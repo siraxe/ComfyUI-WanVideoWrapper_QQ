@@ -5,7 +5,7 @@ class WanVideoVACEFrameReplace:
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("video", "mask", "middle_frames")
-    FUNCTION = "replace_images_in_batch"
+    FUNCTION = "keep_images_in_batch"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """
 Enhanced frame processing with multiple input formats:
