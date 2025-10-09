@@ -3,10 +3,10 @@
 A collection of custom nodes for ComfyUI providing video manipulation, LoRA loading, path animation, and visual drawing tools for WanVideo workflows.
 
 ### Available Nodes
-![Node List](git_assets/list.png)
+![Node List](git_assets/img/list.png)
 
-### Spline Editor & Features
-![Spline Editor](git_assets/spline.png)
+### Spline Editor & Other nodes
+![Spline Editor](git_assets/img/spline.png)
 
 ## Features
 
@@ -27,7 +27,7 @@ cd ComfyUI/custom_nodes/
 
 2. Clone this repository:
 ```bash
-git clone https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ
+git clone https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ.git
 ```
 
 3. Restart ComfyUI

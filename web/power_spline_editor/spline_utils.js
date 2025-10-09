@@ -129,6 +129,62 @@ export function drawRoundedRectangle(ctx, options) {
     ctx.restore();
 }
 
+export function drawWidgetButton(ctx, options, text = null, isMouseDownedAndOver = false) {
+    var _a;
+    const borderRadius = isLowQuality() ? 0 : ((_a = options.borderRadius) !== null && _a !== void 0 ? _a : 4);
+    ctx.save();
+    if (!isLowQuality() && !isMouseDownedAndOver) {
+        drawRoundedRectangle(ctx, {
+            size: [options.size[0] - 2, options.size[1]],
+            pos: [options.pos[0] + 1, options.pos[1] + 1],
+            borderRadius,
+            colorBackground: "#000000aa",
+            colorStroke: "#000000aa",
+        });
+    }
+    drawRoundedRectangle(ctx, {
+        size: options.size,
+        pos: [options.pos[0], options.pos[1] + (isMouseDownedAndOver ? 1 : 0)],
+        borderRadius,
+        colorBackground: isMouseDownedAndOver ? "#444" : LiteGraph.WIDGET_BGCOLOR,
+        colorStroke: "transparent",
+    });
+    if (isLowQuality()) {
+        ctx.restore();
+        return;
+    }
+    if (!isMouseDownedAndOver) {
+        drawRoundedRectangle(ctx, {
+            size: [options.size[0] - 0.75, options.size[1] - 0.75],
+            pos: options.pos,
+            borderRadius: borderRadius - 0.5,
+            colorBackground: "transparent",
+            colorStroke: "#00000044",
+        });
+        drawRoundedRectangle(ctx, {
+            size: [options.size[0] - 0.75, options.size[1] - 0.75],
+            pos: [options.pos[0] + 0.75, options.pos[1] + 0.75],
+            borderRadius: borderRadius - 0.5,
+            colorBackground: "transparent",
+            colorStroke: "#ffffff11",
+        });
+    }
+    drawRoundedRectangle(ctx, {
+        size: [options.size[0] - 1.5, options.size[1] - 1.5],
+        pos: [options.pos[0] + 0.75, options.pos[1] + (isMouseDownedAndOver ? 1.75 : 0.75)],
+        borderRadius: borderRadius - 1,
+        colorBackground: "transparent",
+        colorStroke: isMouseDownedAndOver ? "#00000088" : "#ffffff22",
+    });
+    if (text) {
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.fillText(text, options.pos[0] + options.size[0] / 2, options.pos[1] + options.size[1] / 2 + (isMouseDownedAndOver ? 1 : 0));
+    }
+    ctx.restore();
+}
+
 export function drawTogglePart(ctx, options) {
     const lowQuality = isLowQuality();
     ctx.save();

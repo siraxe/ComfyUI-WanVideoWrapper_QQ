@@ -1,5 +1,5 @@
 import { app } from '../../../scripts/app.js';
-import { makeUUID, loadScript, create_documentation_stylesheet, chainCallback, hideWidgetForGood, RgthreeBaseWidget, DimensionsWidget, PowerSplineWidget, PowerSplineHeaderWidget, NodeSizeManager } from './spline_utils.js';
+import { makeUUID, loadScript, create_documentation_stylesheet, chainCallback, hideWidgetForGood, RgthreeBaseWidget, DimensionsWidget, PowerSplineWidget, PowerSplineHeaderWidget, NodeSizeManager, drawWidgetButton } from './spline_utils.js';
 import SplineEditor2 from './spline_canvas.js';
 import { getSlotInPosition, getSlotMenuOptions, showCustomDrivenToggleMenu } from './context_menu.js';
 
@@ -465,46 +465,94 @@ app.registerExtension({
             // Add header widget
             this.addCustomWidget(new PowerSplineHeaderWidget("spline_header"));
 
-            // Create a container for the buttons
-            const buttonContainer = document.createElement("div");
-            buttonContainer.style.display = "flex";
-            buttonContainer.style.alignItems = "center";
-            buttonContainer.style.width = "100%";
-            buttonContainer.style.padding = "2px 5px";
-            buttonContainer.style.boxSizing = "border-box";
+            // Add button bar widget using custom button drawing (similar to Add Lora button)
+            const buttonBarWidget = new RgthreeBaseWidget("button_bar");
+            buttonBarWidget.type = "custom";
+            buttonBarWidget.serialize = false;
 
-            // Create Add Spline button
-            const addSplineButton = document.createElement("button");
-            addSplineButton.textContent = "➕ Add Spline";
-            addSplineButton.style.width = "70%";
-            addSplineButton.style.padding = "2px";
-            addSplineButton.style.marginRight = "5px"; // Space between buttons
-            addSplineButton.onclick = () => {
-                this.layerManager.addNewSpline();
-            };
+            // Track mouse state for button hover effects
+            buttonBarWidget.addSplineMouseDown = false;
+            buttonBarWidget.duplicateMouseDown = false;
 
-            // Create Duplicate button
-            const duplicateButton = document.createElement("button");
-            duplicateButton.textContent = "Duplicate";
-            duplicateButton.style.width = "30%";
-            duplicateButton.style.padding = "2px";
-            duplicateButton.onclick = () => {
-                const activeWidget = this.layerManager.getActiveWidget();
-                if (activeWidget) {
-                    this.layerManager.duplicateSpline(activeWidget);
-                }
-            };
-
-            buttonContainer.appendChild(addSplineButton);
-            buttonContainer.appendChild(duplicateButton);
-
-            const buttonBarWidget = this.addDOMWidget("button_bar", "BUTTON_BAR", buttonContainer, {
-                serialize: false,
-                hideOnZoom: false,
-            });
             buttonBarWidget.computeSize = function(width) {
-                return [width, 26];
-            }
+                return [width, LiteGraph.NODE_WIDGET_HEIGHT];
+            };
+
+            buttonBarWidget.draw = function(ctx, node, width, posY, height) {
+                const margin = 15;
+                const gap = 5;
+                const addSplineWidth = (width - margin * 2 - gap) * 0.70;
+                const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+
+                // Draw Add Spline button (70% width)
+                drawWidgetButton(
+                    ctx,
+                    { size: [addSplineWidth, height], pos: [margin, posY] },
+                    "➕ Add Spline",
+                    this.addSplineMouseDown
+                );
+
+                // Draw Duplicate button (30% width)
+                drawWidgetButton(
+                    ctx,
+                    { size: [duplicateWidth, height], pos: [margin + addSplineWidth + gap, posY] },
+                    "Duplicate",
+                    this.duplicateMouseDown
+                );
+            };
+
+            buttonBarWidget.mouse = function(event, pos, node) {
+                if (event.type === "pointerdown" || event.type === "mousedown") {
+                    const margin = 15;
+                    const gap = 5;
+                    const width = node.size[0];
+                    const addSplineWidth = (width - margin * 2 - gap) * 0.70;
+                    const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+
+                    // Check if click is on Add Spline button
+                    if (pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
+                        this.addSplineMouseDown = true;
+                        node.setDirtyCanvas(true, false);
+                        return true;
+                    }
+                    // Check if click is on Duplicate button
+                    else if (pos[0] >= margin + addSplineWidth + gap &&
+                             pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
+                        this.duplicateMouseDown = true;
+                        node.setDirtyCanvas(true, false);
+                        return true;
+                    }
+                }
+                else if (event.type === "pointerup" || event.type === "mouseup") {
+                    const margin = 15;
+                    const gap = 5;
+                    const width = node.size[0];
+                    const addSplineWidth = (width - margin * 2 - gap) * 0.70;
+                    const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+
+                    // Handle Add Spline button click
+                    if (this.addSplineMouseDown && pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
+                        node.layerManager.addNewSpline();
+                    }
+                    // Handle Duplicate button click
+                    else if (this.duplicateMouseDown &&
+                             pos[0] >= margin + addSplineWidth + gap &&
+                             pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
+                        const activeWidget = node.layerManager.getActiveWidget();
+                        if (activeWidget) {
+                            node.layerManager.duplicateSpline(activeWidget);
+                        }
+                    }
+
+                    this.addSplineMouseDown = false;
+                    this.duplicateMouseDown = false;
+                    node.setDirtyCanvas(true, false);
+                    return true;
+                }
+                return false;
+            };
+
+            this.addCustomWidget(buttonBarWidget);
 
             // Set initial node size
             this.updateNodeHeight();
