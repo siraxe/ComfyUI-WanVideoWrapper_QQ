@@ -14,6 +14,10 @@ export class LayerRenderer {
         // Each layer gets its own panel to prevent state pollution and rendering artifacts
         this.inactiveLayerPanels = [];
         this.activeLayerPanel = this.vis.add(pv.Panel);
+
+        // Store metadata for inactive layers to enable hit detection
+        // Format: [{ widget: widgetRef, points: [...], panel: panelRef }, ...]
+        this.inactiveLayerMetadata = [];
     }
 
     /**
@@ -61,8 +65,9 @@ export class LayerRenderer {
                 this.vis.children.splice(index, 1);
             }
         });
-        // Clear the array
+        // Clear the arrays
         this.inactiveLayerPanels = [];
+        this.inactiveLayerMetadata = [];
 
         // Clear active layer panel
         this.activeLayerPanel.children = [];
@@ -184,20 +189,7 @@ export class LayerRenderer {
             .event("dragend", this.splineEditor.dragEndHandler)
             .event("drag", this.splineEditor.dragHandler)
             .event("mouseover", this.splineEditor.mouseOverHandler)
-            .event("mouseout", this.splineEditor.mouseOutHandler)
-            .event("mouseup", function() {
-                // Handle right-click (button 2) to toggle highlight on points (except first point)
-                if (pv.event.button === 2 && !pv.event.altKey) {
-                    const dot = this;
-                    const index = this.splineEditor.points.indexOf(dot);
-                    if (index !== 0 && index !== -1) {
-                        // Toggle the highlighted state for the clicked point
-                        this.splineEditor.points[index].highlighted = !this.splineEditor.points[index].highlighted;
-                        // Trigger re-render to update the visual representation
-                        this.splineEditor.layerRenderer.render();
-                    }
-                }
-            });
+            .event("mouseout", this.splineEditor.mouseOutHandler);
         // No labels for any mode - removed the label anchor
     }
 
@@ -225,6 +217,13 @@ export class LayerRenderer {
         // Create a new isolated panel for this layer
         const layerPanel = this.vis.add(pv.Panel);
         this.inactiveLayerPanels.push(layerPanel);
+
+        // Store metadata for hit detection (widget reference and points)
+        this.inactiveLayerMetadata.push({
+            widget: widget,
+            points: points,
+            panel: layerPanel
+        });
 
         const interpolation = widget.value.interpolation || 'linear';
 
@@ -320,5 +319,85 @@ export class LayerRenderer {
                     });
             }
         }
+    }
+
+    /**
+     * Find the inactive layer widget that contains the given mouse position.
+     * Returns the widget closest to the click position, or null if none found.
+     * @param {number} mouseX - Mouse X coordinate on canvas
+     * @param {number} mouseY - Mouse Y coordinate on canvas
+     * @param {number} threshold - Distance threshold in pixels (default: 15)
+     * @returns {object|null} The widget reference or null
+     */
+    findInactiveLayerAtPosition(mouseX, mouseY, threshold = 15) {
+        let closestWidget = null;
+        let closestDistance = threshold;
+
+        // Check each inactive layer's points
+        for (const layerData of this.inactiveLayerMetadata) {
+            const points = layerData.points;
+
+            // Check distance to each point
+            for (const point of points) {
+                const dx = mouseX - point.x;
+                const dy = mouseY - point.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestWidget = layerData.widget;
+                }
+            }
+
+            // Also check distance to line segments between points
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const distance = this.distanceToLineSegment(mouseX, mouseY, p1.x, p1.y, p2.x, p2.y);
+
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestWidget = layerData.widget;
+                }
+            }
+        }
+
+        return closestWidget;
+    }
+
+    /**
+     * Calculate the perpendicular distance from a point to a line segment.
+     * @param {number} px - Point X coordinate
+     * @param {number} py - Point Y coordinate
+     * @param {number} x1 - Line segment start X
+     * @param {number} y1 - Line segment start Y
+     * @param {number} x2 - Line segment end X
+     * @param {number} y2 - Line segment end Y
+     * @returns {number} Distance in pixels
+     */
+    distanceToLineSegment(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared === 0) {
+            // Line segment is a point
+            const dpx = px - x1;
+            const dpy = py - y1;
+            return Math.sqrt(dpx * dpx + dpy * dpy);
+        }
+
+        // Calculate projection parameter t
+        let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+        t = Math.max(0, Math.min(1, t)); // Clamp to [0, 1]
+
+        // Find closest point on line segment
+        const closestX = x1 + t * dx;
+        const closestY = y1 + t * dy;
+
+        // Return distance to closest point
+        const distX = px - closestX;
+        const distY = py - closestY;
+        return Math.sqrt(distX * distX + distY * distY);
     }
 }

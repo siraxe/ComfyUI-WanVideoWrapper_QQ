@@ -139,16 +139,71 @@ class SplineLayerManager {
     removeSpline(widget) {
         const index = this.node.widgets.indexOf(widget);
         if (index > -1) {
+            // Get all spline widgets before removal
+            const allSplines = this.getSplineWidgets();
+
             // Check if the widget being removed is the active widget
             if (this.activeWidget === widget) {
-                this.activeWidget = null;
+                // Select a new active widget BEFORE removing the current one
+                let newActiveWidget = null;
+
+                // Try to find a replacement widget
+                if (allSplines.length > 1) {
+                    // Prefer the next visible spline, or previous if this is the last one
+                    const currentIndex = allSplines.indexOf(widget);
+
+                    // Try next visible spline
+                    for (let i = currentIndex + 1; i < allSplines.length; i++) {
+                        if (allSplines[i].value.on) {
+                            newActiveWidget = allSplines[i];
+                            break;
+                        }
+                    }
+
+                    // If no visible spline found after current, try before
+                    if (!newActiveWidget) {
+                        for (let i = currentIndex - 1; i >= 0; i--) {
+                            if (allSplines[i].value.on) {
+                                newActiveWidget = allSplines[i];
+                                break;
+                            }
+                        }
+                    }
+
+                    // If still no visible spline, just take the next one (or previous)
+                    if (!newActiveWidget) {
+                        if (currentIndex + 1 < allSplines.length) {
+                            newActiveWidget = allSplines[currentIndex + 1];
+                        } else if (currentIndex - 1 >= 0) {
+                            newActiveWidget = allSplines[currentIndex - 1];
+                        }
+                    }
+                }
+
+                // Set the new active widget
+                this.activeWidget = newActiveWidget;
+
+                // Notify the editor to sync its state (points, interpolation, etc.)
+                if (this.node.editor && this.activeWidget) {
+                    this.node.editor.onActiveLayerChanged();
+                } else if (this.node.editor && !this.activeWidget) {
+                    // No splines left - clear the editor's points
+                    this.node.editor.points = [];
+                    if (this.node.editor.layerRenderer) {
+                        this.node.editor.layerRenderer.render();
+                    }
+                }
             }
+
+            // Now remove the widget
             this.node.widgets.splice(index, 1);
             this.node.updateNodeHeight();
+
             // Trigger re-render of all layers
             if (this.node.editor && this.node.editor.layerRenderer) {
                 this.node.editor.layerRenderer.render();
             }
+
             this.node.setDirtyCanvas(true, true);
         }
     }
@@ -590,9 +645,10 @@ app.registerExtension({
             // Create an array of menu items using the createMenuItem function
             this.menuItems = [
               createMenuItem(0, "Invert point order"),
-              createMenuItem(1, "Background image"),
-              createMenuItem(2, "Clear Image"),
-              createMenuItem(3, "Remove all splines"),
+              createMenuItem(1, "Delete spline"),
+              createMenuItem(2, "Background image"),
+              createMenuItem(3, "Clear Image"),
+              createMenuItem(4, "Delete all splines"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling

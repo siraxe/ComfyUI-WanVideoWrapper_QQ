@@ -195,16 +195,22 @@ export default class SplineEditor2 {
     this.drawRuler = true;
     this.hoverIndex = -1;
     this.isDragging = false;
-    this.isDraggingAll = false; // Flag for Alt+middle-drag on first point (translation)
-    this.isScalingAll = false; // Flag for Alt+right-drag on first point (scaling)
-    this.isRotatingAll = false; // Flag for Alt+left-drag on first point (rotation)
+    this.isDraggingAll = false; // Flag for Alt+middle-drag (translation)
+    this.isScalingAll = false; // Flag for Alt+right-drag (scaling)
+    this.isRotatingAll = false; // Flag for Alt+left-drag (rotation)
     this.dragStartPos = null; // Store initial drag position
     this.initialXDistance = 0; // Store initial X distance for horizontal scaling
     this.initialRotationAngle = 0; // Store initial angle from anchor to mouse for rotation
     this.anchorPoint = null; // Store locked anchor point position during scaling/rotation
+    this.anchorIndex = -1; // Store index of anchor point for rotation/scaling
     this.originalPoints = null; // Store original points before scaling/rotation
     this.dragOffset = null; // Store offset between mouse and point center during drag
     this.i = -1; // Initialize i, will be set during drag/add
+
+    // Double-click tracking for layer switching
+    this.lastCanvasClickTime = 0;
+    this.lastCanvasClickPos = null;
+    this.doubleClickDelay = 300; // ms
 
     // Load points from active widget
     this.points = this.getActivePoints();
@@ -244,10 +250,46 @@ export default class SplineEditor2 {
       .antialias(false)
       .margin(10)
       .event("mousedown", (e) => {
-        if (pv.event.shiftKey) { // Use pv.event to access the event object
+        // Get mouse position (scaled for canvas)
+        const mouseX = this.vis.mouse().x / app.canvas.ds.scale;
+        const mouseY = this.vis.mouse().y / app.canvas.ds.scale;
+
+        // Check for double-click on canvas
+        const currentTime = Date.now();
+        const timeSinceLastClick = currentTime - this.lastCanvasClickTime;
+        let isDoubleClick = false;
+
+        if (timeSinceLastClick < this.doubleClickDelay && this.lastCanvasClickPos) {
+          const dx = Math.abs(mouseX - this.lastCanvasClickPos.x);
+          const dy = Math.abs(mouseY - this.lastCanvasClickPos.y);
+          isDoubleClick = (dx < 5 && dy < 5); // Within 5 pixel tolerance
+        }
+
+        if (isDoubleClick && !pv.event.shiftKey && !pv.event.ctrlKey && pv.event.button === 0) {
+          // Double-click detected - check if we clicked on an inactive layer
+          const clickedWidget = this.layerRenderer.findInactiveLayerAtPosition(mouseX, mouseY);
+
+          if (clickedWidget) {
+            // Switch to the clicked layer
+            this.node.layerManager.setActiveWidget(clickedWidget);
+            console.log(`Switched to layer: ${clickedWidget.value.name}`);
+
+            // Reset click tracking
+            this.lastCanvasClickTime = 0;
+            this.lastCanvasClickPos = null;
+            return this;
+          }
+        }
+
+        // Store this click for potential double-click detection
+        this.lastCanvasClickTime = currentTime;
+        this.lastCanvasClickPos = { x: mouseX, y: mouseY };
+
+        // Existing mousedown handlers
+        if (pv.event.shiftKey && pv.event.button === 0) { // Use pv.event to access the event object
           let scaledMouse = {
-            x: this.vis.mouse().x / app.canvas.ds.scale,
-            y: this.vis.mouse().y / app.canvas.ds.scale,
+            x: mouseX,
+            y: mouseY,
             highlighted: false
           };
           this.i = this.points.push(scaledMouse) - 1;
@@ -257,8 +299,8 @@ export default class SplineEditor2 {
         else if (pv.event.ctrlKey) {
           // Capture the clicked location
           let clickedPoint = {
-            x: this.vis.mouse().x / app.canvas.ds.scale,
-            y: this.vis.mouse().y / app.canvas.ds.scale
+            x: mouseX,
+            y: mouseY
           };
 
           // Find the two closest points to the clicked location
@@ -294,26 +336,41 @@ export default class SplineEditor2 {
         const pointY = this.points[this.i].y;
         this.dragOffset = { x: pointX - mouseX, y: pointY - mouseY };
 
-        if (pv.event.altKey && pv.event.button === 0 && this.i === 0) {
+        // Shift+Middle-Click: Toggle highlighted state on points (except first point)
+        if (pv.event.shiftKey && pv.event.button === 1) {
+          if (this.i !== 0 && this.i !== -1) {
+            this.points[this.i].highlighted = !this.points[this.i].highlighted;
+            this.layerRenderer.render();
+            this.updatePath();
+          }
+          return;
+        }
+
+        // Alt+Left-Click: Rotation around clicked point (any point)
+        if (pv.event.altKey && pv.event.button === 0) {
           this.isRotatingAll = true;
           this.originalPoints = this.points.map(p => ({ ...p }));
-          this.anchorPoint = { ...this.points[0] };
+          this.anchorPoint = { ...this.points[this.i] }; // Use clicked point as anchor
+          this.anchorIndex = this.i; // Store anchor index
           this.initialRotationAngle = Math.atan2(mouseY - this.anchorPoint.y, mouseX - this.anchorPoint.x);
           this.isDragging = true;
           return;
         }
 
-        if (pv.event.altKey && pv.event.button === 1 && this.i === 0) {
+        // Alt+Middle-Click: Translation (any point)
+        if (pv.event.altKey && pv.event.button === 1) {
           this.isDraggingAll = true;
           this.dragStartPos = { x: mouseX, y: mouseY };
           this.isDragging = true;
           return;
         }
 
-        if (pv.event.altKey && pv.event.button === 2 && this.i === 0) {
+        // Alt+Right-Click: Scaling relative to clicked point (any point)
+        if (pv.event.altKey && pv.event.button === 2) {
           this.isScalingAll = true;
           this.originalPoints = this.points.map(p => ({ ...p }));
-          this.anchorPoint = { ...this.points[0] };
+          this.anchorPoint = { ...this.points[this.i] }; // Use clicked point as anchor
+          this.anchorIndex = this.i; // Store anchor index
           this.initialXDistance = mouseX - this.anchorPoint.x;
           if (Math.abs(this.initialXDistance) < 10) {
             this.initialXDistance = this.initialXDistance >= 0 ? 10 : -10;
@@ -322,13 +379,7 @@ export default class SplineEditor2 {
           return;
         }
 
-        if (pv.event.altKey && pv.event.button === 0 && this.i !== 0) {
-          this.points[this.i].highlighted = !this.points[this.i].highlighted;
-          this.setActivePoints(this.points);
-          this.layerRenderer.render();
-          return;
-        }
-
+        // Regular drag or delete
         this.isDragging = true;
         if (pv.event.button === 2 && this.i !== 0 && this.i !== this.points.length - 1) {
           this.points.splice(this.i--, 1);
@@ -352,6 +403,7 @@ export default class SplineEditor2 {
         this.initialXDistance = 0;
         this.initialRotationAngle = 0;
         this.anchorPoint = null;
+        this.anchorIndex = -1;
         this.originalPoints = null;
     };
 
@@ -362,20 +414,26 @@ export default class SplineEditor2 {
         if (this.isRotatingAll && this.anchorPoint && this.originalPoints) {
           const currentAngle = Math.atan2(adjustedY - this.anchorPoint.y, adjustedX - this.anchorPoint.x);
           const rotationAngle = currentAngle - this.initialRotationAngle;
-          this.points[0] = { ...this.anchorPoint };
-          for (let j = 1; j < this.originalPoints.length; j++) {
-            const originalPoint = this.originalPoints[j];
-            const vecX = originalPoint.x - this.anchorPoint.x;
-            const vecY = originalPoint.y - this.anchorPoint.y;
-            const cos = Math.cos(rotationAngle);
-            const sin = Math.sin(rotationAngle);
-            const rotatedX = vecX * cos - vecY * sin;
-            const rotatedY = vecX * sin + vecY * cos;
-            this.points[j] = {
-              x: this.anchorPoint.x + rotatedX,
-              y: this.anchorPoint.y + rotatedY,
-              highlighted: originalPoint.highlighted || false
-            };
+          const cos = Math.cos(rotationAngle);
+          const sin = Math.sin(rotationAngle);
+
+          // Rotate all points around the anchor point
+          for (let j = 0; j < this.originalPoints.length; j++) {
+            if (j === this.anchorIndex) {
+              // Keep anchor point fixed
+              this.points[j] = { ...this.anchorPoint };
+            } else {
+              const originalPoint = this.originalPoints[j];
+              const vecX = originalPoint.x - this.anchorPoint.x;
+              const vecY = originalPoint.y - this.anchorPoint.y;
+              const rotatedX = vecX * cos - vecY * sin;
+              const rotatedY = vecX * sin + vecY * cos;
+              this.points[j] = {
+                x: this.anchorPoint.x + rotatedX,
+                y: this.anchorPoint.y + rotatedY,
+                highlighted: originalPoint.highlighted || false
+              };
+            }
           }
           this.layerRenderer.render();
           return;
@@ -401,16 +459,22 @@ export default class SplineEditor2 {
           const dampingFactor = 0.1;
           const dampedScaleFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
           const clampedScaleFactor = Math.max(0.1, Math.min(10, dampedScaleFactor));
-          this.points[0] = { ...this.anchorPoint };
-          for (let j = 1; j < this.originalPoints.length; j++) {
-            const originalPoint = this.originalPoints[j];
-            const vecX = originalPoint.x - this.anchorPoint.x;
-            const vecY = originalPoint.y - this.anchorPoint.y;
-            this.points[j] = {
-              x: this.anchorPoint.x + vecX * clampedScaleFactor,
-              y: this.anchorPoint.y + vecY * clampedScaleFactor,
-              highlighted: originalPoint.highlighted || false
-            };
+
+          // Scale all points relative to the anchor point
+          for (let j = 0; j < this.originalPoints.length; j++) {
+            if (j === this.anchorIndex) {
+              // Keep anchor point fixed
+              this.points[j] = { ...this.anchorPoint };
+            } else {
+              const originalPoint = this.originalPoints[j];
+              const vecX = originalPoint.x - this.anchorPoint.x;
+              const vecY = originalPoint.y - this.anchorPoint.y;
+              this.points[j] = {
+                x: this.anchorPoint.x + vecX * clampedScaleFactor,
+                y: this.anchorPoint.y + vecY * clampedScaleFactor,
+                highlighted: originalPoint.highlighted || false
+              };
+            }
           }
           this.layerRenderer.render();
           return;
@@ -813,6 +877,15 @@ export default class SplineEditor2 {
             this.node.contextMenu.style.display = 'none';
             break;
           case 1:
+            // Delete spline
+            e.preventDefault();
+            const activeWidget = this.getActiveWidget();
+            if (activeWidget) {
+              this.node.layerManager.removeSpline(activeWidget);
+            }
+            this.node.contextMenu.style.display = 'none';
+            break;
+          case 2:
             // Background image
             // Create file input element
             const fileInput = document.createElement('input');
@@ -835,7 +908,7 @@ export default class SplineEditor2 {
 
             this.node.contextMenu.style.display = 'none';
             break;
-          case 2:
+          case 3:
             // Clear Image
             this.backgroundImage.visible(false); // Hide image
             this.layerRenderer.render(); // Re-render to show changes
@@ -850,7 +923,7 @@ export default class SplineEditor2 {
             this.node.contextMenu.style.display = 'none';
             this.updatePath(); // Update coordinates after clearing image
             break;
-          case 3:
+          case 4:
             // Remove all splines
             e.preventDefault();
             this.node.layerManager.removeAllSplines();
