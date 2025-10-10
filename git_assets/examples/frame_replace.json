@@ -585,7 +585,7 @@
         }
       ],
       "properties": {
-        "aux_id": "siraxe/ComfyUI-WanVideoWrapper_QQ",
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
         "ver": "7f11d4a3af73b8671d171f4fdea42bc8cde2288a",
         "Node name for S&R": "WanVideoVACEFrameReplace",
         "ue_properties": {
