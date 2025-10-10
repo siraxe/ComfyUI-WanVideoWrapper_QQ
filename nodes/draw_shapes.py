@@ -8,6 +8,7 @@ import torch.nn.functional as F # Added for grid_sample
 # Assuming utility functions are in a parent directory utility module
 from ..utility.utility import pil2tensor, tensor2pil # Ensure both are imported
 from ..utility import draw_utils
+from ..utility.driver_utils import apply_driver_offset, rotate_path, smooth_path, interpolate_path
 
 class PathFrameConfig:
     """Configuration node for path animation frame timing and easing"""
@@ -83,7 +84,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         }
     } 
 
-    def _draw_single_frame_pil(self, frame_index, processed_coords_list, path_pause_frames, total_frames, frame_width, frame_height, shape_width, shape_height, shape_color, bg_color, blur_radius, shape, border_width, border_color, static_points=None, p_coords_use_driver=False, p_driver_path=None, p_coords_pause_frames=None):
+    def _draw_single_frame_pil(self, frame_index, processed_coords_list, path_pause_frames, total_frames, frame_width, frame_height, shape_width, shape_height, shape_color, bg_color, blur_radius, shape, border_width, border_color, static_points=None, p_coords_use_driver=False, p_driver_path=None, p_coords_pause_frames=None, coords_driver_info_list=None):
         """Helper function to draw a single frame using PIL. Runs in a separate process."""
         image = Image.new("RGB", (frame_width, frame_height), bg_color)
         draw = ImageDraw.Draw(image)
@@ -184,8 +185,47 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 location_y = coords[coord_index]['y']
             except (KeyError, IndexError, TypeError):
                  # Skip drawing for this path on this frame if error
-                 continue 
-            
+                 continue
+
+            # --- APPLY PER-FRAME DRIVER OFFSET FOR ANIMATED COORDINATES ---
+            # Calculate driver offset for this frame if driver is used
+            driver_offset_x = 0.0
+            driver_offset_y = 0.0
+
+            if coords_driver_info_list and path_idx < len(coords_driver_info_list):
+                driver_info = coords_driver_info_list[path_idx]
+
+                if driver_info and isinstance(driver_info, dict):
+                    interpolated_driver = driver_info.get('interpolated_path')
+                    driver_pause_frames = driver_info.get('pause_frames', (0, 0))
+
+                    if interpolated_driver and len(interpolated_driver) > 0:
+                        driver_start_p, driver_end_p = driver_pause_frames
+                        driver_animation_frames = total_frames - driver_start_p - driver_end_p
+
+                        # Map frame_index to driver index
+                        if frame_index < driver_start_p:
+                            driver_index = 0  # Hold at first position
+                        elif frame_index >= total_frames - driver_end_p:
+                            driver_index = len(interpolated_driver) - 1  # Hold at last position
+                        else:
+                            driver_index = frame_index - driver_start_p  # Normal animation
+
+                        # Bounds check and get driver offset
+                        if 0 <= driver_index < len(interpolated_driver):
+                            # Calculate offset from first driver position
+                            ref_x = float(interpolated_driver[0]['x'])
+                            ref_y = float(interpolated_driver[0]['y'])
+                            current_x = float(interpolated_driver[driver_index]['x'])
+                            current_y = float(interpolated_driver[driver_index]['y'])
+                            driver_offset_x = current_x - ref_x
+                            driver_offset_y = current_y - ref_y
+
+            # Apply driver offset to location
+            location_x += driver_offset_x
+            location_y += driver_offset_y
+            # --- END APPLY PER-FRAME DRIVER OFFSET ---
+
             # Draw shapes
             if shape == 'circle' or shape == 'square':
                 left_up_point = (location_x - current_width / 2.0, location_y - current_height / 2.0)
@@ -327,6 +367,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         end_p_frames_meta = 0
         offsets_meta = 0 # Initialize offsets_meta
         interpolations_meta = 'linear' # Initialize interpolations_meta
+        drivers_meta = None  # Driver metadata for all paths
         p_coordinates_data = None  # For static shapes
         coordinates_data = None    # For animated path
         p_coordinates_use_driver = False  # Whether p_coordinates use driver for group movement
@@ -350,9 +391,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 end_p_frames_meta = coord_parsed.get("end_p_frames", 0)
                 offsets_meta = coord_parsed.get("offsets", 0)
                 interpolations_meta = coord_parsed.get("interpolations", 'linear') # <-- Extract interpolations_meta
-                
-                # New logic to handle drivers from metadata
-                drivers_meta = coord_parsed.get("drivers")
+                drivers_meta = coord_parsed.get("drivers")  # Extract driver metadata for all paths
+
+                # Old logic to handle p_coordinates driver from metadata (for backward compatibility)
                 if isinstance(drivers_meta, dict):
                     p_drivers = drivers_meta.get("p")
                     
@@ -561,6 +602,34 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     scaled_coords_list.append(scaled_path)
                 coords_list_raw = scaled_coords_list
 
+                # Also scale driver paths if they exist in drivers_meta
+                if isinstance(drivers_meta, dict):
+                    c_drivers = drivers_meta.get("c", [])
+                    if isinstance(c_drivers, list):
+                        scaled_c_drivers = []
+                        for driver_info in c_drivers:
+                            if isinstance(driver_info, dict):
+                                scaled_driver_info = driver_info.copy()
+                                driver_path = driver_info.get('path')
+                                if isinstance(driver_path, list) and driver_path:
+                                    scaled_driver_path = []
+                                    for point in driver_path:
+                                        if isinstance(point, dict) and 'x' in point and 'y' in point:
+                                            scaled_point = {
+                                                'x': point['x'] * scale_x,
+                                                'y': point['y'] * scale_y
+                                            }
+                                            # Preserve any other properties
+                                            for key in point:
+                                                if key not in ['x', 'y']:
+                                                    scaled_point[key] = point[key]
+                                            scaled_driver_path.append(scaled_point)
+                                    scaled_driver_info['path'] = scaled_driver_path
+                                scaled_c_drivers.append(scaled_driver_info)
+                            else:
+                                scaled_c_drivers.append(driver_info)
+                        drivers_meta['c'] = scaled_c_drivers
+
         # Extract pause frames for p_coordinates (if using driver)
         p_coords_pause_frames = (0, 0)
         if p_coordinates_use_driver and static_points:
@@ -586,6 +655,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 end_val = end_p_frames_meta
             
             p_coords_pause_frames = (start_val, end_val)
+
+        # Initialize coords_driver_info_list for all code paths
+        coords_driver_info_list = []
 
         # Check if any valid paths were parsed
         if not coords_list_raw:
@@ -653,6 +725,18 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             else:
                 interpolations_list = ['linear'] * num_paths
 
+            # Normalize drivers to arrays matching number of paths
+            drivers_list = []
+            if isinstance(drivers_meta, dict):
+                c_drivers = drivers_meta.get("c", [])
+                if isinstance(c_drivers, list):
+                    # Pad with None if list is shorter than num_paths
+                    drivers_list = c_drivers + [None] * (num_paths - len(c_drivers))
+                else:
+                    drivers_list = [None] * num_paths
+            else:
+                drivers_list = [None] * num_paths
+
             # Normalize offsets to arrays matching number of paths
             num_paths = len(coords_list_raw)
             offsets_list = []
@@ -699,6 +783,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                  path_end_p = end_p_frames_list[i]
                                  path_offset = offsets_list[i]
                                  path_interpolation = interpolations_list[i] # Get interpolation type for this path
+                                 path_driver_info = drivers_list[i] if i < len(drivers_list) else None  # Get driver info for this path
 
                                  # Calculate animation frames for this specific path
                                  path_animation_frames = total_frames - path_start_p - path_end_p
@@ -721,6 +806,38 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                  # Resample the (potentially newly interpolated) path to match animation frames
                                  # InterpMath.interpolate_or_downsample_path is now used for resampling only
                                  processed_path = draw_utils.InterpMath.interpolate_or_downsample_path(interpolated_path, path_animation_frames, easing_function, effective_easing_path, bounce_between=0.0, easing_strength=easing_strength, interpolation=path_interpolation)
+
+                                 # --- PREPARE DRIVER FOR PER-FRAME APPLICATION ---
+                                 # Prepare driver info for per-frame application (only for animated coordinates)
+                                 driver_info_for_frame = None
+                                 if path_driver_info and isinstance(path_driver_info, dict):
+                                     raw_driver_path = path_driver_info.get('path')
+                                     driver_rotate = path_driver_info.get('rotate', 0)
+                                     driver_smooth = path_driver_info.get('smooth', 0.0)
+
+                                     if raw_driver_path and len(raw_driver_path) > 0:
+                                         # Apply rotation to driver path
+                                         transformed_driver = raw_driver_path
+                                         if driver_rotate != 0:
+                                             transformed_driver = rotate_path(transformed_driver, driver_rotate)
+
+                                         # Apply smoothing to driver path
+                                         if driver_smooth > 0.0:
+                                             transformed_driver = smooth_path(transformed_driver, driver_smooth)
+
+                                         # Interpolate to total_frames for per-frame use
+                                         interpolated_driver = draw_utils.InterpMath.interpolate_or_downsample_path(
+                                             transformed_driver, total_frames, easing_function, easing_path,
+                                             bounce_between=0.0, easing_strength=easing_strength
+                                         )
+
+                                         driver_info_for_frame = {
+                                             'interpolated_path': interpolated_driver,
+                                             'pause_frames': (path_start_p, path_end_p)
+                                         }
+
+                                 coords_driver_info_list.append(driver_info_for_frame)
+                                 # --- END PREPARE DRIVER ---
 
                                  # --- APPLY OFFSET TIMING ---
                                  # Offset creates pause frames by removing coordinates and adjusting pause metadata
@@ -761,7 +878,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             # Build args list - pass frame_index directly and let draw function map per-path
             args_list = []
             for i in range(batch_size):
-                args_list.append((i, processed_coords_list, path_pause_frames, total_frames, frame_width, frame_height, shape_width, shape_height, shape_color, bg_color, blur_radius, shape, border_width, border_color, static_points, p_coordinates_use_driver, p_driver_path, p_coords_pause_frames))
+                args_list.append((i, processed_coords_list, path_pause_frames, total_frames, frame_width, frame_height, shape_width, shape_height, shape_color, bg_color, blur_radius, shape, border_width, border_color, static_points, p_coordinates_use_driver, p_driver_path, p_coords_pause_frames, coords_driver_info_list))
 
             try:
                 # Pass the method directly to map

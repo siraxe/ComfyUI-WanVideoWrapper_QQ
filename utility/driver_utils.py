@@ -66,59 +66,58 @@ def rotate_path(path, angle_degrees, pivot=None):
 
 def smooth_path(path, smooth_factor):
     """
-    Apply smoothing to a path using simple moving average.
+    Apply smoothing by scaling the path relative to its first point.
 
     Args:
         path: List of coordinate dicts with 'x' and 'y' keys
-        smooth_factor: Smoothing factor from 0.0 (no smoothing) to 1.0 (maximum smoothing)
+        smooth_factor: Smoothing factor from 0.0 (no effect) to 1.0 (path collapsed to first point)
 
     Returns:
         Smoothed path (new list of dicts)
     """
-    if not path or len(path) <= 2 or smooth_factor <= 0.0:
+    if not path or len(path) == 0 or smooth_factor is None:
         return [p.copy() for p in path]
 
     # Clamp smooth factor
     smooth_factor = max(0.0, min(1.0, smooth_factor))
-
-    # Calculate window size based on smooth factor
-    # smooth_factor 0.0 → window size 1 (no smoothing)
-    # smooth_factor 1.0 → window size ~20% of path length
-    max_window = max(3, int(len(path) * 0.2))
-    window_size = max(1, int(1 + (max_window - 1) * smooth_factor))
-
-    if window_size <= 1:
+    
+    if smooth_factor == 0.0:
         return [p.copy() for p in path]
 
+    scale_factor = 1.0 - smooth_factor
+
+    pivot_point = path[0]
+    pivot_x = float(pivot_point['x'])
+    pivot_y = float(pivot_point['y'])
+
     smoothed = []
-    half_window = window_size // 2
+    for point in path:
+        px = float(point['x'])
+        py = float(point['y'])
 
-    for i in range(len(path)):
-        # Calculate window bounds
-        start_idx = max(0, i - half_window)
-        end_idx = min(len(path), i + half_window + 1)
+        # Vector from pivot to point
+        vec_x = px - pivot_x
+        vec_y = py - pivot_y
 
-        # Average coordinates in window
-        sum_x = 0.0
-        sum_y = 0.0
-        count = 0
+        # Scale the vector
+        scaled_vec_x = vec_x * scale_factor
+        scaled_vec_y = vec_y * scale_factor
 
-        for j in range(start_idx, end_idx):
-            sum_x += float(path[j]['x'])
-            sum_y += float(path[j]['y'])
-            count += 1
-
-        smoothed_point = {
-            'x': sum_x / count,
-            'y': sum_y / count
+        # New point position
+        new_x = pivot_x + scaled_vec_x
+        new_y = pivot_y + scaled_vec_y
+        
+        new_point = {
+            'x': new_x,
+            'y': new_y
         }
-
-        # Preserve other properties from original point
-        for key in path[i]:
+        
+        # Preserve other properties
+        for key in point:
             if key not in ('x', 'y'):
-                smoothed_point[key] = path[i][key]
-
-        smoothed.append(smoothed_point)
+                new_point[key] = point[key]
+        
+        smoothed.append(new_point)
 
     return smoothed
 

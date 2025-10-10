@@ -506,27 +506,14 @@ class PowerSplineEditor:
                             # Driver layer found
                             driver_coords = layer_map[driver_name]
 
-                            # Different handling based on interpolation mode
-                            if spline_interpolation == 'points':
-                                # For points mode: store driver info separately, don't apply offset
-                                driver_info_for_layer = {
-                                    "path": driver_coords,
-                                    "rotate": driver_rotate,
-                                    "smooth": driver_smooth
-                                }
-                                print(f"Stored driver '{driver_name}' for points layer '{current_spline_name}' (rotate={driver_rotate}°, smooth={driver_smooth})")
-                            else:
-                                # For other modes: apply offset directly to coordinates
-                                try:
-                                    spline_coords = apply_driver_offset(
-                                        spline_coords,
-                                        driver_coords,
-                                        rotate=driver_rotate,
-                                        smooth=driver_smooth
-                                    )
-                                    print(f"Applied driver '{driver_name}' to layer '{current_spline_name}' (rotate={driver_rotate}°, smooth={driver_smooth})")
-                                except Exception as e:
-                                    print(f"Error applying driver '{driver_name}' to layer '{current_spline_name}': {e}")
+                            # Store driver info for ALL interpolation modes
+                            # Let draw_shapes.py apply the offset at the right time
+                            driver_info_for_layer = {
+                                "path": driver_coords,
+                                "rotate": driver_rotate,
+                                "smooth": driver_smooth
+                            }
+                            print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, smooth={driver_smooth})")
                         else:
                             print(f"Warning: Driver layer '{driver_name}' not found for layer '{current_spline_name}'. Available layers: {list(layer_map.keys())}")
                 # --- END DRIVER LOGIC ---
