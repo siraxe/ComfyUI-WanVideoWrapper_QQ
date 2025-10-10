@@ -1624,7 +1624,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         if (this.haveMouseMovedValue) return;
         const canvas = app.canvas;
         // Offset creates pause frames: +5 waits 5 frames then plays, -5 plays then holds 5 frames
-        canvas.prompt("Offset (timing shift: +N waits N frames, -N holds N frames)", this.value.offset || 0, (v) => {
+        canvas.prompt("Offset", this.value.offset || 0, (v) => {
             this.value.offset = Math.max(-100, Math.min(100, Number(v)));
             this.parent.setDirtyCanvas(true, true);
         });

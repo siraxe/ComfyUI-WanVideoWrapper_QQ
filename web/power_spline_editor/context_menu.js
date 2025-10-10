@@ -39,7 +39,7 @@ function createNumberInput(widget, configObj, field, min, max, step, precision =
         app.graph.setDirtyCanvas(true, true);
     };
 
-    // Number display (draggable only)
+    // Number display (draggable and clickable)
     const numberDisplay = document.createElement('div');
     numberDisplay.textContent = configObj[field].toFixed(precision);
     numberDisplay.style.cssText = `
@@ -53,6 +53,7 @@ function createNumberInput(widget, configObj, field, min, max, step, precision =
     `;
 
     let isDragging = false;
+    let hasDragged = false;
     let startX = 0;
     let startValue = 0;
 
@@ -61,6 +62,10 @@ function createNumberInput(widget, configObj, field, min, max, step, precision =
             e.stopPropagation();
             e.preventDefault();
             const deltaX = e.clientX - startX;
+            // Only mark as dragged if movement exceeds threshold
+            if (Math.abs(deltaX) > 3) {
+                hasDragged = true;
+            }
             const delta = Math.round(deltaX / 5) * step;
             const newValue = Math.max(min, Math.min(max, startValue + delta));
             configObj[field] = newValue;
@@ -88,12 +93,33 @@ function createNumberInput(widget, configObj, field, min, max, step, precision =
         e.preventDefault();
         if (e.button === 0) {
             isDragging = true;
+            hasDragged = false;
             startX = e.clientX;
             startValue = configObj[field];
             numberDisplay.style.cursor = 'ew-resize';
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
         }
+    };
+
+    numberDisplay.onclick = (e) => {
+        e.stopPropagation();
+        // Only show prompt if user didn't drag
+        if (!hasDragged) {
+            const fieldLabel = field === 'd_scale' ? 'D Scale' : field.charAt(0).toUpperCase() + field.slice(1);
+            app.canvas.prompt(fieldLabel, configObj[field], (v) => {
+                const newValue = Math.max(min, Math.min(max, Number(v)));
+                configObj[field] = newValue;
+                // Sync back to both driven and _drivenConfig
+                if (widget.value.driven && typeof widget.value.driven === 'object') {
+                    widget.value.driven[field] = newValue;
+                }
+                widget.value._drivenConfig[field] = newValue;
+                numberDisplay.textContent = newValue.toFixed(precision);
+                app.graph.setDirtyCanvas(true, true);
+            });
+        }
+        hasDragged = false;
     };
 
     // Right arrow
