@@ -2,6 +2,9 @@
 
 A collection of custom nodes for ComfyUI providing video manipulation, LoRA loading, path animation, and visual drawing tools for WanVideo workflows.
 
+https://github.com/user-attachments/assets/16f0da4c-38f1-4789-97dc-c331ad8a6d92
+
+
 ### Power Spline Editor
 <table>
 <tr>
