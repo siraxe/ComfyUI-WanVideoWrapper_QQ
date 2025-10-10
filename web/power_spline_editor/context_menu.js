@@ -186,7 +186,7 @@ export function showCustomDrivenToggleMenu(event, widget, position) {
     } else {
         // Driven is off - use the preserved config
         if (!widget.value._drivenConfig || typeof widget.value._drivenConfig !== 'object') {
-            widget.value._drivenConfig = { driver: "", rotate: 0, smooth: 0.0 };
+            widget.value._drivenConfig = { driver: "", rotate: 0, d_scale: 1.0 };
         }
         configObj = widget.value._drivenConfig;
     }
@@ -194,7 +194,7 @@ export function showCustomDrivenToggleMenu(event, widget, position) {
     // Ensure all fields exist
     if (!configObj.driver) configObj.driver = "";
     if (typeof configObj.rotate !== 'number') configObj.rotate = 0;
-    if (typeof configObj.smooth !== 'number') configObj.smooth = 0.0;
+    if (typeof configObj.d_scale !== 'number') configObj.d_scale = 1.0;
 
     const menu = document.createElement('div');
     menu.id = 'custom-driven-toggle-menu';
@@ -243,12 +243,12 @@ export function showCustomDrivenToggleMenu(event, widget, position) {
     // Row 1: Headers
     container.appendChild(createHeader('Driver:'));
     container.appendChild(createHeader('Rotate:'));
-    container.appendChild(createHeader('Smooth:'));
+    container.appendChild(createHeader('D_Scale:'));
 
     // Row 2: Interactive inputs
     container.appendChild(createTextInput(widget, configObj, 'driver', 'None'));
     container.appendChild(createNumberInput(widget, configObj, 'rotate', -360, 360, 1, 0));
-    container.appendChild(createNumberInput(widget, configObj, 'smooth', 0.0, 1.0, 0.01, 2));
+    container.appendChild(createNumberInput(widget, configObj, 'd_scale', 0.0, 1.0, 0.01, 2));
 
     menu.appendChild(container);
     document.body.appendChild(menu);

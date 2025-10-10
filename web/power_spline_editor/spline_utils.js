@@ -711,9 +711,9 @@ export class InterpolationWidget extends RgthreeBaseWidget {
     }
 }
 
-// === DRIVER ROTATION & SMOOTH WIDGET (Combined driver_rotation and driver_smooth) ===
-export class DriverRotationSmoothWidget extends RgthreeBaseWidget {
-    constructor(name = "DriverRotationSmoothWidget") {
+// === DRIVER ROTATION & D_SCALE WIDGET (Combined driver_rotation and driver_d_scale) ===
+export class DriverRotationDScaleWidget extends RgthreeBaseWidget {
+    constructor(name = "DriverRotationDScaleWidget") {
         super(name);
         this.type = "custom";
         this.options = { serialize: false };
@@ -724,10 +724,10 @@ export class DriverRotationSmoothWidget extends RgthreeBaseWidget {
             rotationVal: { bounds: [0, 0] },
             rotationInc: { bounds: [0, 0] },
             rotationAny: { bounds: [0, 0] },
-            smoothDec: { bounds: [0, 0] },
-            smoothVal: { bounds: [0, 0] },
-            smoothInc: { bounds: [0, 0] },
-            smoothAny: { bounds: [0, 0] },
+            dScaleDec: { bounds: [0, 0] },
+            dScaleVal: { bounds: [0, 0] },
+            dScaleInc: { bounds: [0, 0] },
+            dScaleAny: { bounds: [0, 0] },
         };
     }
 
@@ -750,19 +750,19 @@ export class DriverRotationSmoothWidget extends RgthreeBaseWidget {
 
         const rotationWidget = node.widgets?.find(w => w.name === "driver_rotation");
         const rotationValue = rotationWidget ? rotationWidget.value : 0;
-        const smoothWidget = node.widgets?.find(w => w.name === "driver_smooth");
-        const smoothValue = smoothWidget ? smoothWidget.value : 0.0;
+        const dScaleWidget = node.widgets?.find(w => w.name === "driver_d_scale");
+        const dScaleValue = dScaleWidget ? dScaleWidget.value : 1.0;
 
         // Labels
         const rotationLabel = "driver_rotation:";
-        const smoothLabel = "driver_smooth:";
+        const dScaleLabel = "driver_d_scale:";
         const maxLeftLabelWidth = Math.max(
             ctx.measureText("width:").width,
             ctx.measureText("driver_rotation:").width
         );
         const maxRightLabelWidth = Math.max(
             ctx.measureText("height:").width,
-            ctx.measureText("driver_smooth:").width
+            ctx.measureText("driver_d_scale:").width
         );
 
         // Total width: left label + controls + spacing + right label + controls
@@ -801,29 +801,29 @@ export class DriverRotationSmoothWidget extends RgthreeBaseWidget {
 
         posX += drawNumberWidgetPart.WIDTH_TOTAL + spacingBetweenGroups;
 
-        // Draw "driver_smooth:" label (right-aligned)
+        // Draw "driver_d_scale:" label (right-aligned)
         ctx.textAlign = "right";
-        ctx.fillText(smoothLabel, posX + maxRightLabelWidth, midY);
+        ctx.fillText(dScaleLabel, posX + maxRightLabelWidth, midY);
         posX += maxRightLabelWidth + innerMargin;
 
-        // Draw smooth control
+        // Draw d_scale control
         const [sLeftArrow, sText, sRightArrow] = drawNumberWidgetPart(ctx, {
             posX: posX,
             posY,
             height,
-            value: smoothValue,
+            value: dScaleValue,
             direction: 1,
             precision: 2
         });
 
-        this.hitAreas.smoothDec.bounds = sLeftArrow;
-        this.hitAreas.smoothVal.bounds = sText;
-        this.hitAreas.smoothInc.bounds = sRightArrow;
-        this.hitAreas.smoothAny.bounds = [sLeftArrow[0], sRightArrow[0] + sRightArrow[1] - sLeftArrow[0]];
-        this.hitAreas.smoothDec.onClick = () => this.stepSmooth(node, -0.01);
-        this.hitAreas.smoothInc.onClick = () => this.stepSmooth(node, 0.01);
-        this.hitAreas.smoothVal.onClick = () => this.promptSmooth(node);
-        this.hitAreas.smoothAny.onMove = (event) => this.dragSmooth(node, event);
+        this.hitAreas.dScaleDec.bounds = sLeftArrow;
+        this.hitAreas.dScaleVal.bounds = sText;
+        this.hitAreas.dScaleInc.bounds = sRightArrow;
+        this.hitAreas.dScaleAny.bounds = [sLeftArrow[0], sRightArrow[0] + sRightArrow[1] - sLeftArrow[0]];
+        this.hitAreas.dScaleDec.onClick = () => this.stepDScale(node, -0.01);
+        this.hitAreas.dScaleInc.onClick = () => this.stepDScale(node, 0.01);
+        this.hitAreas.dScaleVal.onClick = () => this.promptDScale(node);
+        this.hitAreas.dScaleAny.onMove = (event) => this.dragDScale(node, event);
 
         ctx.restore();
     }
@@ -858,28 +858,28 @@ export class DriverRotationSmoothWidget extends RgthreeBaseWidget {
         }
     }
 
-    stepSmooth(node, step) {
-        const widget = node.widgets?.find(w => w.name === "driver_smooth");
+    stepDScale(node, step) {
+        const widget = node.widgets?.find(w => w.name === "driver_d_scale");
         if (widget) {
             widget.value = Math.max(0.0, Math.min(1.0, widget.value + step));
             if (widget.callback) widget.callback(widget.value);
             node.setDirtyCanvas(true, true);
         }
     }
-    promptSmooth(node) {
+    promptDScale(node) {
         if (this.haveMouseMovedValue) return;
-        const widget = node.widgets?.find(w => w.name === "driver_smooth");
+        const widget = node.widgets?.find(w => w.name === "driver_d_scale");
         if (widget) {
-            app.canvas.prompt("driver_smooth", widget.value, (v) => {
+            app.canvas.prompt("driver_d_scale", widget.value, (v) => {
                 widget.value = Math.max(0.0, Math.min(1.0, Number(v)));
                 if (widget.callback) widget.callback(widget.value);
             });
         }
     }
-    dragSmooth(node, event) {
+    dragDScale(node, event) {
         if (event.deltaX) {
             this.haveMouseMovedValue = true;
-            const widget = node.widgets?.find(w => w.name === "driver_smooth");
+            const widget = node.widgets?.find(w => w.name === "driver_d_scale");
             if (widget) {
                 widget.value = Math.max(0.0, Math.min(1.0, widget.value + event.deltaX * 0.01)); // Scale for float precision
                 if (widget.callback) widget.callback(widget.value);

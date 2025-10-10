@@ -493,7 +493,7 @@ class PowerSplineEditor:
                 if driven_config and isinstance(driven_config, dict):
                     driver_name = driven_config.get('driver', '').strip()
                     driver_rotate = driven_config.get('rotate', 0)
-                    driver_smooth = driven_config.get('smooth', 0.0)
+                    driver_d_scale = driven_config.get('d_scale', 1.0)
 
                     # Get current spline name for self-driving prevention
                     current_spline_name = spline_data.get('name', '')
@@ -511,9 +511,9 @@ class PowerSplineEditor:
                             driver_info_for_layer = {
                                 "path": driver_coords,
                                 "rotate": driver_rotate,
-                                "smooth": driver_smooth
+                                "d_scale": driver_d_scale
                             }
-                            print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, smooth={driver_smooth})")
+                            print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale})")
                         else:
                             print(f"Warning: Driver layer '{driver_name}' not found for layer '{current_spline_name}'. Available layers: {list(layer_map.keys())}")
                 # --- END DRIVER LOGIC ---
@@ -538,6 +538,13 @@ class PowerSplineEditor:
 
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"Warning: Could not parse spline coordinates: {e}")
+
+        # Determine background image dimensions first (needed for coord_width/coord_height)
+        bg_h = float(mask_height)
+        bg_w = float(mask_width)
+        if bg_image is not None and bg_image.dim() == 4 and bg_image.shape[0] > 0:
+             bg_h = float(bg_image.shape[1])
+             bg_w = float(bg_image.shape[2])
 
         # Build output data structure
         coord_out_data = {}
@@ -606,10 +613,10 @@ class PowerSplineEditor:
             print("Warning: No paths to output")
 
         # Include coordinate space dimensions so DrawShapeOnPath can scale if needed
-        # Use widget dimensions because coordinates are generated in widget coordinate space
-        # (The UI canvas uses widget dimensions, not bg_image dimensions)
-        coord_out_data["coord_width"] = 1
-        coord_out_data["coord_height"] = 1
+        # Coordinates from the frontend are in normalized 0-1 range
+        # Set coord_width/coord_height to 1 so draw_shapes knows to scale them to frame dimensions
+        coord_out_data["coord_width"] = 1.0
+        coord_out_data["coord_height"] = 1.0
 
         coord_out = json.dumps(coord_out_data)
 

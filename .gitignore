@@ -1,3 +1,5 @@
 __pycache__/
 nodes/__pycache__/
 .clade
+.env
+.env 22
