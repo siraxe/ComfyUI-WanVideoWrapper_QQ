@@ -14,17 +14,19 @@ class PowerSplineEditor:
             "required": {
                 "points_store": ("STRING", {"default": "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]", "multiline": False}),
                 "coordinates": ("STRING", {"multiline": False}),
-                "mask_width": ("INT", {"default": 504, "min": 8, "max": 4096, "step": 8}),
+                "mask_width": ("INT", {"default": 600, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 480, "min": 8, "max": 4096, "step": 8}),
+                "bg_img": (["None", "A", "B", "C"], {"default": "None", "tooltip": "Select background image to overlay at 60% opacity"}),
             },
             "optional": {
-                "bg_image": ("IMAGE", ),
+                "ref_image": ("IMAGE", ),
                 "coord_in": ("STRING", {"forceInput": True}),
+                "frames": ("INT", {"forceInput": True}),
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING",)
-    RETURN_NAMES = ("bg_image", "coord_out",)
+    RETURN_TYPES = ("IMAGE", "STRING", "INT",)
+    RETURN_NAMES = ("ref_image", "coord_out", "frames",)
     FUNCTION = "splinedata"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """WIP"""
@@ -258,8 +260,12 @@ class PowerSplineEditor:
             # Negative: remove last N frames, add to end pause
             return points[:-offset_abs] if offset_abs > 0 else points, 0, offset_abs
 
-    def splinedata(self, mask_width, mask_height, coordinates, points_store,
-                   bg_image=None, coord_in=None):
+    def splinedata(self, mask_width, mask_height, coordinates, points_store, bg_img,
+                   ref_image=None, coord_in=None, frames=None):
+
+        # Use default frames value if not provided (from input)
+        if frames is None:
+            frames = 41  # Default value that was previously hardcoded
 
         # PowerSplineEditor: This node now handles multiple splines through widget data
         # The coordinates and points_store contain serialized widget data from multiple splines
@@ -389,6 +395,14 @@ class PowerSplineEditor:
         all_coord_offsets = [] # Initialize list for coordinates offsets
         all_p_interpolations = [] # Initialize list for p_coordinates interpolations
         all_coord_interpolations = [] # Initialize list for coordinates interpolations
+        all_p_easing_functions = [] # Initialize list for p_coordinates easing functions
+        all_coord_easing_functions = [] # Initialize list for coordinates easing functions
+        all_p_easing_paths = [] # Initialize list for p_coordinates easing paths
+        all_coord_easing_paths = [] # Initialize list for coordinates easing paths
+        all_p_easing_strengths = [] # Initialize list for p_coordinates easing strengths
+        all_coord_easing_strengths = [] # Initialize list for coordinates easing strengths
+        all_p_scales = [] # Initialize list for p_coordinates scales
+        all_coord_scales = [] # Initialize list for coordinates scales
         all_p_drivers = []  # Driver info for p_coordinates
         all_coord_drivers = []  # Driver info for coordinates
 
@@ -439,6 +453,15 @@ class PowerSplineEditor:
             start_frames = spline_data.get('a_pause', 0)
             end_frames = spline_data.get('z_pause', 0)
             repeat_count = int(spline_data.get('repeat', 1))
+            
+            # Get easing parameters
+            easing_function = spline_data.get('easing', 'in_out') # Get easing function using simple name
+            easing_config = spline_data.get('easingConfig', {'path': 'full', 'strength': 1.0}) # Get easing config
+            easing_path = easing_config.get('path', 'full') # Get easing path ('each' or 'full')
+            easing_strength = easing_config.get('strength', 1.0) # Get easing strength
+            
+            # Get scale parameter
+            scale = spline_data.get('scale', 1.00) # Get scale value
 
             # Offset: Timing shift that creates pause frames
             # Positive offset (e.g., 5): Waits at START position for 5 frames, then animates to 5 frames before end
@@ -527,6 +550,10 @@ class PowerSplineEditor:
                     all_p_end_frames.append(end_frames)
                     all_p_offsets.append(offset) # Collect offset for p_coordinates
                     all_p_interpolations.append(spline_interpolation) # Collect interpolation type
+                    all_p_easing_functions.append(easing_function) # Collect easing function
+                    all_p_easing_paths.append(easing_path) # Collect easing path
+                    all_p_easing_strengths.append(easing_strength) # Collect easing strength
+                    all_p_scales.append(scale) # Collect scale value
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
                 else:
                     all_coord_paths.append(spline_coords)
@@ -534,6 +561,10 @@ class PowerSplineEditor:
                     all_coord_end_frames.append(end_frames)
                     all_coord_offsets.append(offset) # Collect offset for coordinates
                     all_coord_interpolations.append(spline_interpolation) # Collect interpolation type
+                    all_coord_easing_functions.append(easing_function) # Collect easing function
+                    all_coord_easing_paths.append(easing_path) # Collect easing path
+                    all_coord_easing_strengths.append(easing_strength) # Collect easing strength
+                    all_coord_scales.append(scale) # Collect scale value
                     all_coord_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
 
             except (json.JSONDecodeError, TypeError) as e:
@@ -542,9 +573,9 @@ class PowerSplineEditor:
         # Determine background image dimensions first (needed for coord_width/coord_height)
         bg_h = float(mask_height)
         bg_w = float(mask_width)
-        if bg_image is not None and bg_image.dim() == 4 and bg_image.shape[0] > 0:
-             bg_h = float(bg_image.shape[1])
-             bg_w = float(bg_image.shape[2])
+        if ref_image is not None and ref_image.dim() == 4 and ref_image.shape[0] > 0:
+             bg_h = float(ref_image.shape[1])
+             bg_w = float(ref_image.shape[2])
 
         # Build output data structure
         coord_out_data = {}
@@ -581,13 +612,17 @@ class PowerSplineEditor:
             c_start_out = []
             c_end_out = []
 
-        # Add pause frames, offsets, interpolations, and drivers based on what exists
+        # Add pause frames, offsets, interpolations, easing params, scales, and drivers based on what exists
         if all_p_paths and all_coord_paths:
-            # Both types exist - use new format with separate pause frames, offsets, interpolations, and drivers
+            # Both types exist - use new format with separate pause frames, offsets, interpolations, easing params, scales, and drivers
             coord_out_data["start_p_frames"] = {"p": p_start_out, "c": c_start_out}
             coord_out_data["end_p_frames"] = {"p": p_end_out, "c": c_end_out}
             coord_out_data["offsets"] = {"p": all_p_offsets, "c": all_coord_offsets}
             coord_out_data["interpolations"] = {"p": all_p_interpolations, "c": all_coord_interpolations}
+            coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": all_coord_easing_functions}
+            coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": all_coord_easing_paths}
+            coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": all_coord_easing_strengths}
+            coord_out_data["scales"] = {"p": all_p_scales, "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": all_coord_drivers}
         elif all_p_paths:
             # Only p_coordinates - use new format for consistency
@@ -595,6 +630,10 @@ class PowerSplineEditor:
             coord_out_data["end_p_frames"] = {"p": p_end_out, "c": []}
             coord_out_data["offsets"] = {"p": all_p_offsets, "c": []}
             coord_out_data["interpolations"] = {"p": all_p_interpolations, "c": []}
+            coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": []}
+            coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": []}
+            coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": []}
+            coord_out_data["scales"] = {"p": all_p_scales, "c": []}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": []}
         elif all_coord_paths:
             # Only coordinates - use new format for consistency
@@ -602,6 +641,10 @@ class PowerSplineEditor:
             coord_out_data["end_p_frames"] = {"p": [], "c": c_end_out}
             coord_out_data["offsets"] = {"p": [], "c": all_coord_offsets}
             coord_out_data["interpolations"] = {"p": [], "c": all_coord_interpolations}
+            coord_out_data["easing_functions"] = {"p": [], "c": all_coord_easing_functions}
+            coord_out_data["easing_paths"] = {"p": [], "c": all_coord_easing_paths}
+            coord_out_data["easing_strengths"] = {"p": [], "c": all_coord_easing_strengths}
+            coord_out_data["scales"] = {"p": [], "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": [], "c": all_coord_drivers}
         else:
             # No paths at all
@@ -609,6 +652,10 @@ class PowerSplineEditor:
             coord_out_data["end_p_frames"] = 0
             coord_out_data["offsets"] = [] # Default empty list
             coord_out_data["interpolations"] = [] # Default empty list
+            coord_out_data["easing_functions"] = [] # Default empty list for easing functions
+            coord_out_data["easing_paths"] = [] # Default empty list for easing paths
+            coord_out_data["easing_strengths"] = [] # Default empty list for easing strengths
+            coord_out_data["scales"] = [] # Default empty list for scales
             coord_out_data["drivers"] = [] # Default empty list
             print("Warning: No paths to output")
 
@@ -624,9 +671,9 @@ class PowerSplineEditor:
         # Determine background image dimensions if present
         bg_h = float(mask_height)
         bg_w = float(mask_width)
-        if bg_image is not None and bg_image.dim() == 4 and bg_image.shape[0] > 0:
-             bg_h = float(bg_image.shape[1])
-             bg_w = float(bg_image.shape[2])
+        if ref_image is not None and ref_image.dim() == 4 and ref_image.shape[0] > 0:
+             bg_h = float(ref_image.shape[1])
+             bg_w = float(ref_image.shape[2])
 
 
         # Prepare the UI output dictionary for background image preview
@@ -636,17 +683,17 @@ class PowerSplineEditor:
             ui_out["coord_in"] = coord_in
 
         # Always send dimensions to UI so canvas can initialize properly
-        ui_out["bg_image_dims"] = [{"width": bg_w, "height": bg_h}]
+        ui_out["ref_image_dims"] = [{"width": bg_w, "height": bg_h}]
 
-        if bg_image is not None:
-            # Ensure bg_image is on CPU before converting
-            if bg_image.device != torch.device('cpu'):
-                bg_image = bg_image.cpu()
+        if ref_image is not None:
+            # Ensure ref_image is on CPU before converting
+            if ref_image.device != torch.device('cpu'):
+                ref_image = ref_image.cpu()
 
             transform = transforms.ToPILImage()
             # Use the first image in the batch for the preview
             # Ensure tensor is in CHW format (channels, height, width)
-            img_tensor = bg_image[0]
+            img_tensor = ref_image[0]
             if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
                  img_tensor = img_tensor.permute(2, 0, 1) # HWC to CHW if needed
             elif img_tensor.dim() == 2: # Grayscale HW -> 1HW -> CHW (repeat channel)
@@ -658,24 +705,50 @@ class PowerSplineEditor:
 
             try:
                 image = transform(img_tensor)
+                
+                # Save the image directly to the bg folder as ref_image.jpg
+                self._save_ref_image_to_bg_folder(image)
+                
+                # Also provide the base64 version for the UI (as before)
                 buffered = io.BytesIO()
                 image.save(buffered, format="PNG") # Use PNG to preserve quality for display
                 img_bytes = buffered.getvalue()
                 img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-                ui_out["bg_image"] = [img_base64]
+                ui_out["ref_image"] = [img_base64]
             except Exception as e:
                 print(f"Error processing background image for UI preview: {e}")
 
-
         # Return results
-        # Create proper blank tensor if no bg_image provided (ComfyUI expects BHWC format)
-        if bg_image is not None:
-            result_image = bg_image
+        # Create proper blank tensor if no ref_image provided (ComfyUI expects BHWC format)
+        if ref_image is not None:
+            result_image = ref_image
         else:
             # Create blank image tensor in BHWC format (Batch, Height, Width, Channels)
             result_image = torch.zeros((1, int(bg_h), int(bg_w), 3), dtype=torch.float32)
 
-        result = (result_image, coord_out)
+        result = (result_image, coord_out, frames)
 
+        # Include bg_img selection in UI output so frontend can use it
+        ui_out["bg_img"] = [bg_img]
+        
         # Always return UI data with at least dimensions for proper canvas initialization
         return {"ui": ui_out, "result": result}
+
+    def _save_ref_image_to_bg_folder(self, image):
+        """Save the reference image directly to the bg folder"""
+        import os
+        from pathlib import Path
+        
+        # Get the bg folder path (relative to this file)
+        bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
+        bg_folder.mkdir(parents=True, exist_ok=True)
+        ref_image_path = bg_folder / "ref_image.jpg"
+        
+        # Convert image to RGB if it's not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Save as JPEG with good quality
+        image.save(str(ref_image_path), format="JPEG", quality=95)
+        
+        print(f"Reference image saved to: {ref_image_path}")

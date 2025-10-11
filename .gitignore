@@ -2,5 +2,6 @@ __pycache__/
 nodes/__pycache__/
 .clade
 .env
+.env2
 .env 22
 wanvideo_cached_samples.pt

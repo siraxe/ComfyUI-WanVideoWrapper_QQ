@@ -1,28 +1,42 @@
 /**
  * NodeSizeManager - Unified size management for PowerSplineEditor node
  * Handles both width and height calculations, user adjustments, and auto-sizing
+ *
+ * All spacing parameters are centralized here for easy adjustment
  */
 export class NodeSizeManager {
     constructor(node, options = {}) {
         this.node = node;
 
-        // Default configuration
+        // Default configuration - SINGLE SOURCE OF TRUTH for all sizing
         this.config = {
-            canvasWidth: options.canvasWidth || 504,
+            // === SPACING PARAMETERS (All Controllable) ===
+            spacingTop: options.spacingTop || 20,              // Top spacing (ComfyUI native offset)
+            spacingBeforeCanvas: options.spacingBeforeCanvas || 30,   // Spacing before canvas (tight to dimensions widget)
+            spacingAfterCanvas: options.spacingAfterCanvas || 20,    // Spacing after canvas (reduced for tighter layout)
+            spacingAfterLayers: options.spacingAfterLayers || 10,    // Spacing after layer list (reduced for tighter layout)
+            spacingBottom: options.spacingBottom || 10,               // Bottom spacing (minimal)
+
+            // === COMPONENT HEIGHTS ===
+            titleHeight: options.titleHeight || 30,                  // ComfyUI title bar
+            dimensionsWidgetHeight: options.dimensionsWidgetHeight || (LiteGraph.NODE_WIDGET_HEIGHT || 30),
+            canvasMargin: options.canvasMargin || 0,                // Canvas internal margin
+            headerWidgetHeight: options.headerWidgetHeight || (LiteGraph.NODE_WIDGET_HEIGHT || 30),
+            sLayerWidgetHeight: options.sLayerWidgetHeight || (LiteGraph.NODE_WIDGET_HEIGHT || 30),
+            buttonBarHeight: options.buttonBarHeight || (LiteGraph.NODE_WIDGET_HEIGHT || 30),
+
+            // === CANVAS DIMENSIONS ===
+            canvasWidth: options.canvasWidth || 600,
             canvasHeight: options.canvasHeight || 480,
             canvasExtraWidth: options.canvasExtraWidth || 45,
-            minNodeWidth: options.minNodeWidth || 504,
-            minNodeHeight: options.minNodeHeight || 480,
-            titleHeight: options.titleHeight || 100,
-            widgetHeight: options.widgetHeight || LiteGraph.NODE_WIDGET_HEIGHT,
-            headerWidgetHeight: options.headerWidgetHeight || LiteGraph.NODE_WIDGET_HEIGHT,
-            splineWidgetHeight: options.splineWidgetHeight || LiteGraph.NODE_WIDGET_HEIGHT,
-            padding: options.padding || 0,
-            // Canvas dimension constraints (for mask_width/mask_height widgets)
-            minCanvasWidth: options.minCanvasWidth || 504,
+            minCanvasWidth: options.minCanvasWidth || 600,
             maxCanvasWidth: options.maxCanvasWidth || 8192,
             minCanvasHeight: options.minCanvasHeight || 480,
             maxCanvasHeight: options.maxCanvasHeight || 8192,
+
+            // === NODE CONSTRAINTS ===
+            minNodeWidth: options.minNodeWidth || 600,
+            minNodeHeight: options.minNodeHeight || 480,
         };
 
         // Initialize properties for tracking user adjustments
@@ -36,27 +50,21 @@ export class NodeSizeManager {
     }
 
     /**
-     * Calculate the total height of all non-canvas widgets
-     * @returns {number}
-     * @private
-     */
-    _getWidgetHeightsTotal() {
-        const widgets = this.node.widgets || [];
-        const splineWidgets = widgets.filter(w => w.name?.startsWith("spline_"));
-
-        const titleHeight = this.config.titleHeight;
-        const dimensionsWidgetHeight = this.config.widgetHeight; // DimensionsWidget always shows
-        const headerWidgetHeight = splineWidgets.length > 0 ? this.config.headerWidgetHeight : 0; // Header only when splines exist
-        const splineWidgetsHeight = splineWidgets.length * this.config.splineWidgetHeight;
-        const addButtonHeight = this.config.widgetHeight; // "Add Spline" button
-        const padding = this.config.padding;
-
-        return titleHeight + dimensionsWidgetHeight +
-            headerWidgetHeight + splineWidgetsHeight + addButtonHeight + padding;
-    }
-
-    /**
      * Calculate required node size based on current widgets and canvas
+     * Uses the centralized spacing configuration for predictable sizing
+     *
+     * Layout structure (top to bottom):
+     * - spacingTop
+     * - titleHeight
+     * - dimensionsWidgetHeight
+     * - spacingBeforeCanvas
+     * - canvasHeight + spacingAfterCanvas (dynamic, spacing included in canvas widget)
+     * - buttonBarHeight
+     * - headerWidgetHeight (if layers exist)
+     * - sLayerWidgetHeight × layerCount (dynamic)
+     * - spacingAfterLayers
+     * - spacingBottom
+     *
      * @returns {Array} [width, height]
      */
     calculateSize() {
@@ -68,26 +76,33 @@ export class NodeSizeManager {
         const currentCanvasWidth = widthWidget ? widthWidget.value : this.config.canvasWidth;
         const currentCanvasHeight = heightWidget ? heightWidget.value : this.config.canvasHeight;
 
-        // Calculate width (canvas + extra width for controls)
+        // Get layer count (dynamic - grows when layers are added)
+        const layerCount = this.node.layerManager ? this.node.layerManager.getSplineWidgets().length : 0;
+
+        // === WIDTH CALCULATION ===
         const calculatedWidth = Math.max(
             currentCanvasWidth + this.config.canvasExtraWidth,
             this.config.minNodeWidth
         );
 
-        // Calculate total widget heights (everything except canvas)
-        const widgetHeightsTotal = this._getWidgetHeightsTotal();
+        // === HEIGHT CALCULATION (Single Source of Truth Formula) ===
+        // Note: canvas DOM widget includes spacingAfterCanvas in its computeSize
+        const calculatedHeight =
+            this.config.spacingTop +
+            this.config.titleHeight +
+            this.config.dimensionsWidgetHeight +
+            this.config.spacingBeforeCanvas +
+            (currentCanvasHeight + this.config.spacingAfterCanvas) +  // Dynamic canvas height + spacing (included in canvas widget)
+            this.config.buttonBarHeight +  // Button bar now comes BEFORE header/layers
+            (layerCount > 0 ? this.config.headerWidgetHeight : 0) +  // Only show header if layers exist
+            (layerCount * this.config.sLayerWidgetHeight) +  // Dynamic - grows with layer count
+            this.config.spacingAfterLayers +
+            this.config.spacingBottom;
 
-        // Calculate minimum node height dynamically (minCanvasHeight + all widgets)
-        const minCalculatedHeight = this.config.minCanvasHeight + widgetHeightsTotal;
+        // Enforce minimum height constraint
+        const finalHeight = Math.max(calculatedHeight, this.config.minNodeHeight);
 
-        // Calculate actual height (canvas + widgets, but never below minimum)
-        const calculatedHeight = Math.max(
-            currentCanvasHeight + widgetHeightsTotal,
-            minCalculatedHeight,
-            this.config.minNodeHeight // Absolute floor (for edge cases)
-        );
-
-        return [calculatedWidth, calculatedHeight];
+        return [calculatedWidth, finalHeight];
     }
 
     /**
@@ -138,14 +153,13 @@ export class NodeSizeManager {
      * @returns {Array} Constrained size [width, height]
      */
     onNodeResized(newSize) {
-        // Calculate minimum required height based on widgets + min canvas height
-        const widgetHeightsTotal = this._getWidgetHeightsTotal();
-        const minRequiredHeight = widgetHeightsTotal + this.config.minCanvasHeight;
+        // Calculate minimum required height using the new formula
+        const [minWidth, minHeight] = this.calculateSize();
 
-        // Enforce minimum constraints, ensuring node is tall enough for widgets and min canvas
+        // Enforce minimum constraints
         const constrainedSize = [
             Math.max(newSize[0], this.config.minNodeWidth),
-            Math.max(newSize[1], minRequiredHeight, this.config.minNodeHeight)
+            Math.max(newSize[1], minHeight, this.config.minNodeHeight)
         ];
 
         // Check if this was a user adjustment (not an auto-update)

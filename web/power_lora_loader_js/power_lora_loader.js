@@ -1428,6 +1428,8 @@ app.registerExtension({
                             content: `🗑️ Remove`,
                             callback: () => {
                                 removeArrayItem(this.widgets, widget);
+                                const computed = this.computeSize();
+                                this.size[1] = Math.max(this._tempHeight || 15, computed[1]);
                                 this.setDirtyCanvas(true, true);
                             },
                         },

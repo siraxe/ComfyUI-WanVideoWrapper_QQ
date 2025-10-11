@@ -1,9 +1,35 @@
 import { app } from '../../../scripts/app.js';
-import { showCustomDrivenToggleMenu } from './context_menu.js';
+import { showCustomDrivenToggleMenu, showCustomEasingMenu } from './context_menu.js';
+import { initializeDrivenConfig, initializeEasingConfig, toggleDrivenState, prepareDrivenMenu } from './persistence.js';
 import { NodeSizeManager } from './node_size_manager.js';
+import { PowerSplineHeaderWidget, PowerSplineWidget } from './widget_utils.js';
+import { 
+    binarySearch, 
+    fitString, 
+    measureText, 
+    isLowQuality, 
+    drawRoundedRectangle, 
+    drawWidgetButton, 
+    drawTogglePart, 
+    drawNumberWidgetPart,
+    RgthreeBaseWidget
+} from './drawing_utils.js';
 
 // Re-export for convenience
-export { NodeSizeManager };
+export { 
+    NodeSizeManager, 
+    PowerSplineHeaderWidget, 
+    PowerSplineWidget, 
+    binarySearch, 
+    fitString, 
+    measureText, 
+    isLowQuality, 
+    drawRoundedRectangle, 
+    drawWidgetButton, 
+    drawTogglePart, 
+    drawNumberWidgetPart,
+    RgthreeBaseWidget
+};
 
 //from melmass
 export function makeUUID() {
@@ -79,323 +105,311 @@ export const create_documentation_stylesheet = () => {
     }
   }
 
-// === CANVAS UTILITY FUNCTIONS (from power_lora_loader.js) ===
-export function binarySearch(max, getValue, match) {
-    let min = 0;
-    while (min <= max) {
-        let guess = Math.floor((min + max) / 2);
-        const compareVal = getValue(guess);
-        if (compareVal === match)
-            return guess;
-        if (compareVal < match)
-            min = guess + 1;
-        else
-            max = guess - 1;
+// === TOP ROW WIDGET (Combined refresh button, bg_image dropdown, and width/height controls) ===
+export class TopRowWidget extends RgthreeBaseWidget {
+    constructor(name = "TopRowWidget") {
+        super(name);
+        this.type = "custom";
+        this.options = { serialize: false };
+        this.value = {};
+        this.haveMouseMovedValue = false;
+        this.buttonMouseDown = false;
+        this.hitAreas = {
+            refreshButton: { bounds: [0, 0], onClick: null },
+            bgImgLeftArrow: { bounds: [0, 0], onClick: null },
+            bgImgVal: { bounds: [0, 0], onClick: null },
+            bgImgRightArrow: { bounds: [0, 0], onClick: null },
+            bgImgAny: { bounds: [0, 0], onClick: null },
+            widthDec: { bounds: [0, 0], onClick: null },
+            widthVal: { bounds: [0, 0], onClick: null },
+            widthInc: { bounds: [0, 0], onClick: null },
+            widthAny: { bounds: [0, 0], onMove: null },
+            heightDec: { bounds: [0, 0], onClick: null },
+            heightVal: { bounds: [0, 0], onClick: null },
+            heightInc: { bounds: [0, 0], onClick: null },
+            heightAny: { bounds: [0, 0], onMove: null },
+        };
     }
-    return max;
-}
 
-export function fitString(ctx, str, maxWidth) {
-    let width = ctx.measureText(str).width;
-    const ellipsis = "…";
-    const ellipsisWidth = measureText(ctx, ellipsis);
-    if (width <= maxWidth || width <= ellipsisWidth) {
-        return str;
-    }
-    const index = binarySearch(str.length, (guess) => measureText(ctx, str.substring(0, guess)), maxWidth - ellipsisWidth);
-    return str.substring(0, index) + ellipsis;
-}
-
-export function measureText(ctx, str) {
-    return ctx.measureText(str).width;
-}
-
-export function isLowQuality() {
-    var _a;
-    const canvas = app.canvas;
-    return (((_a = canvas.ds) === null || _a === void 0 ? void 0 : _a.scale) || 1) <= 0.5;
-}
-
-export function drawRoundedRectangle(ctx, options) {
-    const lowQuality = isLowQuality();
-    options = { ...options };
-    ctx.save();
-    ctx.strokeStyle = options.colorStroke || LiteGraph.WIDGET_OUTLINE_COLOR;
-    ctx.fillStyle = options.colorBackground || LiteGraph.WIDGET_BGCOLOR;
-    ctx.beginPath();
-    ctx.roundRect(...options.pos, ...options.size, lowQuality ? [0] : options.borderRadius ? [options.borderRadius] : [options.size[1] * 0.5]);
-    ctx.fill();
-    !lowQuality && ctx.stroke();
-    ctx.restore();
-}
-
-export function drawWidgetButton(ctx, options, text = null, isMouseDownedAndOver = false) {
-    var _a;
-    const borderRadius = isLowQuality() ? 0 : ((_a = options.borderRadius) !== null && _a !== void 0 ? _a : 4);
-    ctx.save();
-    if (!isLowQuality() && !isMouseDownedAndOver) {
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 2, options.size[1]],
-            pos: [options.pos[0] + 1, options.pos[1] + 1],
-            borderRadius,
-            colorBackground: "#000000aa",
-            colorStroke: "#000000aa",
-        });
-    }
-    drawRoundedRectangle(ctx, {
-        size: options.size,
-        pos: [options.pos[0], options.pos[1] + (isMouseDownedAndOver ? 1 : 0)],
-        borderRadius,
-        colorBackground: isMouseDownedAndOver ? "#444" : LiteGraph.WIDGET_BGCOLOR,
-        colorStroke: "transparent",
-    });
-    if (isLowQuality()) {
-        ctx.restore();
-        return;
-    }
-    if (!isMouseDownedAndOver) {
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 0.75, options.size[1] - 0.75],
-            pos: options.pos,
-            borderRadius: borderRadius - 0.5,
-            colorBackground: "transparent",
-            colorStroke: "#00000044",
-        });
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 0.75, options.size[1] - 0.75],
-            pos: [options.pos[0] + 0.75, options.pos[1] + 0.75],
-            borderRadius: borderRadius - 0.5,
-            colorBackground: "transparent",
-            colorStroke: "#ffffff11",
-        });
-    }
-    drawRoundedRectangle(ctx, {
-        size: [options.size[0] - 1.5, options.size[1] - 1.5],
-        pos: [options.pos[0] + 0.75, options.pos[1] + (isMouseDownedAndOver ? 1.75 : 0.75)],
-        borderRadius: borderRadius - 1,
-        colorBackground: "transparent",
-        colorStroke: isMouseDownedAndOver ? "#00000088" : "#ffffff22",
-    });
-    if (text) {
+    draw(ctx, node, w, posY, height) {
+        const margin = 15;
+        const spacing = 10; // Reduced spacing to fit within 100%
+        const midY = posY + height * 0.5;
+        
+        ctx.save();
+        
+        // Get widget values
+        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+        const widthValue = widthWidget ? widthWidget.value : 512;
+        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+        const heightValue = heightWidget ? heightWidget.value : 512;
+        const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
+        const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
+        
+        // Calculate available width for components (excluding margins and spacing)
+        const availableWidth = node.size[0] - margin * 2 - spacing * 2; // Account for spacing between elements
+        
+        // Calculate component widths based on percentages (now totaling 100% of available width)
+        const refreshButtonWidth = availableWidth * 0.15;
+        const bgImgDropdownWidth = availableWidth * 0.15;
+        const dimensionsAreaWidth = availableWidth * 0.70;
+        
+        // Calculate total width and starting position to center everything
+        const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + dimensionsAreaWidth;
+        const startX = margin; // Start from left margin instead of centering
+        let posX = startX;
+        
+        // Draw Refresh button
+        drawWidgetButton(
+            ctx,
+            { size: [refreshButtonWidth, height], pos: [posX, posY] },
+            "👀 Refresh",
+            this.buttonMouseDown
+        );
+        this.hitAreas.refreshButton.bounds = [posX, refreshButtonWidth];
+        posX += refreshButtonWidth + spacing;
+        
+        // Draw bg_img control with left/right arrows
+        const arrowWidth = 7; // Smaller arrows
+        
+        // Draw background box
+        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+        ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
+        
+        // Draw left arrow (positioned at the very left edge)
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.fillText(text, options.pos[0] + options.size[0] / 2, options.pos[1] + options.size[1] / 2 + (isMouseDownedAndOver ? 1 : 0));
-    }
-    ctx.restore();
-}
-
-export function drawTogglePart(ctx, options) {
-    const lowQuality = isLowQuality();
-    ctx.save();
-    const { posX, posY, height, value } = options;
-    const toggleRadius = height * 0.36;
-    const toggleBgWidth = height * 1.5;
-    if (!lowQuality) {
+        ctx.fillText("◀", posX + arrowWidth / 2, midY);
+        this.hitAreas.bgImgLeftArrow.bounds = [posX, arrowWidth];
+        
+        // Draw text value (centered in the control)
+        ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
+        this.hitAreas.bgImgVal.bounds = [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)];
+        
+        // Draw right arrow (positioned at the very right edge)
+        ctx.fillText("▶", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
+        this.hitAreas.bgImgRightArrow.bounds = [posX + bgImgDropdownWidth - arrowWidth, arrowWidth];
+        
+        // Combined bounds for the entire control
+        this.hitAreas.bgImgAny.bounds = [posX, bgImgDropdownWidth];
+        posX += bgImgDropdownWidth + spacing;
+        
+        // Draw rounded area for width/height controls
+        const roundedAreaX = posX;
+        const roundedAreaY = posY;
+        const roundedAreaWidth = dimensionsAreaWidth;
+        const roundedAreaHeight = height;
+        
+        // Draw rounded rectangle background
+        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
         ctx.beginPath();
-        ctx.roundRect(posX + 4, posY + 4, toggleBgWidth - 8, height - 8, [height * 0.5]);
-        ctx.globalAlpha = app.canvas.editor_alpha * 0.25;
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.roundRect(roundedAreaX, roundedAreaY, roundedAreaWidth, roundedAreaHeight, [roundedAreaHeight * 0.5]);
         ctx.fill();
-        ctx.globalAlpha = app.canvas.editor_alpha;
-    }
-    // Check for truthiness - objects (driven config) should render as "on"
-    const isOn = !!value;
-    ctx.fillStyle = isOn ? "#89B" : "#888";
-    const toggleX = lowQuality || !value
-        ? posX + height * 0.5
-        : posX + height;
-    ctx.beginPath();
-    ctx.arc(toggleX, posY + height * 0.5, toggleRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    return [posX, toggleBgWidth];
-}
-
-export function drawNumberWidgetPart(ctx, options) {
-    const arrowWidth = 9;
-    const arrowHeight = 10;
-    const innerMargin = 3;
-    const numberWidth = 32;
-    const xBoundsArrowLess = [0, 0];
-    const xBoundsNumber = [0, 0];
-    const xBoundsArrowMore = [0, 0];
-    ctx.save();
-    let posX = options.posX;
-    const { posY, height, value, textColor } = options;
-    const midY = posY + height / 2;
-    if (options.direction === -1) {
-        posX = posX - arrowWidth - innerMargin - numberWidth - innerMargin - arrowWidth;
-    }
-    
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const oldTextcolor = ctx.fillStyle;
-    if (textColor) {
-        ctx.fillStyle = textColor;
-    }
-
-    // Draw left arrow
-    ctx.fillText("◀", posX + arrowWidth / 2, midY);
-    xBoundsArrowLess[0] = posX;
-    xBoundsArrowLess[1] = arrowWidth;
-    posX += arrowWidth + innerMargin;
-
-    // Draw number with precision and suffix support
-    const precision = options.precision !== undefined ? options.precision : 0;
-    const suffix = options.suffix || "";
-    const valueText = value.toFixed(precision) + suffix;
-    ctx.fillText(fitString(ctx, valueText, numberWidth), posX + numberWidth / 2, midY);
-    xBoundsNumber[0] = posX;
-    xBoundsNumber[1] = numberWidth;
-    posX += numberWidth + innerMargin;
-
-    // Draw right arrow
-    ctx.fillText("▶", posX + arrowWidth / 2, midY);
-    xBoundsArrowMore[0] = posX;
-    xBoundsArrowMore[1] = arrowWidth;
-
-    ctx.fillStyle = oldTextcolor;
-    ctx.restore();
-    return [xBoundsArrowLess, xBoundsNumber, xBoundsArrowMore];
-}
-drawNumberWidgetPart.WIDTH_TOTAL = 9 + 3 + 32 + 3 + 9;
-
-// === BASE WIDGET CLASS ===
-export class RgthreeBaseWidget {
-    constructor(name) {
-        this.type = "custom";
-        this.options = {};
-        this.y = 0;
-        this.last_y = 0;
-        this.mouseDowned = null;
-        this.isMouseDownedAndOver = false;
-        this.hitAreas = {};
-        this.downedHitAreasForMove = [];
-        this.downedHitAreasForClick = [];
-        this.name = name;
-    }
-
-    serializeValue(node, index) {
-        return this.value;
+        ctx.stroke();
+        
+        // Calculate positions for width and height controls within the rounded area
+        // Center the controls in the rounded area
+        const controlSpacing = 20;
+        const numberControlWidth = drawNumberWidgetPart.WIDTH_TOTAL; // Width of each number control
+        const labelWidth = 40; // Approximate width for labels
+        const totalControlWidth = labelWidth + numberControlWidth + controlSpacing + labelWidth + numberControlWidth;
+        
+        // Center the controls in the rounded area
+        const controlsStartX = roundedAreaX + (roundedAreaWidth - totalControlWidth) / 2;
+        
+        // Width control with label
+        const widthLabel = "width:";
+        const widthControlX = controlsStartX;
+        
+        // Draw width label
+        ctx.textAlign = "left";
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.fillText(widthLabel, widthControlX, midY);
+        
+        // Draw width control (positioned after label)
+        const widthControlStartX = widthControlX + labelWidth;
+        const [wLeftArrow, wText, wRightArrow] = drawNumberWidgetPart(ctx, {
+            posX: widthControlStartX,
+            posY,
+            height,
+            value: widthValue,
+            direction: 1,
+        });
+        
+        this.hitAreas.widthDec.bounds = wLeftArrow;
+        this.hitAreas.widthVal.bounds = wText;
+        this.hitAreas.widthInc.bounds = wRightArrow;
+        this.hitAreas.widthAny.bounds = [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]];
+        this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
+        this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
+        this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
+        this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
+        
+        // Height control with label
+        const heightControlX = widthControlStartX + numberControlWidth + controlSpacing;
+        const heightLabel = "height:";
+        
+        // Draw height label
+        ctx.fillText(heightLabel, heightControlX, midY);
+        
+        // Draw height control (positioned after label)
+        const heightControlStartX = heightControlX + labelWidth;
+        const [hLeftArrow, hText, hRightArrow] = drawNumberWidgetPart(ctx, {
+            posX: heightControlStartX,
+            posY,
+            height,
+            value: heightValue,
+            direction: 1,
+        });
+        
+        this.hitAreas.heightDec.bounds = hLeftArrow;
+        this.hitAreas.heightVal.bounds = hText;
+        this.hitAreas.heightInc.bounds = hRightArrow;
+        this.hitAreas.heightAny.bounds = [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]];
+        this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
+        this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
+        this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
+        this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
+        
+        // Set up event handlers for refresh button
+        this.hitAreas.refreshButton.onClick = () => {
+            if (node.updateReferenceImageFromConnectedNode) {
+                node.updateReferenceImageFromConnectedNode();
+            }
+        };
+        
+        // Set up event handlers for bg_img control
+        this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
+        this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
+        this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
+        
+        ctx.restore();
     }
 
-    clickWasWithinBounds(pos, bounds) {
-        let xStart = bounds[0];
-        let xEnd = xStart + (bounds.length > 2 ? bounds[2] : bounds[1]);
-        const clickedX = pos[0] >= xStart && pos[0] <= xEnd;
-        if (bounds.length === 2) {
-            return clickedX;
+    // Methods for width controls
+    stepWidth(node, step) {
+        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+        if (widthWidget) {
+            const newValue = widthWidget.value + step;
+            widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
+            if (widthWidget.callback) {
+                widthWidget.callback(widthWidget.value);
+            }
+            node.setDirtyCanvas(true, true);
         }
-        return clickedX && pos[1] >= bounds[1] && pos[1] <= bounds[1] + bounds[3];
     }
 
+    promptWidth(node) {
+        if (this.haveMouseMovedValue) return;
+        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+        if (widthWidget) {
+            const canvas = app.canvas;
+            canvas.prompt("Width", widthWidget.value, (v) => {
+                const newValue = Number(v);
+                widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
+                if (widthWidget.callback) {
+                    widthWidget.callback(widthWidget.value);
+                }
+            });
+        }
+    }
+
+    dragWidth(node, event) {
+        if (event.deltaX) {
+            this.haveMouseMovedValue = true;
+            const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+            if (widthWidget) {
+                const newValue = widthWidget.value + event.deltaX * 2;
+                widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
+                if (widthWidget.callback) {
+                    widthWidget.callback(widthWidget.value);
+                }
+                node.setDirtyCanvas(true, true);
+            }
+        }
+    }
+
+    // Methods for height controls
+    stepHeight(node, step) {
+        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+        if (heightWidget) {
+            const newValue = heightWidget.value + step;
+            heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
+            if (heightWidget.callback) {
+                heightWidget.callback(heightWidget.value);
+            }
+            node.setDirtyCanvas(true, true);
+        }
+    }
+
+    promptHeight(node) {
+        if (this.haveMouseMovedValue) return;
+        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+        if (heightWidget) {
+            const canvas = app.canvas;
+            canvas.prompt("Height", heightWidget.value, (v) => {
+                const newValue = Number(v);
+                heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
+                if (heightWidget.callback) {
+                    heightWidget.callback(heightWidget.value);
+                }
+            });
+        }
+    }
+
+    dragHeight(node, event) {
+        if (event.deltaX) {
+            this.haveMouseMovedValue = true;
+            const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+            if (heightWidget) {
+                const newValue = heightWidget.value + event.deltaX * 2;
+                heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
+                if (heightWidget.callback) {
+                    heightWidget.callback(heightWidget.value);
+                }
+                node.setDirtyCanvas(true, true);
+            }
+        }
+    }
+
+    // Methods for bg_img controls
+    stepBgImg(node, step) {
+        const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
+        if (bgImgWidget) {
+            const options = ["None", "A", "B", "C"];
+            const currentIndex = options.indexOf(bgImgWidget.value);
+            const newIndex = (currentIndex + step + options.length) % options.length;
+            bgImgWidget.value = options[newIndex];
+            if (bgImgWidget.callback) {
+                bgImgWidget.callback(bgImgWidget.value);
+            }
+            node.setDirtyCanvas(true, true);
+        }
+    }
+
+
+    // Mouse event handlers
     mouse(event, pos, node) {
-        var _a, _b, _c;
-        const canvas = app.canvas;
-        if (event.type == "pointerdown") {
-            this.mouseDowned = [...pos];
-            this.isMouseDownedAndOver = true;
-            this.downedHitAreasForMove.length = 0;
-            this.downedHitAreasForClick.length = 0;
-            let anyHandled = false;
-            // Check if it's a right click (button 2)
-            const isRightClick = event.button === 2;
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    if (part.onMove) {
-                        this.downedHitAreasForMove.push(part);
-                    }
-                    if (part.onClick) {
-                        this.downedHitAreasForClick.push(part);
-                    }
-                    // Check for right-click BEFORE calling onDown to prevent toggle from firing on right-click
-                    if (isRightClick && part.onRightDown) {
-                        const thisHandled = part.onRightDown.apply(this, [event, pos, node, part]);
-                        anyHandled = anyHandled || thisHandled == true;
-                    } else if (part.onDown) {
-                        // Only call onDown if it's NOT a right-click with onRightDown
-                        const thisHandled = part.onDown.apply(this, [event, pos, node, part]);
-                        anyHandled = anyHandled || thisHandled == true;
-                    }
-                    part.wasMouseClickedAndIsOver = true;
-                }
-            }
-            return (_a = this.onMouseDown(event, pos, node)) !== null && _a !== void 0 ? _a : anyHandled;
-        }
-        if (event.type == "pointerup") {
-            if (!this.mouseDowned)
-                return true;
-            this.downedHitAreasForMove.length = 0;
-            const wasMouseDownedAndOver = this.isMouseDownedAndOver;
-            this.cancelMouseDown();
-            let anyHandled = false;
-            for (const part of Object.values(this.hitAreas)) {
-                if (part.onUp && this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onUp.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-                part.wasMouseClickedAndIsOver = false;
-            }
-            for (const part of this.downedHitAreasForClick) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onClick.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-            }
-            this.downedHitAreasForClick.length = 0;
-            if (wasMouseDownedAndOver) {
-                const thisHandled = this.onMouseClick(event, pos, node);
-                anyHandled = anyHandled || thisHandled == true;
-            }
-            return (_b = this.onMouseUp(event, pos, node)) !== null && _b !== void 0 ? _b : anyHandled;
-        }
-        if (event.type == "pointermove") {
-            this.isMouseDownedAndOver = !!this.mouseDowned;
-            if (this.mouseDowned &&
-                (pos[0] < 15 ||
-                    pos[0] > node.size[0] - 15 ||
-                    pos[1] < this.last_y ||
-                    pos[1] > this.last_y + LiteGraph.NODE_WIDGET_HEIGHT)) {
-                this.isMouseDownedAndOver = false;
-            }
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.downedHitAreasForMove.includes(part)) {
-                    part.onMove.apply(this, [event, pos, node, part]);
-                }
-                if (this.downedHitAreasForClick.includes(part)) {
-                    part.wasMouseClickedAndIsOver = this.clickWasWithinBounds(pos, part.bounds);
-                }
-            }
-            return (_c = this.onMouseMove(event, pos, node)) !== null && _c !== void 0 ? _c : true;
-        }
-        return false;
-    }
-
-    cancelMouseDown() {
-        this.mouseDowned = null;
-        this.isMouseDownedAndOver = false;
-        this.downedHitAreasForMove.length = 0;
-    }
-
-    onMouseDown(event, pos, node) {
-        return;
+        // Use the parent's mouse handling which properly manages hit areas
+        return super.mouse(event, pos, node);
     }
 
     onMouseUp(event, pos, node) {
-        return;
+        super.onMouseUp(event, pos, node);
+        this.haveMouseMovedValue = false;
+        this.buttonMouseDown = false;
     }
 
-    onMouseClick(event, pos, node) {
-        return;
-    }
-
-    onMouseMove(event, pos, node) {
-        return;
+    computeSize(width) {
+        return [width, LiteGraph.NODE_WIDGET_HEIGHT];
     }
 }
 
-// === DIMENSIONS WIDGET ===
+// === DIMENSIONS WIDGET (Simplified version for backward compatibility) ===
 export class DimensionsWidget extends RgthreeBaseWidget {
     constructor(name = "DimensionsWidget") {
         super(name);
@@ -416,91 +430,12 @@ export class DimensionsWidget extends RgthreeBaseWidget {
     }
 
     draw(ctx, node, w, posY, height) {
-        const margin = 80; // Increased margin from sides
-        const innerMargin = 10; // Reduced space between label and number
-        const spacingBetweenControls = 30; // Space between width and height controls
-        const midY = posY + height * 0.5;
-
-        ctx.save();
-        drawRoundedRectangle(ctx, { pos: [margin, posY], size: [node.size[0] - margin * 2, height] });
-
-        if (isLowQuality()) {
-            ctx.restore();
-            return;
-        }
-
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.textBaseline = "middle";
-
-        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
-        const widthValue = widthWidget ? widthWidget.value : 512;
-        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
-        const heightValue = heightWidget ? heightWidget.value : 512;
-
-        // Standardize label widths for alignment across widgets
-        const widthLabel = "width:";
-        const heightLabel = "height:";
-        const maxLeftLabelWidth = Math.max(ctx.measureText(widthLabel).width, ctx.measureText("start_pause:").width);
-        const maxRightLabelWidth = Math.max(ctx.measureText(heightLabel).width, ctx.measureText("end_pause:").width);
-
-        const totalWidth = maxLeftLabelWidth + innerMargin + drawNumberWidgetPart.WIDTH_TOTAL +
-                          spacingBetweenControls +
-                          maxRightLabelWidth + innerMargin + drawNumberWidgetPart.WIDTH_TOTAL;
-
-        const startX = (node.size[0] - totalWidth) / 2;
-        let posX = startX;
-
-        // Draw "width:" label (right-aligned)
-        ctx.textAlign = "right";
-        ctx.fillText(widthLabel, posX + maxLeftLabelWidth, midY);
-        posX += maxLeftLabelWidth + innerMargin;
-
-        // Draw width control
-        const [wLeftArrow, wText, wRightArrow] = drawNumberWidgetPart(ctx, {
-            posX: posX,
-            posY,
-            height,
-            value: widthValue,
-            direction: 1,
-        });
-
-        this.hitAreas.widthDec.bounds = wLeftArrow;
-        this.hitAreas.widthVal.bounds = wText;
-        this.hitAreas.widthInc.bounds = wRightArrow;
-        this.hitAreas.widthAny.bounds = [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]];
-        this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
-        this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
-        this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
-        this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
-
-        posX += drawNumberWidgetPart.WIDTH_TOTAL + spacingBetweenControls;
-
-        // Draw "height:" label (right-aligned)
-        ctx.textAlign = "right";
-        ctx.fillText(heightLabel, posX + maxRightLabelWidth, midY);
-        posX += maxRightLabelWidth + innerMargin;
-
-        // Draw height control
-        const [hLeftArrow, hText, hRightArrow] = drawNumberWidgetPart(ctx, {
-            posX: posX,
-            posY,
-            height,
-            value: heightValue,
-            direction: 1,
-        });
-
-        this.hitAreas.heightDec.bounds = hLeftArrow;
-        this.hitAreas.heightVal.bounds = hText;
-        this.hitAreas.heightInc.bounds = hRightArrow;
-        this.hitAreas.heightAny.bounds = [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]];
-        this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
-        this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
-        this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
-        this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
-
-        ctx.restore();
+        // This widget is now replaced by TopRowWidget, but kept for backward compatibility
+        // It will not be displayed
+        return;
     }
 
+    // Keep the methods for backward compatibility
     stepWidth(node, step) {
         const widthWidget = node.widgets?.find(w => w.name === "mask_width");
         if (widthWidget) {
@@ -591,7 +526,7 @@ export class DimensionsWidget extends RgthreeBaseWidget {
     }
 
     computeSize(width) {
-        return [width, LiteGraph.NODE_WIDGET_HEIGHT];
+        return [width, 0]; // Zero height since it's not displayed
     }
 }
 
@@ -1272,623 +1207,4 @@ export class OffsetRepeatWidget extends RgthreeBaseWidget {
     computeSize(width) {
         return [width, LiteGraph.NODE_WIDGET_HEIGHT];
     }
-}
-
-// === SPLINE MULTI WIDGET ===
-export class PowerSplineHeaderWidget extends RgthreeBaseWidget {
-    constructor(name = "PowerSplineHeaderWidget") {
-        super(name);
-        this.value = { type: "PowerSplineHeaderWidget" };
-        this.type = "custom";
-        this.options = { serialize: false };
-        this.hitAreas = {
-            toggle: { bounds: [0, 0], onDown: this.onToggleDown },
-        };
-    }
-
-    draw(ctx, node, w, posY, height) {
-        const margin = 10;
-        const innerMargin = margin * 0.33;
-        const lowQuality = isLowQuality();
-        const allSplineState = node.allSplinesState ? node.allSplinesState() : false;
-        posY += 2;
-        const midY = posY + height * 0.5;
-        let posX = 10;
-        ctx.save();
-        this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: allSplineState });
-        if (!lowQuality) {
-            posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-            ctx.globalAlpha = app.canvas.editor_alpha * 0.55;
-            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.textAlign = "left";
-            ctx.textBaseline = "middle";
-            ctx.fillText("Toggle All", posX, midY);
-
-            let rposX = node.size[0] - margin - innerMargin - innerMargin;
-            ctx.textAlign = "center";
-
-            // Match the widget layout exactly:
-            // 1. Repeat control (far right) - drawNumberWidgetPart.WIDTH_TOTAL = 56
-            const repeatWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-            ctx.fillText("Repeat", rposX - repeatWidth / 2, midY);
-            rposX -= repeatWidth + 10;
-
-            // 2. Interpolation selector - just text, no arrows (width = 70)
-            const interpTextWidth = 70;
-            ctx.fillText("Interpolation", rposX - interpTextWidth / 2, midY);
-            rposX -= interpTextWidth + 10;
-
-            const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-            ctx.fillText("Z-Pause", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            ctx.fillText("A-Pause", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            ctx.fillText("Offset", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            ctx.fillText("Driven", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-        }
-        ctx.restore();
-    }
-
-    onToggleDown(event, pos, node) {
-        if (node.toggleAllSplines) {
-            node.toggleAllSplines();
-        }
-        this.cancelMouseDown();
-        return true;
-    }
-}
-
-export class PowerSplineWidget extends RgthreeBaseWidget {
-    constructor(name) {
-        super(name);
-        this.type = "custom";
-        this.options = { serialize: true };
-        this.haveMouseMovedValue = false;
-        this.hitAreas = {
-            toggle: { bounds: [0, 0], onDown: this.onToggleDown },
-            name: { bounds: [0, 0], onClick: this.onNameClick },
-            interpVal: { bounds: [0, 0], onClick: this.onInterpClick },
-            repeatDec: { bounds: [0, 0], onClick: this.onRepeatDec },
-            repeatVal: { bounds: [0, 0], onClick: this.onRepeatClick },
-            repeatInc: { bounds: [0, 0], onClick: this.onRepeatInc },
-            repeatAny: { bounds: [0, 0], onMove: this.onRepeatMove },
-            offsetDec: { bounds: [0, 0], onClick: this.onOffsetDec },
-            offsetVal: { bounds: [0, 0], onClick: this.onOffsetClick },
-            offsetInc: { bounds: [0, 0], onClick: this.onOffsetInc },
-            offsetAny: { bounds: [0, 0], onMove: this.onOffsetMove },
-            aPauseDec: { bounds: [0, 0], onClick: this.onAPauseDec },
-            aPauseVal: { bounds: [0, 0], onClick: this.onAPauseClick },
-            aPauseInc: { bounds: [0, 0], onClick: this.onAPauseInc },
-            aPauseAny: { bounds: [0, 0], onMove: this.onAPauseMove },
-            zPauseDec: { bounds: [0, 0], onClick: this.onZPauseDec },
-            zPauseVal: { bounds: [0, 0], onClick: this.onZPauseClick },
-            zPauseInc: { bounds: [0, 0], onClick: this.onZPauseInc },
-            zPauseAny: { bounds: [0, 0], onMove: this.onZPauseMove },
-            drivenToggle: { bounds: [0, 0], onDown: this.onDrivenToggleDown, onRightDown: this.onDrivenToggleRightDown },
-        };
-        this._value = {
-            on: true,
-            name: "Spline",
-            interpolation: 'linear',
-            repeat: 1,
-            offset: 0,
-            a_pause: 0,
-            z_pause: 0,
-            driven: false, // false = off, object = on with config
-            _drivenConfig: { driver: "", rotate: 0, smooth: 0.0 }, // Preserved config
-            points_store: "[]",
-            coordinates: "[]",
-        };
-    }
-
-    set value(v) {
-        // Always merge with defaults to ensure all required fields exist
-        // This prevents issues with old saves, corrupted data, or missing fields
-        // Each widget gets properly isolated values, preventing interpolation contamination
-        this._value = {
-            on: true,
-            name: "Spline",
-            interpolation: 'linear',
-            repeat: 1,
-            offset: 0,
-            a_pause: 0,
-            z_pause: 0,
-            driven: false, // false = off, object = on with config
-            _drivenConfig: { driver: "", rotate: 0, smooth: 0.0 }, // Preserved config
-            points_store: "[]",
-            coordinates: "[]",
-            ...(typeof v === 'object' && v !== null ? v : {})
-        };
-
-        // If driven is an object (old format), extract config and mark as enabled
-        if (typeof this._value.driven === 'object' && this._value.driven !== null) {
-            this._value._drivenConfig = { ...this._value.driven };
-            this._value.driven = this._value._drivenConfig; // Keep object format for "on" state
-        }
-        // Ensure _drivenConfig exists
-        if (!this._value._drivenConfig || typeof this._value._drivenConfig !== 'object') {
-            this._value._drivenConfig = { driver: "", rotate: 0, smooth: 0.0 };
-        }
-    }
-
-    get value() {
-        return this._value;
-    }
-
-    draw(ctx, node, w, posY, height) {
-        ctx.save();
-        const margin = 10;
-        const innerMargin = margin * 0.33;
-        const lowQuality = isLowQuality();
-        const midY = posY + height * 0.5;
-        let posX = margin;
-
-        // Highlight if active
-        if (node.layerManager && node.layerManager.getActiveWidget() === this) {
-            drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height], colorStroke: "#1f77b4" });
-        } else {
-            drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height] });
-        }
-
-        this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: this.value.on });
-        posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-
-        if (lowQuality) {
-            ctx.restore();
-            return;
-        }
-
-        if (!this.value.on) {
-            ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
-        }
-
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.textBaseline = "middle";
-        let rposX = node.size[0] - margin - innerMargin;
-
-        // Draw repeat control (far right)
-        const [repeatL, repeatT, repeatR] = drawNumberWidgetPart(ctx, {
-            posX: rposX, posY, height, value: this.value.repeat || 1, direction: -1,
-        });
-        this.hitAreas.repeatDec.bounds = repeatL;
-        this.hitAreas.repeatVal.bounds = repeatT;
-        this.hitAreas.repeatInc.bounds = repeatR;
-        this.hitAreas.repeatAny.bounds = [repeatL[0], repeatR[0] + repeatR[1] - repeatL[0]];
-        rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
-
-        // Draw interpolation selector
-        const interpModes = ['linear', 'cardinal', 'basis', 'points'];
-        const interpShortNames = ['linear', 'cardinal', 'basis', 'points'];
-        const interpIndex = interpModes.indexOf(this.value.interpolation || 'linear');
-        const interpDisplayText = interpIndex >= 0 ? interpShortNames[interpIndex] : 'linear';
-        const interpTextWidth = 70;
-        ctx.textAlign = "center";
-        ctx.fillText(interpDisplayText, rposX - interpTextWidth / 2, midY);
-        this.hitAreas.interpVal.bounds = [rposX - interpTextWidth, interpTextWidth];
-        rposX -= interpTextWidth + 10;
-
-        // Draw z_pause control
-        const [zPauseL, zPauseT, zPauseR] = drawNumberWidgetPart(ctx, {
-            posX: rposX, posY, height, value: this.value.z_pause || 0, direction: -1,
-        });
-        this.hitAreas.zPauseDec.bounds = zPauseL;
-        this.hitAreas.zPauseVal.bounds = zPauseT;
-        this.hitAreas.zPauseInc.bounds = zPauseR;
-        this.hitAreas.zPauseAny.bounds = [zPauseL[0], zPauseR[0] + zPauseR[1] - zPauseL[0]];
-        rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
-
-        // Draw a_pause control
-        const [aPauseL, aPauseT, aPauseR] = drawNumberWidgetPart(ctx, {
-            posX: rposX, posY, height, value: this.value.a_pause || 0, direction: -1,
-        });
-        this.hitAreas.aPauseDec.bounds = aPauseL;
-        this.hitAreas.aPauseVal.bounds = aPauseT;
-        this.hitAreas.aPauseInc.bounds = aPauseR;
-        this.hitAreas.aPauseAny.bounds = [aPauseL[0], aPauseR[0] + aPauseR[1] - aPauseL[0]];
-        rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
-
-        // Draw offset control
-        // Offset creates pause frames by removing coordinates and adjusting pause metadata
-        // Positive: waits at START for N frames, then animates to N frames before end
-        // Negative: animates normally, then holds at END for N frames
-        const [offsetL, offsetT, offsetR] = drawNumberWidgetPart(ctx, {
-            posX: rposX, posY, height, value: this.value.offset || 0, direction: -1,
-        });
-        this.hitAreas.offsetDec.bounds = offsetL;
-        this.hitAreas.offsetVal.bounds = offsetT;
-        this.hitAreas.offsetInc.bounds = offsetR;
-        this.hitAreas.offsetAny.bounds = [offsetL[0], offsetR[0] + offsetR[1] - offsetL[0]];
-        rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
-
-        // Draw driven toggle
-        const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-        // Align driven toggle with the header label by using precise positioning
-        const drivenPosX = rposX - numberWidth / 2 - 15; // Shift driven toggle a bit to the left (by 5 pixels)
-        this.hitAreas.drivenToggle.bounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height, value: this.value.driven });
-        rposX -= numberWidth + 10;
-
-        // Draw name (left side, after toggle)
-        ctx.textAlign = "left";
-        const nameText = fitString(ctx, this.value.name || "Spline", rposX - posX - innerMargin);
-        ctx.fillText(nameText, posX, midY);
-        this.hitAreas.name.bounds = [posX, 0, rposX - posX, height];
-
-        ctx.restore();
-    }
-
-    onMouseDown(event, pos, node) {
-        // Check if the click was on the toggle button
-        if (this.hitAreas.toggle && this.clickWasWithinBounds(pos, this.hitAreas.toggle.bounds)) {
-            // If it was on the toggle, do not set active widget.
-            // The onToggleDown handler will take care of the toggle action.
-        } else if (node.layerManager) {
-            // Otherwise, set this widget as active
-            node.layerManager.setActiveWidget(this);
-        }
-        return super.onMouseDown?.(event, pos, node);
-    }
-
-    onToggleDown(event, pos, node) {
-        this.value.on = !this.value.on;
-        this.cancelMouseDown();
-        node.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onNameClick(event, pos, node) {
-        // Single click just activates the layer
-        // Double-click rename is handled at the node level via onDblClick
-        return true;
-    }
-
-    onInterpDec() {
-        const modes = ['linear', 'cardinal', 'basis', 'points'];
-        const currentIndex = modes.indexOf(this.value.interpolation || 'linear');
-        const newIndex = (currentIndex - 1 + modes.length) % modes.length;
-        this.value.interpolation = modes[newIndex];
-        this.parent.setDirtyCanvas(true, true);
-        // Update editor immediately if this is the active layer
-        if (this.parent.layerManager?.getActiveWidget() === this && this.parent.editor) {
-            if (this.parent.editor.layerRenderer) {
-                this.parent.editor.layerRenderer.render();
-            }
-        }
-        return true;
-    }
-
-    onInterpInc() {
-        const modes = ['linear', 'cardinal', 'basis', 'points'];
-        const currentIndex = modes.indexOf(this.value.interpolation || 'linear');
-        const newIndex = (currentIndex + 1) % modes.length;
-        this.value.interpolation = modes[newIndex];
-        this.parent.setDirtyCanvas(true, true);
-        // Update editor immediately if this is the active layer
-        if (this.parent.layerManager?.getActiveWidget() === this && this.parent.editor) {
-            if (this.parent.editor.layerRenderer) {
-                this.parent.editor.layerRenderer.render();
-            }
-        }
-        return true;
-    }
-
-    onInterpClick() {
-        // Cycle through modes
-        this.onInterpInc();
-        return true;
-    }
-
-    onRepeatDec() {
-        this.value.repeat = Math.max(1, (this.value.repeat || 1) - 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onRepeatInc() {
-        this.value.repeat = Math.min(20, (this.value.repeat || 1) + 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onRepeatClick() {
-        const canvas = app.canvas;
-        canvas.prompt("Repeat", this.value.repeat || 1, (v) => {
-            this.value.repeat = Math.max(1, Math.min(20, Number(v)));
-            this.parent.setDirtyCanvas(true, true);
-        });
-        return true;
-    }
-
-    onRepeatMove(event, pos, node) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            this.value.repeat = Math.max(1, Math.min(20, (this.value.repeat || 1) + Math.round(event.deltaX / 10)));
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    onOffsetDec() {
-        this.value.offset = Math.max(-100, (this.value.offset || 0) - 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onOffsetInc() {
-        this.value.offset = Math.min(100, (this.value.offset || 0) + 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onOffsetClick() {
-        if (this.haveMouseMovedValue) return;
-        const canvas = app.canvas;
-        // Offset creates pause frames: +5 waits 5 frames then plays, -5 plays then holds 5 frames
-        canvas.prompt("Offset", this.value.offset || 0, (v) => {
-            this.value.offset = Math.max(-100, Math.min(100, Number(v)));
-            this.parent.setDirtyCanvas(true, true);
-        });
-        return true;
-    }
-
-    onOffsetMove(event, pos, node) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            this.value.offset = Math.max(-100, Math.min(100, (this.value.offset || 0) + Math.round(event.deltaX / 10)));
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    onAPauseDec() {
-        this.value.a_pause = Math.max(0, (this.value.a_pause || 0) - 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onAPauseInc() {
-        this.value.a_pause = Math.min(100, (this.value.a_pause || 0) + 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onAPauseClick() {
-        if (this.haveMouseMovedValue) return;
-        const canvas = app.canvas;
-        canvas.prompt("A Pause", this.value.a_pause || 0, (v) => {
-            this.value.a_pause = Math.max(0, Math.min(100, Number(v)));
-            this.parent.setDirtyCanvas(true, true);
-        });
-        return true;
-    }
-
-    onAPauseMove(event, pos, node) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            this.value.a_pause = Math.max(0, Math.min(100, (this.value.a_pause || 0) + Math.round(event.deltaX / 10)));
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    onZPauseDec() {
-        this.value.z_pause = Math.max(0, (this.value.z_pause || 0) - 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onZPauseInc() {
-        this.value.z_pause = Math.min(100, (this.value.z_pause || 0) + 1);
-        this.parent.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onZPauseClick() {
-        if (this.haveMouseMovedValue) return;
-        const canvas = app.canvas;
-        canvas.prompt("Z Pause", this.value.z_pause || 0, (v) => {
-            this.value.z_pause = Math.max(0, Math.min(100, Number(v)));
-            this.parent.setDirtyCanvas(true, true);
-        });
-        return true;
-    }
-
-    onZPauseMove(event, pos, node) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            this.value.z_pause = Math.max(0, Math.min(100, (this.value.z_pause || 0) + Math.round(event.deltaX / 10)));
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    onMouseUp(event, pos, node) {
-        super.onMouseUp(event, pos, node);
-        this.haveMouseMovedValue = false;
-
-        // Set this widget as active when clicked
-        if (node.layerManager) {
-            node.layerManager.setActiveWidget(this);
-        }
-    }
-
-    onDrivenToggleDown(event, pos, node) {
-        // Toggle between false (off) and config object (on)
-        // Preserve the config object so settings aren't lost
-        if (this.value.driven) {
-            // Currently on - save config and turn off
-            if (typeof this.value.driven === 'object') {
-                this.value._drivenConfig = { ...this.value.driven };
-            }
-            this.value.driven = false;
-        } else {
-            // Currently off - restore config and turn on
-            this.value.driven = { ...this.value._drivenConfig };
-        }
-        this.cancelMouseDown();
-        node.setDirtyCanvas(true, true);
-        return true;
-    }
-
-    onDrivenToggleRightDown(event, pos, node) {
-        event.preventDefault(); // Prevent default browser context menu
-        event.stopPropagation(); // Stop event from propagating further
-
-        // Ensure driven is in object format when opening menu
-        // If it's currently false, use the saved config
-        if (!this.value.driven) {
-            // Don't toggle - just prepare the config for the menu
-            // The menu will work with the _drivenConfig
-            if (!this.value._drivenConfig || typeof this.value._drivenConfig !== 'object') {
-                this.value._drivenConfig = { driver: "", rotate: 0, smooth: 0.0 };
-            }
-        } else if (typeof this.value.driven === 'object') {
-            // Update the saved config with current values
-            this.value._drivenConfig = { ...this.value.driven };
-        }
-
-        // Show context menu for the driven toggle specifically
-        showCustomDrivenToggleMenu(event, this, { x: pos[0], y: pos[1] });
-        this.cancelMouseDown();
-        return true;
-    }
-
-    // Also need to make sure we properly handle the right-click event in the base mouse handler
-    mouse(event, pos, node) {
-        var _a, _b, _c;
-        const canvas = app.canvas;
-        if (event.type == "pointerdown") {
-            this.mouseDowned = [...pos];
-            this.isMouseDownedAndOver = true;
-            this.downedHitAreasForMove.length = 0;
-            this.downedHitAreasForClick.length = 0;
-            let anyHandled = false;
-            // Check if it's a right click (button 2)
-            const isRightClick = event.button === 2;
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    if (part.onMove) {
-                        this.downedHitAreasForMove.push(part);
-                    }
-                    if (part.onClick) {
-                        this.downedHitAreasForClick.push(part);
-                    }
-                    // Check for right-click BEFORE calling onDown to prevent toggle from firing on right-click
-                    if (isRightClick && part.onRightDown) {
-                        const thisHandled = part.onRightDown.apply(this, [event, pos, node, part]);
-                        anyHandled = anyHandled || thisHandled == true;
-                    } else if (part.onDown) {
-                        // Only call onDown if it's NOT a right-click with onRightDown
-                        const thisHandled = part.onDown.apply(this, [event, pos, node, part]);
-                        anyHandled = anyHandled || thisHandled == true;
-                    }
-                    part.wasMouseClickedAndIsOver = true;
-                }
-            }
-            return (_a = this.onMouseDown(event, pos, node)) !== null && _a !== void 0 ? _a : anyHandled;
-        }
-        if (event.type == "pointerup") {
-            if (!this.mouseDowned)
-                return true;
-            this.downedHitAreasForMove.length = 0;
-            const wasMouseDownedAndOver = this.isMouseDownedAndOver;
-            this.cancelMouseDown();
-            let anyHandled = false;
-            for (const part of Object.values(this.hitAreas)) {
-                if (part.onUp && this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onUp.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-                part.wasMouseClickedAndIsOver = false;
-            }
-            for (const part of this.downedHitAreasForClick) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onClick.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-            }
-            this.downedHitAreasForClick.length = 0;
-            if (wasMouseDownedAndOver) {
-                const thisHandled = this.onMouseClick(event, pos, node);
-                anyHandled = anyHandled || thisHandled == true;
-            }
-            return (_b = this.onMouseUp(event, pos, node)) !== null && _b !== void 0 ? _b : anyHandled;
-        }
-        if (event.type == "pointermove") {
-            this.isMouseDownedAndOver = !!this.mouseDowned;
-            if (this.mouseDowned &&
-                (pos[0] < 15 ||
-                    pos[0] > node.size[0] - 15 ||
-                    pos[1] < this.last_y ||
-                    pos[1] > this.last_y + LiteGraph.NODE_WIDGET_HEIGHT)) {
-                this.isMouseDownedAndOver = false;
-            }
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.downedHitAreasForMove.includes(part)) {
-                    part.onMove.apply(this, [event, pos, node, part]);
-                }
-                if (this.downedHitAreasForClick.includes(part)) {
-                    part.wasMouseClickedAndIsOver = this.clickWasWithinBounds(pos, part.bounds);
-                }
-            }
-            return (_c = this.onMouseMove(event, pos, node)) !== null && _c !== void 0 ? _c : true;
-        }
-        return false;
-    }
-    serializeValue(node, index) {
-        // Return a deep copy to prevent reference sharing between widgets during serialization
-        // This ensures each widget has independent interpolation and other values
-        const serialized = JSON.parse(JSON.stringify(this.value));
-        return serialized;
-    }
-
-    computeSize(width) {
-        return [width, LiteGraph.NODE_WIDGET_HEIGHT];
-    }
-}
-
-export function chainCallback(object, property, callback) {
-  if (object == undefined) {
-      //This should not happen.
-      console.error("Tried to add callback to non-existant object")
-      return;
-  }
-  if (property in object) {
-      const callback_orig = object[property]
-      object[property] = function () {
-          const r = callback_orig.apply(this, arguments);
-          callback.apply(this, arguments);
-          return r
-      };
-  } else {
-      object[property] = callback;
-  }
-}
-
-export function hideWidgetForGood(node, widget, suffix = '') {
-  widget.origType = widget.type;
-  widget.type = 'hidden' + suffix;
-  widget.hidden = true;
-  
-  // Monkeypatch draw to do nothing
-  widget.draw = () => {};
-  
-  // Monkeypatch computeSize to return [0, -4]
-  // This is a hack to make the widget not take up any space
-  // We need to return -4 instead of 0 because of how LiteGraph calculates node height
-  // In recent versions of LiteGraph, it adds 4 to the widget height
-  widget.computeSize = () => [0, -4];
-  
-  // Prevent the widget from being serialized
-  if (!widget.options) {
-    widget.options = {};
-  }
-  // widget.options.serialize = false;
-  
-  // Hide the widget from the node's list of widgets
-  // This is another hack to prevent the widget from being drawn
-  // We can't just remove it from the list, because other parts of the code
-  // might still need to access it
-  const index = node.widgets.indexOf(widget);
-  if (index > -1) {
-    node.widgets.splice(index, 1);
-    node.widgets.push(widget);
-  }
 }

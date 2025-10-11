@@ -152,10 +152,13 @@ class WanVideoPowerLoraLoader:
                 print(f"[WanVideoPowerLoraLoader] LoRA '{lora_name}' is_low flag: {is_low}, low_variant_name: {low_variant_name}")
 
                 if is_low and low_variant_name:
+                    # Use low_strength for the low variant LoRA, fallback to strength_model if not available
+                    low_strength = value.get('low_strength', strength_model)
+                    
                     # Create entry for the low variant LoRA
                     low_lora_entry = {
                         "path": folder_paths.get_full_path("loras", low_variant_name),
-                        "strength": strength_model,
+                        "strength": low_strength,
                         "name": os.path.splitext(low_variant_name)[0],
                         "blocks": blocks.get("selected_blocks", {}) if blocks else {},
                         "layer_filter": blocks.get("layer_filter", "") if blocks else "",
@@ -163,12 +166,15 @@ class WanVideoPowerLoraLoader:
                         "merge_loras": merge_loras,
                     }
 
-                    # Add clip strength if it's different from model strength
+                    # Add clip strength if the original high LoRA was using separate model/clip strengths
                     if strength_clip != strength_model:
+                        # For low variant with separate model/clip strengths, we should probably use the same clip strength
+                        # but some users might want to apply the low_strength concept to clip as well
+                        # For now, maintain the same clip strength relationship as the original
                         low_lora_entry["strength_clip"] = strength_clip
 
                     low_loras_list.append(low_lora_entry)
-                    print(f"[WanVideoPowerLoraLoader] Added low variant '{low_variant_name}' to low_loras_list")
+                    print(f"[WanVideoPowerLoraLoader] Added low variant '{low_variant_name}' to low_loras_list with strength: {low_strength}")
 
         return (loras_list, low_loras_list)
 

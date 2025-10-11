@@ -37,7 +37,6 @@ export default class SplineEditor2 {
 
     // On drop upload files
     this.node.onDragDrop = (e) => {
-      console.log("onDragDrop called");
       let handled = false;
       for (const file of e.dataTransfer.files) {
         if (file.type.startsWith("image/")) {
@@ -161,6 +160,9 @@ export default class SplineEditor2 {
       this.points = this.getActivePoints();
 
       this.updatePath();
+      
+      // Ensure canvas is rendered with new dimensions
+      this.vis.render();
     }
     // Preserve existing callback (which may set userAdjustedDims flag)
     const originalHeightCallback = this.heightWidget.callback;
@@ -189,6 +191,9 @@ export default class SplineEditor2 {
       this.points = this.getActivePoints();
 
       this.updatePath();
+      
+      // Ensure canvas is rendered with new dimensions
+      this.vis.render();
     }
 
     // Initialize or reset points array
@@ -248,7 +253,6 @@ export default class SplineEditor2 {
       .strokeStyle("gray")
       .lineWidth(2)
       .antialias(false)
-      .margin(10)
       .event("mousedown", (e) => {
         // Get mouse position (scaled for canvas)
         const mouseX = this.vis.mouse().x / app.canvas.ds.scale;
@@ -272,7 +276,6 @@ export default class SplineEditor2 {
           if (clickedWidget) {
             // Switch to the clicked layer
             this.node.layerManager.setActiveWidget(clickedWidget);
-            console.log(`Switched to layer: ${clickedWidget.value.name}`);
 
             // Reset click tracking
             this.lastCanvasClickTime = 0;
@@ -578,9 +581,9 @@ export default class SplineEditor2 {
     var svgElement = this.vis.canvas();
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
+    svgElement.style['display'] = "block"
     this.node.splineEditor2.parentEl.appendChild(svgElement);
-    // Set explicit height to ensure proper space is reserved
-    this.node.splineEditor2.parentEl.style.height = `${this.height + 20}px`; // +20 for padding
+    // Let the size manager handle height - don't set explicit height here
     this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 
     // Update node size to match current dimensions
@@ -659,10 +662,8 @@ export default class SplineEditor2 {
     // Render active and inactive layers
     this.layerRenderer.render();
 
-    // Update container height to match canvas height
-    if (this.node.splineEditor2 && this.node.splineEditor2.parentEl) {
-      this.node.splineEditor2.parentEl.style.height = `${this.height + 20}px`;
-    }
+    // Let the size manager handle container height
+    // Don't set explicit height here - it will be managed by the size manager
 
     if (this.pointsLayer) {
       // Clear any previously drawn sample points if the layer exists
@@ -766,6 +767,7 @@ export default class SplineEditor2 {
   };
 
   handleImageLoad = (img, file, base64String) => {
+
     // Image dimensions are used for scaling, not resizing the panel
     this.drawRuler = false;
 
@@ -773,8 +775,11 @@ export default class SplineEditor2 {
     this.originalImageWidth = img.width;
     this.originalImageHeight = img.height;
 
+
     const imageUrl = file ? URL.createObjectURL(file) : `data:${this.node.imgData.type};base64,${base64String}`;
+
     this.backgroundImage.url(imageUrl);
+
 
     // Calculate new scale and offsets
     this.recenterBackgroundImage();
@@ -782,16 +787,32 @@ export default class SplineEditor2 {
     // Reload and denormalize points from active widget to fit the new image
     const activeWidget = this.getActiveWidget();
     if (activeWidget && activeWidget.value.points_store) {
+
         try {
             let storedPoints = JSON.parse(activeWidget.value.points_store);
             this.points = this.denormalizePoints(storedPoints);
+
         } catch (e) {
             console.error("Error parsing points from active widget during image load:", e);
         }
+    } else {
+
     }
 
     // Call updatePath after image details are set and rendered
+
     this.updatePath();
+    
+    // Force a canvas render to ensure the image is displayed
+    if (this.vis) {
+      this.vis.render();
+    }
+    
+    // Force layer renderer to ensure all layers are displayed
+    if (this.layerRenderer) {
+      this.layerRenderer.render();
+    }
+    
   };
 
   processImage = (img, file) => {
@@ -851,6 +872,10 @@ export default class SplineEditor2 {
         this.renderPreviousSplines();
         this.layerRenderer.render();
       };
+      img.onerror = (error) => {
+        console.error(`refreshBackgroundImage: Failed to load image:`, error);
+      };
+    } else {
     }
   };
 
@@ -987,7 +1012,6 @@ export default class SplineEditor2 {
   renderPreviousSplines = () => {
     // Clear previous spline layer if it exists
     if (this.previousSplinesLayer) {
-      console.log("Clearing existing previousSplinesLayer");
       this.vis.children = this.vis.children.filter(child => child !== this.previousSplinesLayer);
       this.previousSplinesLayer = null;
     }
@@ -995,20 +1019,14 @@ export default class SplineEditor2 {
     // Only render if we have any previous data (coordinates or p_coordinates)
     if ((!this.previousSplineData || this.previousSplineData.length === 0) &&
         (!this.previousPCoordinates || this.previousPCoordinates.length === 0)) {
-      console.log("No previous data to render");
       return;
     }
 
-    console.log("Creating new layer for previous data");
-
-    // Create a new layer for previous splines
     this.previousSplinesLayer = this.vis.add(pv.Panel);
 
     // Render coordinates (animated paths) as lines
     if (this.previousSplineData && this.previousSplineData.length > 0) {
-      console.log("Adding lines for", this.previousSplineData.length, "coordinate splines");
       this.previousSplineData.forEach((splineCoords, idx) => {
-        console.log(`Adding line ${idx} with ${splineCoords.length} points`);
         this.previousSplinesLayer.add(pv.Line)
           .data(splineCoords)
           .left(d => {
@@ -1054,14 +1072,11 @@ export default class SplineEditor2 {
             .fillStyle("rgba(255, 255, 255, 0.3)");
         }
       });
-      console.log("Finished adding coordinate lines to previousSplinesLayer");
     }
 
     // Render p_coordinates (static points) as dots
     if (this.previousPCoordinates && this.previousPCoordinates.length > 0) {
-      console.log("Adding dots for", this.previousPCoordinates.length, "p_coordinate lists");
       this.previousPCoordinates.forEach((pointList, idx) => {
-        console.log(`Adding ${pointList.length} dots from p_coordinates list ${idx}`);
         this.previousSplinesLayer.add(pv.Dot)
           .data(pointList)
           .left(d => {
@@ -1081,12 +1096,10 @@ export default class SplineEditor2 {
           .strokeStyle("rgba(255, 255, 255, 0.5)")
           .fillStyle("rgba(255, 255, 255, 0.3)");
       });
-      console.log("Finished adding p_coordinate dots to previousSplinesLayer");
     }
   };
 
   drawPreviousSpline = (coord_in) => {
-    console.log("drawPreviousSpline called with:", coord_in);
     try {
       const coordInData = JSON.parse(coord_in);
       let previousSplinePoints = [];
@@ -1094,18 +1107,15 @@ export default class SplineEditor2 {
 
       // Parse the incoming coordinate data
       if (Array.isArray(coordInData)) {
-        console.log("coordInData is array, wrapping in single spline");
         previousSplinePoints = [coordInData];
       } else if (typeof coordInData === 'object' && coordInData !== null) {
         // Extract coordinates (animated paths)
         if ('coordinates' in coordInData) {
           if (Array.isArray(coordInData.coordinates) && coordInData.coordinates.length > 0 && !Array.isArray(coordInData.coordinates[0])) {
               // single spline
-              console.log("Single spline detected from coordinates property");
               previousSplinePoints = [coordInData.coordinates];
           } else {
               // multiple splines
-              console.log("Multiple splines detected from coordinates property");
               previousSplinePoints = coordInData.coordinates;
           }
         }
@@ -1114,23 +1124,12 @@ export default class SplineEditor2 {
         if ('p_coordinates' in coordInData) {
           if (Array.isArray(coordInData.p_coordinates) && coordInData.p_coordinates.length > 0 && !Array.isArray(coordInData.p_coordinates[0])) {
               // single list of points
-              console.log("Single p_coordinates list detected");
               previousPPoints = [coordInData.p_coordinates];
           } else {
               // multiple lists
-              console.log("Multiple p_coordinates lists detected");
               previousPPoints = coordInData.p_coordinates;
           }
         }
-      }
-
-      console.log("previousSplinePoints:", previousSplinePoints);
-      console.log("Number of coordinate splines:", previousSplinePoints.length);
-      console.log("previousPPoints:", previousPPoints);
-      console.log("Number of p_coordinate lists:", previousPPoints.length);
-      if (previousSplinePoints.length > 0) {
-        console.log("First spline has", previousSplinePoints[0].length, "points");
-        console.log("First few points:", previousSplinePoints[0].slice(0, 5));
       }
 
       // Store the parsed data separately
@@ -1139,9 +1138,7 @@ export default class SplineEditor2 {
 
       // Render the previous splines
       this.renderPreviousSplines();
-      console.log("About to render vis");
       this.vis.render();
-      console.log("Rendered vis");
 
     } catch (e) {
       console.error("Error parsing coord_in:", e);

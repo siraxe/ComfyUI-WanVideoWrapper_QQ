@@ -49,7 +49,7 @@ If pivot_coordinates are provided:
                 relative_pivot=True):
         # Extract config parameters
         total_frames = path_frame_config["total_frames"]
-        easing_function = path_frame_config["easing_function"]
+        easing_function = path_frame_config.get("easing_function", "in_out")  # Default to in_out for consistency
         easing_path = path_frame_config["easing_path"]
         easing_strength = path_frame_config.get("easing_strength", 1.0)  # Default to 1.0 for backward compatibility
 

@@ -41,10 +41,10 @@ class InterpMath:
         output_points = []
         easing_map = {
             "linear": lambda t, s=1.0: t,
-            "ease_in": lambda t, s=easing_strength: InterpMath._ease_in(t, s),
-            "ease_out": lambda t, s=easing_strength: InterpMath._ease_out(t, s),
-            "ease_in_out": lambda t, s=easing_strength: InterpMath._ease_in_out(t, s),
-            "ease_out_in": lambda t, s=easing_strength: InterpMath._ease_out_in(t, s)
+            "in": lambda t, s=easing_strength: InterpMath._ease_in(t, s),
+            "out": lambda t, s=easing_strength: InterpMath._ease_out(t, s),
+            "in_out": lambda t, s=easing_strength: InterpMath._ease_in_out(t, s),
+            "out_in": lambda t, s=easing_strength: InterpMath._ease_out_in(t, s)
         }
         apply_easing = easing_map.get(method, lambda t, s=1.0: t)
 
