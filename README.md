@@ -4,11 +4,11 @@ A collection of custom nodes for ComfyUI providing video manipulation, LoRA load
 
 <table>
 <tr>
-<td width="40%">
+<td width="50%">
 
 https://github.com/user-attachments/assets/16f0da4c-38f1-4789-97dc-c331ad8a6d92
 </td>
-<td width="60%">
+<td width="50%">
 
 https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 </td>
@@ -18,18 +18,20 @@ https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 ### Power Spline Editor
 <table>
 <tr>
-<td width="60%">
+<td width="50%">
 
 ![img](git_assets/img/spline.png)
 
 </td>
-<td width="40%" valign="top">
+<td width="50%" valign="top">
 
 [Power Spline Editor - usage](git_assets/docs/power_spline_editor.md)
 - **Multi-layer canvas**: Draw unlimited paths with per-layer controls
 - **Interpolation modes**: `linear`, `cardinal` (Catmull-Rom), `basis` (B-spline), `points` (static)
 - **Repeat system**: Loop animations with automatic closed-path handling
-- **Driver/driven**: One path controls another with rotation and smoothing
+- **Driver/driven**: One path controls another with rotation, scaling, and smoothing
+- **Easing functions**: Smooth transitions with various easing curves for path animation
+- **Right-click controls**: Context menu for driver path with additional options
 - **Offset timing**: Positive/negative timing shifts with pause frame control
 - **Pause frames**: Start/end pause per layer for precise animation timing
 </td>
@@ -39,12 +41,12 @@ https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 ### Power Lora Loader
 <table>
 <tr>
-<td width="60%">
+<td width="50%">
 
 ![img](git_assets/img/lora.png)
 
 </td>
-<td width="40%" valign="top">
+<td width="50%" valign="top">
 
 - **LoRAs**: Dynamic UI with rgthree-style interface
 - **Auto-detection**: Finds Low variant pairs from High LoRAs automatically
@@ -59,12 +61,12 @@ https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 ### Wan Video VACE Frame Replace
 <table>
 <tr>
-<td width="60%">
+<td width="50%">
 
 ![img](git_assets/img/vace.png)
 
 </td>
-<td width="40%" valign="top">
+<td width="50%" valign="top">
 
 [Wan Video VACE Frame Replace - example](git_assets/examples/frame_replace.json)
 - **Single frames**: `5` (gray), `5+` (replacement image)
