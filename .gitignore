@@ -6,3 +6,4 @@ nodes/__pycache__/
 .env 22
 wanvideo_cached_samples.pt
 ref_image.jpg
+QWEN.md

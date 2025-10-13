@@ -2,7 +2,7 @@ import { app } from '../../../scripts/app.js';
 
 // == DEFAULTS ---
 const DRIVEN_DEFAULTS = { driver: "", rotate: 0, d_scale: 1.0 };
-const EASING_DEFAULTS = { path: "each", strength: 1.0 };
+const EASING_DEFAULTS = { path: "each", strength: 1.0, acceleration: 0.00 };
 const SCALE_DEFAULT = 1.00;
 
 
@@ -128,7 +128,7 @@ export function initializeEasingConfig(widgetValue, loadedValue = null) {
     // Ensure the easingConfig object exists and apply defaults over the loaded data.
     // Handle case where easingConfig might not exist at all (new layers)
     if (!widgetValue.easingConfig || typeof widgetValue.easingConfig !== 'object') {
-        widgetValue.easingConfig = { path: "each", strength: 1.0 };
+        widgetValue.easingConfig = { path: "each", strength: 1.0, acceleration: 0.00 };
     }
     
     const loadedConfig = widgetValue.easingConfig;

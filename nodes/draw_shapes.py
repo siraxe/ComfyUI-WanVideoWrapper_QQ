@@ -435,7 +435,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     coordinates_data = json.dumps(parsed["coordinates"])
                 if "p_coordinates" in parsed:
                     p_coordinates_data = json.dumps(parsed["p_coordinates"])
-                for k in ("start_p_frames", "end_p_frames", "offsets", "interpolations", "easing_functions", "easing_paths", "easing_strengths", "scales", "drivers", "p_coordinates_use_driver", "p_driver_path", "p_driver_smooth", "coord_width", "coord_height"):
+                for k in ("start_p_frames", "end_p_frames", "offsets", "interpolations", "easing_functions", "easing_paths", "easing_strengths", "accelerations", "scales", "drivers", "p_coordinates_use_driver", "p_driver_path", "p_driver_smooth", "coord_width", "coord_height"):
                     if k in parsed:
                         metadata[k] = parsed[k]
             else:
@@ -693,7 +693,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                   start_p_frames_meta, end_p_frames_meta,
                                   offsets_meta, interpolations_meta, drivers_meta,
                                   easing_functions_meta, easing_paths_meta, easing_strengths_meta,
-                                  scales_meta,
+                                  scales_meta, accelerations_meta=None,
                                   coord_width: Optional[float] = None, coord_height: Optional[float] = None,
                                   frame_width: int = 512, frame_height: int = 512) -> Tuple[List[Path], List[Tuple[int, int]], List[Optional[Dict[str, Any]]], List[float]]:
         """
@@ -714,6 +714,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         easing_functions_list = self._normalize_easing_lists(num_paths, easing_functions_meta, "easing_function")
         easing_paths_list = self._normalize_easing_lists(num_paths, easing_paths_meta, "easing_path")
         easing_strengths_list = self._normalize_easing_lists(num_paths, easing_strengths_meta, "easing_strength")
+        accelerations_list = self._normalize_easing_lists(num_paths, accelerations_meta, 0.00)
         scales_list = self._normalize_easing_lists(num_paths, scales_meta, 1.0)
 
         processed_coords_list: List[Path] = []
@@ -769,6 +770,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 processed_path = draw_utils.InterpMath.interpolate_or_downsample_path(
                     interpolated_path, path_animation_frames, path_easing_function, effective_easing_path, bounce_between=0.0, easing_strength=path_easing_strength, interpolation=path_interpolation
                 )
+                
+                # Apply acceleration remapping if acceleration is not zero
+                path_acceleration = float(accelerations_list[i]) if i < len(accelerations_list) else 0.00
+                if abs(path_acceleration) > 0.001:  # Only apply if acceleration is not close to zero
+                    processed_path = draw_utils.InterpMath.apply_acceleration_remapping(processed_path, path_acceleration)
 
                 # Prepare per-path driver interpolation (for per-frame offsets)
                 driver_info_for_frame = None
@@ -1007,6 +1013,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         easing_functions_meta = meta.get("easing_functions", "in_out")
         easing_paths_meta = meta.get("easing_paths", "full") 
         easing_strengths_meta = meta.get("easing_strengths", 1.0)
+        accelerations_meta = meta.get("accelerations", 0.00)
         
         processed_coords_list, path_pause_frames, coords_driver_info_list, scales_list = self._build_interpolated_paths(
             coords_list_raw, total_frames,
@@ -1017,6 +1024,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             easing_paths_meta,
             easing_strengths_meta,
             meta.get("scales", 1.0),
+            accelerations_meta,
             coord_width, coord_height, frame_width, frame_height
         )
         

@@ -48,6 +48,16 @@ class InterpMath:
         }
         apply_easing = easing_map.get(method, lambda t, s=1.0: t)
 
+        # Create inverted easing functions for "alternate" mode
+        inverted_easing_map = {
+            "linear": lambda t, s=1.0: t,
+            "in": lambda t, s=easing_strength: InterpMath._ease_out(t, s),
+            "out": lambda t, s=easing_strength: InterpMath._ease_in(t, s),
+            "in_out": lambda t, s=easing_strength: InterpMath._ease_out_in(t, s),
+            "out_in": lambda t, s=easing_strength: InterpMath._ease_in_out(t, s)
+        }
+        apply_inverted_easing = inverted_easing_map.get(method, lambda t, s=1.0: t)
+
         total_path_length = 0
         segment_lengths = []
         for i in range(n_points - 1):
@@ -81,6 +91,17 @@ class InterpMath:
         elif easing_path == 'full':
             if interpolation != 'linear':
                 control_point_indices = [i for i, p in enumerate(points) if p.get('highlighted')]
+        elif easing_path == 'alternate':
+            # For alternate mode, use the same segment boundaries as 'each' mode
+            if interpolation == 'basis':
+                control_point_indices = [i for i, p in enumerate(points) if p.get('highlighted')]
+                # If no highlighted points for basis+each, we let control_point_indices be empty, 
+                # which causes a fallback to 'full' path easing later.
+            else:
+                control_point_indices = [i for i, p in enumerate(points) if p.get('is_control')]
+                if not control_point_indices:
+                    # Fallback for non-basis interpolations
+                    control_point_indices = list(range(n_points))
 
         if len(control_point_indices) > 1:
             if control_point_indices[0] != 0:
@@ -119,7 +140,8 @@ class InterpMath:
                 segment_frame_ranges.append({
                     'segment': seg,
                     'start_frame': frames_allocated,
-                    'frame_count': num_frames
+                    'frame_count': num_frames,
+                    'segment_idx': idx  # Track the segment index for alternating easing
                 })
                 frames_allocated += num_frames
 
@@ -145,7 +167,16 @@ class InterpMath:
                 else:
                     t_segment_local = 0.0
 
-                t_segment_eased = apply_easing(t_segment_local, easing_strength)
+                # Apply normal easing or inverted easing based on the segment index for 'alternate' mode
+                if easing_path == 'alternate':
+                    # Alternate between normal and inverted easing based on segment index
+                    if target_segment_info['segment_idx'] % 2 == 0:  # Even index (0, 2, 4, ...)
+                        t_segment_eased = apply_easing(t_segment_local, easing_strength)
+                    else:  # Odd index (1, 3, 5, ...)
+                        t_segment_eased = apply_inverted_easing(t_segment_local, easing_strength)
+                else:
+                    # For 'each' and 'full' modes, use the normal easing
+                    t_segment_eased = apply_easing(t_segment_local, easing_strength)
 
                 dist_before_segment = 0
                 for seg in major_segments:
@@ -183,6 +214,99 @@ class InterpMath:
             if target_frames > 1:
                 output_points[-1] = points[-1].copy()
 
+        return output_points
+
+    @staticmethod
+    def apply_acceleration_remapping(points, acceleration):
+        """
+        Apply acceleration-based timing remapping to a sequence of points.
+        
+        For positive acceleration (> 0.00):
+        - Movement is faster at the end by squishing end coordinates and stretching starting ones
+        
+        For negative acceleration (< 0.00):
+        - Movement is slower at the end by stretching end coordinates (and compressing starting ones)
+        
+        For zero acceleration (0.00):
+        - Skip the function (return original points)
+        
+        Args:
+            points: List of points with x, y coordinates
+            acceleration: Acceleration value from -1.0 to 1.0
+        
+        Returns:
+            List of remapped points
+        """
+        if abs(acceleration) < 0.001:  # Close to zero, skip remapping
+            return points
+        
+        if len(points) <= 2:
+            return points
+        
+        n_points = len(points)
+        output_points = []
+        
+        for i in range(n_points):
+            # Calculate normalized position along the path (0 to 1)
+            t = i / (n_points - 1) if n_points > 1 else 0
+            
+            # Apply acceleration remapping with clamped values to prevent math errors
+            # Convert acceleration to proper easing behavior:
+            # Positive acceleration should create ease-out (start fast, end slow)
+            # Negative acceleration should create ease-in (start slow, end fast)
+            clamped_acceleration = max(-0.99, min(0.99, acceleration))
+            
+            if clamped_acceleration > 0:
+                # For positive acceleration, create ease-out behavior (start fast, end slow)
+                # Use exponent < 1 to make time progress faster at the start and slower at the end
+                exponent = max(0.01, 1.0 - clamped_acceleration)
+            else:
+                # For negative acceleration, create ease-in behavior (start slow, end fast)
+                # Use exponent > 1 to make time progress slower at the start and faster at the end
+                # abs(negative_acceleration) is positive, so 1.0 + positive_value > 1
+                exponent = 1.0 + abs(clamped_acceleration)
+                
+            # Handle edge cases to avoid math errors
+            if t == 0.0:
+                remap_t = 0.0
+            elif t == 1.0:
+                remap_t = 1.0
+            else:
+                remap_t = pow(t, exponent)
+            
+            # Ensure remap_t stays within bounds
+            remap_t = max(0.0, min(1.0, remap_t))
+            
+            # Map remap_t back to original point index
+            original_index = remap_t * (n_points - 1)
+            index_low = int(original_index)
+            index_high = min(index_low + 1, n_points - 1)
+            t_local = original_index - index_low
+            
+            # Linear interpolation between the two nearest points
+            if index_low == index_high:
+                output_points.append(points[index_low].copy())
+            else:
+                p1 = points[index_low]
+                p2 = points[index_high]
+                
+                x = p1['x'] * (1.0 - t_local) + p2['x'] * t_local
+                y = p1['y'] * (1.0 - t_local) + p2['y'] * t_local
+                
+                new_point = {'x': x, 'y': y}
+                
+                # Preserve any additional properties from the original points
+                for key in p1:
+                    if key not in ['x', 'y']:
+                        new_point[key] = p1[key]
+                
+                output_points.append(new_point)
+        
+        # Ensure the first and last points match the original to maintain path integrity
+        if output_points and len(output_points) > 1:
+            output_points[0] = points[0].copy()
+            output_points[-1] = points[-1].copy()
+        
         return output_points
 
 def interpolate_points(points, interpolation, easing_path='full', steps_per_segment=3):

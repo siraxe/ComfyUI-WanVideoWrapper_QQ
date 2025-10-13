@@ -110,7 +110,7 @@ https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 - (EXPERIMENTAL) Maybe there's native ways to do this , but it seems to work
 - **Multi-frame I2V**: Start/mid/end image conditioning with position control
 - **Temporal feathering**: Cosine interpolation for smooth frame transitions
-- **Latent strength**: Per-frame multipliers (start/mid/end) for motion control
+- **Latent strength**: Per-frame multipliers (start/mid/end) for motion control (default setting work but can be adjusted)
 </td>
 </tr>
 </table>

@@ -401,6 +401,8 @@ class PowerSplineEditor:
         all_coord_easing_paths = [] # Initialize list for coordinates easing paths
         all_p_easing_strengths = [] # Initialize list for p_coordinates easing strengths
         all_coord_easing_strengths = [] # Initialize list for coordinates easing strengths
+        all_p_accelerations = [] # Initialize list for p_coordinates accelerations
+        all_coord_accelerations = [] # Initialize list for coordinates accelerations
         all_p_scales = [] # Initialize list for p_coordinates scales
         all_coord_scales = [] # Initialize list for coordinates scales
         all_p_drivers = []  # Driver info for p_coordinates
@@ -456,9 +458,10 @@ class PowerSplineEditor:
             
             # Get easing parameters
             easing_function = spline_data.get('easing', 'in_out') # Get easing function using simple name
-            easing_config = spline_data.get('easingConfig', {'path': 'full', 'strength': 1.0}) # Get easing config
+            easing_config = spline_data.get('easingConfig', {'path': 'full', 'strength': 1.0, 'acceleration': 0.00}) # Get easing config
             easing_path = easing_config.get('path', 'full') # Get easing path ('each' or 'full')
             easing_strength = easing_config.get('strength', 1.0) # Get easing strength
+            acceleration = easing_config.get('acceleration', 0.00) # Get acceleration value
             
             # Get scale parameter
             scale = spline_data.get('scale', 1.00) # Get scale value
@@ -553,6 +556,7 @@ class PowerSplineEditor:
                     all_p_easing_functions.append(easing_function) # Collect easing function
                     all_p_easing_paths.append(easing_path) # Collect easing path
                     all_p_easing_strengths.append(easing_strength) # Collect easing strength
+                    all_p_accelerations.append(acceleration) # Collect acceleration value
                     all_p_scales.append(scale) # Collect scale value
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
                 else:
@@ -564,6 +568,7 @@ class PowerSplineEditor:
                     all_coord_easing_functions.append(easing_function) # Collect easing function
                     all_coord_easing_paths.append(easing_path) # Collect easing path
                     all_coord_easing_strengths.append(easing_strength) # Collect easing strength
+                    all_coord_accelerations.append(acceleration) # Collect acceleration value
                     all_coord_scales.append(scale) # Collect scale value
                     all_coord_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
 
@@ -622,6 +627,7 @@ class PowerSplineEditor:
             coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": all_coord_easing_functions}
             coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": all_coord_easing_paths}
             coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": all_coord_easing_strengths}
+            coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": all_coord_accelerations}
             coord_out_data["scales"] = {"p": all_p_scales, "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": all_coord_drivers}
         elif all_p_paths:
@@ -633,6 +639,7 @@ class PowerSplineEditor:
             coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": []}
             coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": []}
             coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": []}
+            coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": []}
             coord_out_data["scales"] = {"p": all_p_scales, "c": []}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": []}
         elif all_coord_paths:
@@ -644,6 +651,7 @@ class PowerSplineEditor:
             coord_out_data["easing_functions"] = {"p": [], "c": all_coord_easing_functions}
             coord_out_data["easing_paths"] = {"p": [], "c": all_coord_easing_paths}
             coord_out_data["easing_strengths"] = {"p": [], "c": all_coord_easing_strengths}
+            coord_out_data["accelerations"] = {"p": [], "c": all_coord_accelerations}
             coord_out_data["scales"] = {"p": [], "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": [], "c": all_coord_drivers}
         else:
@@ -655,6 +663,7 @@ class PowerSplineEditor:
             coord_out_data["easing_functions"] = [] # Default empty list for easing functions
             coord_out_data["easing_paths"] = [] # Default empty list for easing paths
             coord_out_data["easing_strengths"] = [] # Default empty list for easing strengths
+            coord_out_data["accelerations"] = [] # Default empty list for accelerations
             coord_out_data["scales"] = [] # Default empty list for scales
             coord_out_data["drivers"] = [] # Default empty list
             print("Warning: No paths to output")

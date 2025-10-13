@@ -472,7 +472,6 @@ class OptionsWidget extends RgthreeBaseWidget {
             merge_loras: node.properties['merge_loras'] !== false ? true : false,
             overwrite_duplicates: node.properties['overwrite_duplicates'] || false
         };
-        console.log(`[JS] OptionsWidget serializing: `, value);
         return value;
     }
 
@@ -987,22 +986,6 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         if (v.low_strength === undefined) {
             v.low_strength = 1;
         }
-
-        // Keep the original selected LoRA - let Python backend handle the outputs
-        if (v.is_low && v.low_variant_name) {
-            console.log(`[JS] High LoRA '${v.lora}' has low variant '${v.low_variant_name}' - sending both to backend`);
-            console.log(`[JS] High strength: ${v.strength}, Low strength: ${v.low_strength}`);
-        }
-
-        // Enhanced debug logging
-        console.log(`[JS] serializeValue for ${this.name}:`, {
-            final_lora: v.lora,
-            final_strength: v.strength,
-            original_low_strength: v.low_strength,
-            is_low: v.is_low,
-            low_variant_name: v.low_variant_name,
-            full_object: v
-        });
 
         return v;
     }

@@ -507,11 +507,11 @@ export function showCustomEasingMenu(event, widget, position) {
         font-size: 11px !important;
     `;
 
-    // Create grid container (2 columns: Path | Strength)
+    // Create grid container (3 columns: Path | Strength | Accel)
     const container = document.createElement('div');
     container.style.cssText = `
         display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
+        grid-template-columns: 1fr 1fr 1fr !important;
         grid-template-rows: auto auto !important;
         gap: 2px !important;
         width: 100% !important;
@@ -535,10 +535,12 @@ export function showCustomEasingMenu(event, widget, position) {
     // Row 1: Headers
     container.appendChild(createHeader('Path:'));
     container.appendChild(createHeader('Strength:'));
+    container.appendChild(createHeader('Accel:'));
 
     // Row 2: Controls
-    container.appendChild(createDropdown(['each', 'full'], configObj.path, widget, 'path', updateEasingConfigValue));
+    container.appendChild(createDropdown(['each', 'full', 'alternate'], configObj.path, widget, 'path', updateEasingConfigValue));
     container.appendChild(createEasingNumberInput(widget, configObj, 'strength', 0.0, 2.0, 0.1, 1));
+    container.appendChild(createEasingNumberInput(widget, configObj, 'acceleration', -1.0, 1.0, 0.01, 2));
 
     menu.appendChild(container);
     document.body.appendChild(menu);
