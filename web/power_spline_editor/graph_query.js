@@ -190,6 +190,19 @@ function findConnectedSourceNode(currentNode, inputName) {
                 target_slot: link.target_slot
             });
 
+            // If the directly connected source node is not an image node, try the deep search approach
+            if (!isImageNode(sourceNode)) {
+                console.log('Direct source node is not an image node, trying deep search...');
+                const deepResult = findDeepSourceNode(currentNode, inputName);
+                if (deepResult) {
+                    console.log('Deep search found an image node:', {
+                        sourceNodeId: deepResult.node.id,
+                        sourceNodeType: deepResult.node.type
+                    });
+                    return deepResult;
+                }
+            }
+
             return {
                 node: sourceNode,
                 origin_slot: link.origin_slot,
@@ -319,11 +332,40 @@ async function extractImageFromSourceNode(sourceNodeObj) {
                 }
                 break;
 
+            case 'ImageResizeKJv2':  // Handle image processing nodes
+            case 'ImageScale':
+            case 'ImageScaleBy':
+            case 'ImageUpscale':
+            case 'ImageCrop':
+                // These nodes might pass through image data from their inputs
+                // Look for image widgets that might contain processed image data
+                if (sourceNode.widgets) {
+                    for (const widget of sourceNode.widgets) {
+                        if ((widget.type === 'image' || widget.name?.includes('image')) && widget.value) {
+                            console.log(`Found image in ${sourceNode.type} widget:`, widget.value);
+                            
+                            if (typeof widget.value === 'string') {
+                                if (widget.value.startsWith('data:') || widget.value.startsWith('http')) {
+                                    return widget.value;
+                                }
+                                return `/view?filename=${encodeURIComponent(widget.value)}&type=temp`;
+                            } else if (typeof widget.value === 'object') {
+                                if (widget.value.filename) {
+                                    return `/view?filename=${encodeURIComponent(widget.value.filename)}&type=temp`;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Even if no direct image found in widgets, the node might still be connected 
+                // to image data that can be accessed through other means
+                break;
+
             default:
                 // For other node types, try to find image-related widgets or properties
                 if (sourceNode.widgets) {
                     for (const widget of sourceNode.widgets) {
-                        if ((widget.type === 'image' || widget.name.includes('image') || 
+                        if ((widget.type === 'image' || widget.name?.includes('image') || 
                              widget.type === 'img' || widget.type === 'file') && widget.value) {
                             console.log(`Found potential image in ${sourceNode.type} widget:`, widget.value);
                             
@@ -428,16 +470,44 @@ async function getReferenceImageFromConnectedNode(currentNode) {
     console.log('Starting reference image query for node:', currentNode);
 
     // Step 1: Find the connected source node for ref_image input
-    const sourceNodeObj = findConnectedSourceNode(currentNode, 'ref_image');
+    let sourceNodeObj = findConnectedSourceNode(currentNode, 'ref_image');
     if (!sourceNodeObj) {
-        console.log('No source node found for ref_image input');
+        console.log('No source node found for ref_image input, trying deep search...');
+        // Try deep search as fallback
+        sourceNodeObj = findDeepSourceNode(currentNode, 'ref_image');
+        if (sourceNodeObj) {
+            console.log('Deep search found a potential image source node:', {
+                sourceNodeId: sourceNodeObj.node.id,
+                sourceNodeType: sourceNodeObj.node.type
+            });
+        }
+    }
+    
+    if (!sourceNodeObj) {
+        console.log('No source node found for ref_image input after deep search');
         return null;
     }
 
     // Step 2: Extract image data from the source node
-    const imageDataUrl = await extractImageFromSourceNode(sourceNodeObj);
+    let imageDataUrl = await extractImageFromSourceNode(sourceNodeObj);
     if (!imageDataUrl) {
-        console.log('No image data found in source node');
+        console.log('No image data found in source node, trying deep search for original image source...');
+        // If we couldn't extract image from the found source node, try to find the original image source via deep search
+        const deepSourceNodeObj = findDeepSourceNode(currentNode, 'ref_image');
+        if (deepSourceNodeObj && deepSourceNodeObj.node.id !== sourceNodeObj.node.id) {
+            console.log('Deep search found alternative source node:', {
+                sourceNodeId: deepSourceNodeObj.node.id,
+                sourceNodeType: deepSourceNodeObj.node.type
+            });
+            imageDataUrl = await extractImageFromSourceNode(deepSourceNodeObj);
+            if (imageDataUrl) {
+                sourceNodeObj = deepSourceNodeObj; // Update the source node for potential logging
+            }
+        }
+    }
+
+    if (!imageDataUrl) {
+        console.log('No image data found in source node after trying alternatives');
         return null;
     }
 
@@ -452,5 +522,125 @@ async function getReferenceImageFromConnectedNode(currentNode) {
     return base64Image;
 }
 
+/**
+ * Recursively find the original source node connected to a specific input
+ * @param {Object} currentNode - The node to start from
+ * @param {string} inputName - Name of the input to trace (e.g., "ref_image")
+ * @param {Set<number>} visited - Internal set to prevent infinite loops
+ * @returns {Object|null} The ultimate source node or null
+ */
+function findDeepSourceNode(currentNode, inputName, visited = new Set()) {
+    const graph = app.graph;
+    if (!graph || !graph.links) return null;
+
+    if (visited.has(currentNode.id)) return null;
+    visited.add(currentNode.id);
+
+    // Get the link object for the input
+    const inputIndex = currentNode.inputs?.findIndex(i => i.name === inputName) ?? -1;
+    if (inputIndex < 0) return null;
+
+    let link = null;
+    // Find the link connected to this input (graph.links is a Map, not an array)
+    if (graph.links && graph.links instanceof Map) {
+        for (const [linkId, linkObj] of graph.links) {
+            if (!linkObj) continue;
+            if (linkObj.target_id === currentNode.id && linkObj.target_slot === inputIndex) {
+                link = linkObj;
+                break;
+            }
+        }
+    } else if (Array.isArray(graph.links)) {
+        // Fallback if links is an array (older format)
+        link = graph.links.find(linkObj => {
+            if (!linkObj) return false;
+            return linkObj.target_id === currentNode.id && linkObj.target_slot === inputIndex;
+        });
+    }
+
+    if (!link) return null;
+
+    const sourceNode = graph._nodes?.find(node => node.id === link.origin_id);
+    if (!sourceNode) return null;
+
+    // Check if the source node contains image data
+    if (isImageNode(sourceNode)) {
+        // Prioritize true image loaders over processors
+        const imageLoaderTypes = ['LoadImage', 'LoadImageUpload'];
+        if (imageLoaderTypes.some(type => sourceNode.type?.includes(type))) {
+            return {
+                node: sourceNode,
+                origin_slot: link.origin_slot,
+                target_slot: link.target_slot
+            };
+        }
+
+        // If this is an image processor, continue looking upstream for the original source
+        if (sourceNode.inputs) {
+            for (const input of sourceNode.inputs) {
+                const deeper = findDeepSourceNode(sourceNode, input.name, new Set(visited)); // Use a copy of visited set for each branch
+                if (deeper) {
+                    return deeper; // Return the original source found upstream
+                }
+            }
+        }
+        
+        // If no original source found upstream, return this processor as fallback
+        return {
+            node: sourceNode,
+            origin_slot: link.origin_slot,
+            target_slot: link.target_slot
+        };
+    }
+
+    // If not an image node, recursively check each input of the source node for possible image connections
+    if (sourceNode.inputs) {
+        for (const input of sourceNode.inputs) {
+            const deeper = findDeepSourceNode(sourceNode, input.name, new Set(visited)); // Use a copy of visited set for each branch
+            if (deeper) return deeper;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Check if a node is likely to contain image data
+ * @param {Object} node - The node to check
+ * @returns {boolean} Whether the node is likely to contain image data
+ */
+function isImageNode(node) {
+    // Check node type for common image-related nodes
+    const imageNodeTypes = [
+        'LoadImage', 'LoadImageUpload', 'VAEDecode', 'PreviewImage', 'SaveImage',
+        'ImageScale', 'ImageScaleBy', 'ImageResizeKJv2', 'ImageUpscale', 'ImageCrop', 
+        'ImagePadForOutpaint', 'ImageBatch', 'ImageBlend', 'ImageBlur', 'ImageColorToBW',
+        'ImageFlip', 'ImageOnlyCheckpointLoader', 'ImageApplyProcessing'
+    ];
+    if (imageNodeTypes.some(type => node.type && node.type.includes(type))) {
+        return true;
+    }
+
+    // Check if node has IMAGE type outputs
+    if (node.outputs) {
+        for (const output of node.outputs) {
+            if (output.type === 'IMAGE' || (output.name && (output.name.includes('IMAGE') || output.name.toLowerCase().includes('image')))) {
+                return true;
+            }
+        }
+    }
+
+    // Check if node has image-related widgets
+    if (node.widgets) {
+        for (const widget of node.widgets) {
+            if (widget.type === 'image' || (widget.name && widget.name.toLowerCase().includes('image'))) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 // Export functions for use in other modules
-export { findConnectedSourceNode, extractImageFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode };
+export { findConnectedSourceNode, findDeepSourceNode, extractImageFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode };

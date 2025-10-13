@@ -48,9 +48,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 ),
                 "bg_image": ("IMAGE",),
                 "coordinates": ("STRING", {"forceInput": True}),
-                "easing_function": (["linear", "in", "out", "in_out", "out_in"], {"default": "in_out"}),
-                "easing_path": (["each", "full"], {"default": "full"}),
-                "easing_strength": ("FLOAT", {"default": 1.0, "min": 0.1, "max": 10.0, "step": 0.05}),
                 "shape_width": ("INT", {"default": 40, "min": 2, "max": 1000, "step": 5}),
                 "shape_height": ("INT", {"default": 40, "min": 2, "max": 1000, "step": 5}),
                 "shape_color": ("STRING", {"default": 'white'}),
@@ -82,7 +79,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                p_driver_path: Optional[Path] = None,
                                p_coords_pause_frames: Tuple[int, int] = (0, 0),
                                coords_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
-                               scales_list: Optional[List[float]] = None) -> Image.Image:
+                               scales_list: Optional[List[float]] = None,
+                               static_points_scale: float = 1.0) -> Image.Image:
         """
         Draw one frame using PIL.
         This function is thread-safe and used by ThreadPoolExecutor in drawshapemask.
@@ -121,6 +119,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     driver_offset_x = current_x - ref_x
                     driver_offset_y = current_y - ref_y
 
+            # Apply scale to shape dimensions for static points using the dedicated parameter
+            static_width = float(shape_width) * static_points_scale
+            static_height = float(shape_height) * static_points_scale
+
             # Draw each static point with driver offset applied
             for point in static_points:
                 try:
@@ -130,8 +132,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     continue
 
                 if shape in ('circle', 'square'):
-                    left_up_point = (location_x - current_width / 2.0, location_y - current_height / 2.0)
-                    right_down_point = (location_x + current_width / 2.0, location_y + current_height / 2.0)
+                    left_up_point = (location_x - static_width / 2.0, location_y - static_height / 2.0)
+                    right_down_point = (location_x + static_width / 2.0, location_y + static_height / 2.0)
                     two_points = [left_up_point, right_down_point]
 
                     if shape == 'circle':
@@ -146,9 +148,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             draw.rectangle(two_points, fill=shape_color)
 
                 elif shape == 'triangle':
-                    left = (location_x - current_width / 2.0, location_y + current_height / 2.0)
-                    right = (location_x + current_width / 2.0, location_y + current_height / 2.0)
-                    top = (location_x, location_y - current_height / 2.0)
+                    left = (location_x - static_width / 2.0, location_y + static_height / 2.0)
+                    right = (location_x + static_width / 2.0, location_y + static_height / 2.0)
+                    top = (location_x, location_y - static_height / 2.0)
                     poly_points = [top, left, right]
                     if border_width > 0:
                         try:
@@ -871,7 +873,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
     # ----------------------------
     # Main Node Method
     # ----------------------------
-    def drawshapemask(self, coordinates, bg_image, easing_function, easing_path, easing_strength,
+    def drawshapemask(self, coordinates, bg_image,
                       shape_width, shape_height, shape_color, bg_color, blur_radius, shape, intensity,
                       trailing=1.0, border_width=0, border_color='black', frames=None, preview_enabled=True):
         """
@@ -919,7 +921,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         static_points, p_driver_path_processed = self._scale_points_and_drivers(static_points, p_driver_path_raw, coord_width, coord_height, frame_width, frame_height)
 
         # Interpolate p_driver_path to total_frames and apply smoothing
-        # For p_coordinates, use the global parameters passed to the node
+        # For p_coordinates, use the easing parameters from metadata
+        easing_function = meta.get("easing_functions", "in_out")
+        easing_path = meta.get("easing_paths", "full")
+        easing_strength = meta.get("easing_strengths", 1.0)
         if p_coords_use_driver and p_driver_path_processed:
             p_driver_path_processed = self._process_p_driver_path(p_driver_path_processed, total_frames, p_driver_smooth, easing_function, easing_path, easing_strength)
 
@@ -999,9 +1004,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
         # ----- Build interpolated/resampled animated paths -----
         # Handle different formats for easing parameters - could be single values, lists, or objects
-        easing_functions_meta = meta.get("easing_functions", easing_function)
-        easing_paths_meta = meta.get("easing_paths", easing_path) 
-        easing_strengths_meta = meta.get("easing_strengths", easing_strength)
+        easing_functions_meta = meta.get("easing_functions", "in_out")
+        easing_paths_meta = meta.get("easing_paths", "full") 
+        easing_strengths_meta = meta.get("easing_strengths", 1.0)
         
         processed_coords_list, path_pause_frames, coords_driver_info_list, scales_list = self._build_interpolated_paths(
             coords_list_raw, total_frames,
@@ -1014,6 +1019,23 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             meta.get("scales", 1.0),
             coord_width, coord_height, frame_width, frame_height
         )
+        
+        # Extract scale for static points (p_coordinates) from scales metadata
+        scales_meta = meta.get("scales", 1.0)
+        static_points_scale = 1.0
+        if isinstance(scales_meta, dict):
+            # New format: {"p": [...], "c": [...]} where "p" is for static points
+            p_scales = scales_meta.get("p", [1.0])
+            if isinstance(p_scales, list) and len(p_scales) > 0:
+                static_points_scale = float(p_scales[0])
+            elif isinstance(p_scales, (int, float)):
+                static_points_scale = float(p_scales)
+        elif isinstance(scales_meta, (int, float)):
+            # Single value for both static and animated (fallback)
+            static_points_scale = float(scales_meta)
+        elif isinstance(scales_meta, list):
+            # List format: first value for static points
+            static_points_scale = float(scales_meta[0]) if scales_meta else 1.0
 
         # Special cases: no animated coords but static points exist -> set batch size accordingly
         if not processed_coords_list:
@@ -1072,6 +1094,15 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             ))
 
         try:
+            # Update args_list to include the static_points_scale parameter
+            updated_args_list = []
+            for args in args_list:
+                # args is a tuple that includes all the parameters for _draw_single_frame_pil
+                # We need to add static_points_scale to the end
+                updated_args = args + (static_points_scale,)
+                updated_args_list.append(updated_args)
+            args_list = updated_args_list
+            
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = list(executor.map(lambda p: self._draw_single_frame_pil(*p), args_list))
                 pil_images = results

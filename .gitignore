@@ -5,3 +5,4 @@ nodes/__pycache__/
 .env2
 .env 22
 wanvideo_cached_samples.pt
+ref_image.jpg
