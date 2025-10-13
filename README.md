@@ -115,6 +115,20 @@ https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
 </tr>
 </table>
 
+### Control only vs Control + I2V
+<table>
+<tr>
+<td width="50%">
+
+https://github.com/user-attachments/assets/d65bb9d7-962a-4e1f-bc5d-be90adc9e311
+</td>
+<td width="50%">
+
+https://github.com/user-attachments/assets/c4b70388-54a8-4b08-8f37-6028e1f2f471
+</td>
+</tr>
+</table>
+
 ### Other Experimental Node List
 ![Node List](git_assets/img/list.png)
 
