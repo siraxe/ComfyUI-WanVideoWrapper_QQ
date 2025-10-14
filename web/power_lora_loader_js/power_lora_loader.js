@@ -1,428 +1,78 @@
-import { app } from "../../../scripts/app.js";
-
-// Canvas utility functions 
-function binarySearch(max, getValue, match) {
-    let min = 0;
-    while (min <= max) {
-        let guess = Math.floor((min + max) / 2);
-        const compareVal = getValue(guess);
-        if (compareVal === match)
-            return guess;
-        if (compareVal < match)
-            min = guess + 1;
-        else
-            max = guess - 1;
-    }
-    return max;
-}
-
-export function fitString(ctx, str, maxWidth) {
-    let width = ctx.measureText(str).width;
-    const ellipsis = "…";
-    const ellipsisWidth = measureText(ctx, ellipsis);
-    if (width <= maxWidth || width <= ellipsisWidth) {
-        return str;
-    }
-    const index = binarySearch(str.length, (guess) => measureText(ctx, str.substring(0, guess)), maxWidth - ellipsisWidth);
-    return str.substring(0, index) + ellipsis;
-}
-
-export function measureText(ctx, str) {
-    return ctx.measureText(str).width;
-}
-
-export function isLowQuality() {
-    var _a;
-    const canvas = app.canvas;
-    return (((_a = canvas.ds) === null || _a === void 0 ? void 0 : _a.scale) || 1) <= 0.5;
-}
-
-export function drawRoundedRectangle(ctx, options) {
-    const lowQuality = isLowQuality();
-    options = { ...options };
-    ctx.save();
-    ctx.strokeStyle = options.colorStroke || LiteGraph.WIDGET_OUTLINE_COLOR;
-    ctx.fillStyle = options.colorBackground || LiteGraph.WIDGET_BGCOLOR;
-    ctx.beginPath();
-    ctx.roundRect(...options.pos, ...options.size, lowQuality ? [0] : options.borderRadius ? [options.borderRadius] : [options.size[1] * 0.5]);
-    ctx.fill();
-    !lowQuality && ctx.stroke();
-    ctx.restore();
-}
-
-export function drawTogglePart(ctx, options) {
-    const lowQuality = isLowQuality();
-    ctx.save();
-    const { posX, posY, height, value } = options;
-    const toggleRadius = height * 0.36;
-    const toggleBgWidth = height * 1.5;
-    if (!lowQuality) {
-        ctx.beginPath();
-        ctx.roundRect(posX + 4, posY + 4, toggleBgWidth - 8, height - 8, [height * 0.5]);
-        ctx.globalAlpha = app.canvas.editor_alpha * 0.25;
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
-        ctx.fill();
-        ctx.globalAlpha = app.canvas.editor_alpha;
-    }
-    ctx.fillStyle = value === true ? "#89B" : "#888";
-    const toggleX = lowQuality || value === false
-        ? posX + height * 0.5
-        : value === true
-            ? posX + height
-            : posX + height * 0.75;
-    ctx.beginPath();
-    ctx.arc(toggleX, posY + height * 0.5, toggleRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    return [posX, toggleBgWidth];
-}
-
-export function drawNumberWidgetPart(ctx, options) {
-    const arrowWidth = 9;
-    const arrowHeight = 10;
-    const innerMargin = 3;
-    const numberWidth = 32;
-    const xBoundsArrowLess = [0, 0];
-    const xBoundsNumber = [0, 0];
-    const xBoundsArrowMore = [0, 0];
-    ctx.save();
-    let posX = options.posX;
-    const { posY, height, value, textColor } = options;
-    const midY = posY + height / 2;
-    if (options.direction === -1) {
-        posX = posX - arrowWidth - innerMargin - numberWidth - innerMargin - arrowWidth;
-    }
-    // ctx.fill(new Path2D(`M ${posX} ${midY} l ${arrowWidth} ${arrowHeight / 2} l 0 -${arrowHeight} L ${posX} ${midY} z`));
-    xBoundsArrowLess[0] = posX;
-    xBoundsArrowLess[1] = arrowWidth;
-    posX += arrowWidth + innerMargin;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const oldTextcolor = ctx.fillStyle;
-    if (textColor) {
-        ctx.fillStyle = textColor;
-    }
-    ctx.fillText(fitString(ctx, value.toFixed(3), numberWidth), posX + numberWidth / 2, midY);
-    ctx.fillStyle = oldTextcolor;
-    xBoundsNumber[0] = posX;
-    xBoundsNumber[1] = numberWidth;
-    posX += numberWidth + innerMargin;
-    // ctx.fill(new Path2D(`M ${posX} ${midY - arrowHeight / 2} l ${arrowWidth} ${arrowHeight / 2} l -${arrowWidth} ${arrowHeight / 2} v -${arrowHeight} z`));
-    xBoundsArrowMore[0] = posX;
-    xBoundsArrowMore[1] = arrowWidth;
-    ctx.restore();
-    return [xBoundsArrowLess, xBoundsNumber, xBoundsArrowMore];
-}
-drawNumberWidgetPart.WIDTH_TOTAL = 9 + 3 + 32 + 3 + 9;
-
-export function drawWidgetButton(ctx, options, text = null, isMouseDownedAndOver = false) {
-    var _a;
-    const borderRadius = isLowQuality() ? 0 : ((_a = options.borderRadius) !== null && _a !== void 0 ? _a : 4);
-    ctx.save();
-    if (!isLowQuality() && !isMouseDownedAndOver) {
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 2, options.size[1]],
-            pos: [options.pos[0] + 1, options.pos[1] + 1],
-            borderRadius,
-            colorBackground: "#000000aa",
-            colorStroke: "#000000aa",
-        });
-    }
-    drawRoundedRectangle(ctx, {
-        size: options.size,
-        pos: [options.pos[0], options.pos[1] + (isMouseDownedAndOver ? 1 : 0)],
-        borderRadius,
-        colorBackground: isMouseDownedAndOver ? "#444" : LiteGraph.WIDGET_BGCOLOR,
-        colorStroke: "transparent",
-    });
-    if (isLowQuality()) {
-        ctx.restore();
-        return;
-    }
-    if (!isMouseDownedAndOver) {
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 0.75, options.size[1] - 0.75],
-            pos: options.pos,
-            borderRadius: borderRadius - 0.5,
-            colorBackground: "transparent",
-            colorStroke: "#00000044",
-        });
-        drawRoundedRectangle(ctx, {
-            size: [options.size[0] - 0.75, options.size[1] - 0.75],
-            pos: [options.pos[0] + 0.75, options.pos[1] + 0.75],
-            borderRadius: borderRadius - 0.5,
-            colorBackground: "transparent",
-            colorStroke: "#ffffff11",
-        });
-    }
-    drawRoundedRectangle(ctx, {
-        size: options.size,
-        pos: [options.pos[0], options.pos[1] + (isMouseDownedAndOver ? 1 : 0)],
-        borderRadius,
-        colorBackground: "transparent",
-    });
-    if (!isLowQuality() && text) {
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "center";
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.fillText(text, options.size[0] / 2, options.pos[1] + options.size[1] / 2 + (isMouseDownedAndOver ? 1 : 0));
-    }
-    ctx.restore();
-}
-
-// === COPIED FROM RGTHREE BASE WIDGET CLASS ===
-// From rgthree/web/comfyui/utils_widgets.js
-export class RgthreeBaseWidget {
-    constructor(name) {
-        this.type = "custom";
-        this.options = {};
-        this.y = 0;
-        this.last_y = 0;
-        this.mouseDowned = null;
-        this.isMouseDownedAndOver = false;
-        this.hitAreas = {};
-        this.downedHitAreasForMove = [];
-        this.downedHitAreasForClick = [];
-        this.name = name;
-    }
-
-    serializeValue(node, index) {
-        return this.value;
-    }
-
-    clickWasWithinBounds(pos, bounds) {
-        let xStart = bounds[0];
-        let xEnd = xStart + (bounds.length > 2 ? bounds[2] : bounds[1]);
-        const clickedX = pos[0] >= xStart && pos[0] <= xEnd;
-        if (bounds.length === 2) {
-            return clickedX;
-        }
-        return clickedX && pos[1] >= bounds[1] && pos[1] <= bounds[1] + bounds[3];
-    }
-
-    mouse(event, pos, node) {
-        var _a, _b, _c;
-        const canvas = app.canvas;
-        if (event.type == "pointerdown") {
-            this.mouseDowned = [...pos];
-            this.isMouseDownedAndOver = true;
-            this.downedHitAreasForMove.length = 0;
-            this.downedHitAreasForClick.length = 0;
-            let anyHandled = false;
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    if (part.onMove) {
-                        this.downedHitAreasForMove.push(part);
-                    }
-                    if (part.onClick) {
-                        this.downedHitAreasForClick.push(part);
-                    }
-                    if (part.onDown) {
-                        const thisHandled = part.onDown.apply(this, [event, pos, node, part]);
-                        anyHandled = anyHandled || thisHandled == true;
-                    }
-                    part.wasMouseClickedAndIsOver = true;
-                }
-            }
-            return (_a = this.onMouseDown(event, pos, node)) !== null && _a !== void 0 ? _a : anyHandled;
-        }
-        if (event.type == "pointerup") {
-            if (!this.mouseDowned)
-                return true;
-            this.downedHitAreasForMove.length = 0;
-            const wasMouseDownedAndOver = this.isMouseDownedAndOver;
-            this.cancelMouseDown();
-            let anyHandled = false;
-            for (const part of Object.values(this.hitAreas)) {
-                if (part.onUp && this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onUp.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-                part.wasMouseClickedAndIsOver = false;
-            }
-            for (const part of this.downedHitAreasForClick) {
-                if (this.clickWasWithinBounds(pos, part.bounds)) {
-                    const thisHandled = part.onClick.apply(this, [event, pos, node, part]);
-                    anyHandled = anyHandled || thisHandled == true;
-                }
-            }
-            this.downedHitAreasForClick.length = 0;
-            if (wasMouseDownedAndOver) {
-                const thisHandled = this.onMouseClick(event, pos, node);
-                anyHandled = anyHandled || thisHandled == true;
-            }
-            return (_b = this.onMouseUp(event, pos, node)) !== null && _b !== void 0 ? _b : anyHandled;
-        }
-        if (event.type == "pointermove") {
-            this.isMouseDownedAndOver = !!this.mouseDowned;
-            if (this.mouseDowned &&
-                (pos[0] < 15 ||
-                    pos[0] > node.size[0] - 15 ||
-                    pos[1] < this.last_y ||
-                    pos[1] > this.last_y + LiteGraph.NODE_WIDGET_HEIGHT)) {
-                this.isMouseDownedAndOver = false;
-            }
-            for (const part of Object.values(this.hitAreas)) {
-                if (this.downedHitAreasForMove.includes(part)) {
-                    part.onMove.apply(this, [event, pos, node, part]);
-                }
-                if (this.downedHitAreasForClick.includes(part)) {
-                    part.wasMouseClickedAndIsOver = this.clickWasWithinBounds(pos, part.bounds);
-                }
-            }
-            return (_c = this.onMouseMove(event, pos, node)) !== null && _c !== void 0 ? _c : true;
-        }
-        return false;
-    }
-
-    cancelMouseDown() {
-        this.mouseDowned = null;
-        this.isMouseDownedAndOver = false;
-        this.downedHitAreasForMove.length = 0;
-    }
-
-    onMouseDown(event, pos, node) {
-        return;
-    }
-
-    onMouseUp(event, pos, node) {
-        return;
-    }
-
-    onMouseClick(event, pos, node) {
-        return;
-    }
-
-    onMouseMove(event, pos, node) {
-        return;
-    }
-}
-
-// Button Widget from rgthree
-export class RgthreeBetterButtonWidget extends RgthreeBaseWidget {
-    constructor(name, mouseClickCallback, label) {
-        super(name);
-        this.type = "custom";
-        this.value = "";
-        this.label = "";
-        this.mouseClickCallback = mouseClickCallback;
-        this.label = label || name;
-    }
-
-    draw(ctx, node, width, y, height) {
-        drawWidgetButton(ctx, { size: [width - 30, height], pos: [15, y] }, this.label, this.isMouseDownedAndOver);
-    }
-
-    onMouseClick(event, pos, node) {
-        var _a;
-        return (_a = this.mouseClickCallback) === null || _a === void 0 ? void 0 : _a.call(this, event, pos, node);
-    }
-}
-
-// === UTILITY FUNCTIONS FROM RGTHREE ===
-// From rgthree/web/common/shared_utils.js
-export function moveArrayItem(arr, itemOrFrom, to) {
-    const from = typeof itemOrFrom === "number" ? itemOrFrom : arr.indexOf(itemOrFrom);
-    if (from === -1 || to < 0 || to >= arr.length || from === to) return;
-    const item = arr.splice(from, 1)[0];
-    arr.splice(to, 0, item);
-}
-
-export function removeArrayItem(arr, itemOrIndex) {
-    const index = typeof itemOrIndex === "number" ? itemOrIndex : arr.indexOf(itemOrIndex);
-    if (index !== -1) {
-        arr.splice(index, 1);
-    }
-}
-
-// === DIVIDER WIDGET FROM RGTHREE ===
-// From rgthree/web/comfyui/utils_widgets.js
-export class RgthreeDividerWidget extends RgthreeBaseWidget {
-    constructor(widgetOptions) {
-        super("divider");
-        this.value = {};
-        this.options = { serialize: false };
-        this.type = "custom";
-        this.widgetOptions = {
-            marginTop: 7,
-            marginBottom: 7,
-            marginLeft: 15,
-            marginRight: 15,
-            color: LiteGraph.WIDGET_OUTLINE_COLOR,
-            thickness: 1,
-        };
-        Object.assign(this.widgetOptions, widgetOptions || {});
-    }
-
-    draw(ctx, node, width, posY, h) {
-        if (this.widgetOptions.thickness) {
-            ctx.strokeStyle = this.widgetOptions.color;
-            const x = this.widgetOptions.marginLeft;
-            const y = posY + this.widgetOptions.marginTop;
-            const w = width - this.widgetOptions.marginLeft - this.widgetOptions.marginRight;
-            const thickness = this.widgetOptions.thickness;
-            ctx.fillStyle = this.widgetOptions.color;
-            ctx.fillRect(x, y, w, thickness);
-        }
-    }
-
-    computeSize(width) {
-        return [
-            width,
-            this.widgetOptions.marginTop + this.widgetOptions.thickness + this.widgetOptions.marginBottom,
-        ];
-    }
-}
+import { app } from "../../../../scripts/app.js";
+import { LoraPickerDialog } from "./lora_picker_dialog.js";
+import { api } from "../../../../scripts/api.js";
+import {
+    fitString,
+    measureText,
+    isLowQuality,
+    drawRoundedRectangle,
+    drawTogglePart,
+    drawNumberWidgetPart,
+    drawWidgetButton,
+    RgthreeBaseWidget,
+    RgthreeBetterButtonWidget,
+    moveArrayItem,
+    removeArrayItem,
+    RgthreeDividerWidget
+} from "./power_lora_loader_ui.js";
+import { getLoraSlotInPosition, getLoraSlotMenuOptions } from "./lora_context_menu.js";
+import { loraPatternMatcher } from "./lora_pattern_matcher.js";
 
 // === WAN VIDEO LORA API ===
 // Adapted from rgthree's API calls
 async function getWanVideoLoras() {
     try {
-        const response = await fetch("/object_info");
-        const objectInfo = await response.json();
-
-        // Look for WanVideo lora nodes to get file list
-        if (objectInfo.WanVideoLoraSelectMulti?.input?.required?.lora_0) {
-            const loraFiles = objectInfo.WanVideoLoraSelectMulti.input.required.lora_0[0];
-            if (Array.isArray(loraFiles)) {
-                return loraFiles.map(file => ({ file }));
-            }
-        }
-
-        // Try other lora nodes
-        for (const [nodeName, nodeData] of Object.entries(objectInfo)) {
-            if (nodeName.includes("Lora") || nodeName.includes("LoRA")) {
-                const inputs = nodeData.input?.required || {};
-                for (const [inputName, inputData] of Object.entries(inputs)) {
-                    if (inputName.toLowerCase().includes('lora') && Array.isArray(inputData[0])) {
-                        return inputData[0].map(file => ({ file }));
-                    }
-                }
-            }
-        }
-
-        return [];
+        const response = await fetch("/wanvideowrapper_qq/loras");
+        const data = await response.json();
+        // Filter out any "None" entries that might come from the API
+        const loras = (data.loras || []).filter(l => {
+            const name = typeof l === 'string' ? l : l.name;
+            return name && name.toLowerCase() !== "none";
+        });
+        return loras;
     } catch (error) {
         console.error("Error fetching WanVideo loras:", error);
         return [];
     }
 }
 
-async function showLoraChooser(event, callback, parentMenu, loras) {
-    var _a, _b;
-    const canvas = app.canvas;
-    if (!loras) {
-        const lorasDetails = await getWanVideoLoras();
-        loras = ["None", ...lorasDetails.map(l => l.file)];
-    }
-    new LiteGraph.ContextMenu(loras, {
-        event: event,
-        parentMenu: parentMenu != null ? parentMenu : undefined,
-        title: "Choose a lora",
-        scale: Math.max(1, (_b = (_a = canvas.ds) === null || _a === void 0 ? void 0 : _a.scale) !== null && _b !== void 0 ? _b : 1),
-        className: "dark",
-        callback,
+function saveFavorites(favorites) {
+    localStorage.setItem("wanVideoPowerLoraLoader.favorites", JSON.stringify(favorites));
+}
+
+function loadFavorites() {
+    const favorites = localStorage.getItem("wanVideoPowerLoraLoader.favorites");
+    return favorites ? JSON.parse(favorites) : [];
+}
+
+function saveFavoritesOnly(favoritesOnly) {
+    localStorage.setItem("wanVideoPowerLoraLoader.favoritesOnly", JSON.stringify(favoritesOnly));
+}
+
+function loadFavoritesOnly() {
+    const favoritesOnly = localStorage.getItem("wanVideoPowerLoraLoader.favoritesOnly");
+    return favoritesOnly !== null ? JSON.parse(favoritesOnly) : false;
+}
+
+function saveFoldersVisible(foldersVisible) {
+    localStorage.setItem("wanVideoPowerLoraLoader.foldersVisible", JSON.stringify(foldersVisible));
+}
+
+function loadFoldersVisible() {
+    const foldersVisible = localStorage.getItem("wanVideoPowerLoraLoader.foldersVisible");
+    return foldersVisible !== null ? JSON.parse(foldersVisible) : false;
+}
+
+async function showLoraPicker(event, callback, parentMenu, loras, sort = "Latest", favorites = [], favoritesOnly = false, onFavoriteToggle = null, foldersVisible = null) {
+    const dialog = new LoraPickerDialog(loras, {
+        callback: callback,
+        sort: sort,
+        favorites: favorites,
+        favoritesOnly: favoritesOnly,
+        onFavoriteToggle: onFavoriteToggle,
+        foldersVisible: foldersVisible
     });
+    dialog.show();
 }
 
 // === POWER LORA WIDGET ===
@@ -472,6 +122,12 @@ class OptionsWidget extends RgthreeBaseWidget {
             merge_loras: node.properties['merge_loras'] !== false ? true : false,
             overwrite_duplicates: node.properties['overwrite_duplicates'] || false
         };
+        
+        // Update node properties to ensure they're in sync
+        node.properties['low_mem_load'] = value.low_mem_load;
+        node.properties['merge_loras'] = value.merge_loras;
+        node.properties['overwrite_duplicates'] = value.overwrite_duplicates;
+        
         return value;
     }
 
@@ -618,7 +274,6 @@ class OptionsWidget extends RgthreeBaseWidget {
                 widget.value.low_strength = widget.value.strength || 1;
             }
         }
-        console.log('[JS] Copied all high strengths to low strengths (H -> L)');
     }
 
     copyLowToHighStrengths(node) {
@@ -632,13 +287,13 @@ class OptionsWidget extends RgthreeBaseWidget {
                 }
             }
         }
-        console.log('[JS] Copied all low strengths to high strengths (L -> H)');
     }
 
     computeSize(width) {
         return [width, LiteGraph.NODE_WIDGET_HEIGHT];
     }
 }
+
 
 class PowerLoraLoaderHeaderWidget extends RgthreeBaseWidget {
     constructor(name = "PowerLoraLoaderHeaderWidget") {
@@ -762,85 +417,19 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             return;
         }
 
-        const allLoras = this.parent?.lorasCache || [];
+        const allLoras = this.parent?.constructor?.prototype?.lorasCache || [];
         if (!allLoras.length) {
             return;
         }
 
-        const generatePatterns = (tokens) => {
-            const separators = ['-', '_', ' '];
-            const infixes = [], prefixes = [], suffixes = [];
-            for (const token of tokens) {
-                for (const sep of separators) {
-                    prefixes.push(token + sep);
-                    suffixes.push(sep + token);
-                    infixes.push(sep + token + sep);
-                }
-            }
-            return { infixes, prefixes, suffixes };
-        };
+        // Extract just the names from the cache objects for checking
+        const loraNames = allLoras.map(l => typeof l === 'string' ? l : l.name);
 
-        const highPatterns = generatePatterns(['High', 'high', 'HIGH', 'h', 'H']);
-        const lowPatterns = generatePatterns(['Low', 'low', 'LOW', 'l', 'L']);
-
-        let foundLowVariant = false;
-        let lowVariantName = null;
-
-        // Check for infix patterns
-        for (const highPattern of highPatterns.infixes) {
-            if (loraName.includes(highPattern)) {
-                for (const lowPattern of lowPatterns.infixes) {
-                    const expectedLowName = loraName.replace(highPattern, lowPattern);
-                    if (loraName !== expectedLowName && allLoras.includes(expectedLowName)) {
-                        foundLowVariant = true;
-                        lowVariantName = expectedLowName;
-                        break;
-                    }
-                }
-            }
-            if (foundLowVariant) break;
-        }
-
-        // Check for prefix patterns
-        if (!foundLowVariant) {
-            for (const highPattern of highPatterns.prefixes) {
-                if (loraName.startsWith(highPattern)) {
-                    for (const lowPattern of lowPatterns.prefixes) {
-                        const expectedLowName = loraName.replace(highPattern, lowPattern);
-                        if (loraName !== expectedLowName && allLoras.includes(expectedLowName)) {
-                            foundLowVariant = true;
-                            lowVariantName = expectedLowName;
-                            break;
-                        }
-                    }
-                }
-                if (foundLowVariant) break;
-            }
-        }
-
-        // Check for suffix patterns
-        if (!foundLowVariant) {
-            const nameWithoutExt = loraName.substring(0, loraName.lastIndexOf('.'));
-            for (const highPattern of highPatterns.suffixes) {
-                if (nameWithoutExt.endsWith(highPattern)) {
-                    for (const lowPattern of lowPatterns.suffixes) {
-                        const expectedLowName = loraName.replace(highPattern, lowPattern);
-                        if (loraName !== expectedLowName && allLoras.includes(expectedLowName)) {
-                            foundLowVariant = true;
-                            lowVariantName = expectedLowName;
-                            break;
-                        }
-                    }
-                }
-                if (foundLowVariant) break;
-            }
-        }
-
-        this.value.is_low = foundLowVariant;
-        this.value.low_variant_name = lowVariantName;
-
-        // Debug logging
-        console.log(`[JS] checkLowLoraVariant for '${loraName}': is_low=${foundLowVariant}, low_variant_name=${lowVariantName}`);
+        // Use the pattern matcher to find low variant
+        const result = loraPatternMatcher.checkLowLoraVariant(loraName, loraNames);
+        
+        this.value.is_low = result.found;
+        this.value.low_variant_name = result.variantName;
     }
 
     draw(ctx, node, w, posY, height) {
@@ -987,6 +576,10 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             v.low_strength = 1;
         }
 
+        // Ensure is_low and low_variant_name are preserved
+        v.is_low = this.value.is_low || false;
+        v.low_variant_name = this.value.low_variant_name || null;
+
         return v;
     }
 
@@ -997,24 +590,48 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     }
 
     onLoraClick(event, pos, node) {
+        const sort = node.properties["Sort by"] || "Latest";
+        // Always load favoritesOnly from persistence to ensure it's up-to-date
+        const favoritesOnly = loadFavoritesOnly();
+        // Update the node property to keep it in sync
+        node.properties["Favorites only"] = favoritesOnly;
+
+        // Ensure favorites array exists
+        if (!node.favorites) {
+            node.favorites = loadFavorites();
+        }
+
+        const onFavoriteToggle = (loraName) => {
+            const index = node.favorites.indexOf(loraName);
+            if (index > -1) {
+                node.favorites.splice(index, 1);
+            } else {
+                node.favorites.push(loraName);
+            }
+            saveFavorites(node.favorites);
+        };
+
+        // Load folders visible state from persistence
+        const foldersVisible = loadFoldersVisible();
+        
         // Use cached loras from parent node for instant response, same as Add Lora button
-        const cachedLoras = node.lorasCache || [];
+        const cachedLoras = node.constructor.prototype.lorasCache || [];
         if (cachedLoras.length > 0) {
             // Use cached data for instant response
-            showLoraChooser(event, (value) => {
+            showLoraPicker(event, (value) => {
                 if (typeof value === "string") {
                     this.setLora(value);
                 }
                 node.setDirtyCanvas(true, true);
-            }, null, ["None", ...cachedLoras]);
+            }, null, [...cachedLoras, "None"], sort, node.favorites, favoritesOnly, onFavoriteToggle, foldersVisible);
         } else {
             // Fallback to API call if cache is empty
-            showLoraChooser(event, (value) => {
+            showLoraPicker(event, (value) => {
                 if (typeof value === "string") {
                     this.setLora(value);
                 }
                 node.setDirtyCanvas(true, true);
-            });
+            }, null, null, sort, node.favorites, favoritesOnly, onFavoriteToggle, foldersVisible);
         }
         this.cancelMouseDown();
     }
@@ -1040,7 +657,7 @@ class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     }
 
     onStrengthTwoAnyMove(event, pos, node) {
-        this.doOnStrengthAnyMove(event, true);
+        this.doOnStrengthTwoAnyMove(event, true);
     }
 
     onLowStrengthDecDown(event, pos, node) {
@@ -1150,136 +767,30 @@ Clip Strength: ${this.value.strengthTwo}` : ""}`;
 
 // === MAIN NODE EXTENSION ===
 // Based exactly on rgthree's registration pattern
-class WanVideePowerLoraLoader {
-    constructor(title = "Wan Video Power Lora Loader") {
-        this.serialize_widgets = true;
-        this.loraWidgetsCounter = 0;
-        this.properties = {};
-        this.properties[PROP_LABEL_SHOW_STRENGTHS] = PROP_VALUE_SHOW_STRENGTHS_SINGLE;
-
-        // Fetch loras on creation
-        getWanVideoLoras();
-    }
-
-    configure(info) {
-        var _b;
-        while ((_b = this.widgets) === null || _b === void 0 ? void 0 : _b.length)
-            this.removeWidget(0);
-
-        this._tempWidth = this.size[0];
-        this._tempHeight = this.size[1];
-
-        for (const widgetValue of info.widgets_values || []) {
-            if ((widgetValue === null || widgetValue === void 0 ? void 0 : widgetValue.lora) !== undefined) {
-                const widget = this.addNewLoraWidget();
-                widget.value = { ...widgetValue };
-            }
-        }
-
-        this.addNonLoraWidgets();
-        this.size[0] = Math.max(MINIMUM_NODE_WIDTH, this._tempWidth);
-        this.size[1] = Math.max(this._tempHeight, this.computeSize()[1]);
-    }
-
-    onNodeCreated() {
-        this.addNonLoraWidgets();
-        const computed = this.computeSize();
-        this.size = this.size || [0, 0];
-        this.size[0] = Math.max(MINIMUM_NODE_WIDTH, this.size[0], computed[0]);
-        this.size[1] = Math.max(this.size[1], computed[1]);
-        this.setDirtyCanvas(true, true);
-    }
-
-    addNewLoraWidget(lora) {
-        this.loraWidgetsCounter++;
-        const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
-        if (lora)
-            widget.setLora(lora);
-        return widget;
-    }
-
-    addNonLoraWidgets() {
-        this.addCustomWidget(new RgthreeBetterButtonWidget("➕ Add Lora", (event, pos, node) => {
-            getWanVideoLoras().then((lorasDetails) => {
-                const loras = lorasDetails.map((l) => l.file);
-                showLoraChooser(event, (value) => {
-                    if (typeof value === "string") {
-                        if (value !== "None") {
-                            this.addNewLoraWidget(value);
-                            const computed = this.computeSize();
-                            const tempHeight = this._tempHeight || 15;
-                            this.size[1] = Math.max(tempHeight, computed[1]);
-                            this.setDirtyCanvas(true, true);
-                        }
-                    }
-                }, null, [...loras]);
-            });
-            return true;
-        }));
-    }
-}
-
-WanVideePowerLoraLoader.title = "Wan Video Power Lora Loader";
-WanVideePowerLoraLoader.type = "WanVideoPowerLoraLoader";
-WanVideePowerLoraLoader.comfyClass = "WanVideoPowerLoraLoader";
-
-const NODE_CLASS = WanVideePowerLoraLoader;
-
 app.registerExtension({
-    name: "WanVideoWrapper_QQ.PowerLoraLoader",
-    async beforeRegisterNodeDef(nodeType, nodeData) {
+    name: "WanVideo.PowerLoraLoader",
+    async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeData.name === "WanVideoPowerLoraLoader") {
-            // Store original functions
-            const onNodeCreated = nodeType.prototype.onNodeCreated;
-            const originalConfigure = nodeType.prototype.configure;
+            // Add the properties to the node class
+            nodeType.prototype.lorasCache = []; // Initialize cache for loras
+            nodeType.prototype.lorasCacheLoaded = false; // Flag to track if cache is loaded
 
-            // Add configure method for workflow persistence
-            nodeType.prototype.configure = function(info) {
-                // Clear existing widgets using ComfyUI's method
-                if (this.widgets) {
-                    this.widgets.length = 0;
-                }
-                this.widgetButtonSpacer = null;
-
-                // Call original configure if it exists
-                if (originalConfigure) {
-                    originalConfigure.call(this, info);
-                }
-
-                // Store size for restoration
-                this._tempWidth = this.size[0];
-                this._tempHeight = this.size[1];
-
-                // Recreate LoRA widgets from saved data
-                for (const widgetValue of info.widgets_values || []) {
-                    if (widgetValue?.lora !== undefined) {
-                        const widget = this.addNewLoraWidget();
-
-                        // Ensure low_strength is preserved during restore
-                        const restoredValue = { ...widgetValue };
-                        if (restoredValue.low_strength === undefined) {
-                            restoredValue.low_strength = 1;
-                        }
-
-                        console.log(`[JS] Restoring widget with value:`, {
-                            lora: restoredValue.lora,
-                            strength: restoredValue.strength,
-                            low_strength: restoredValue.low_strength,
-                            is_low: restoredValue.is_low,
-                            full_object: restoredValue
-                        });
-
-                        widget.value = restoredValue;
+            // Load loras when the node is created
+            getWanVideoLoras().then((initialLoras) => {
+                // Store the full lora objects with mtime data
+                nodeType.prototype.lorasCache = initialLoras;
+                nodeType.prototype.lorasCacheLoaded = true;
+                
+                // Trigger a redraw of all existing nodes to update their UI
+                app.graph._nodes.forEach(node => {
+                    if (node.type === "WanVideoPowerLoraLoader") {
+                        node.setDirtyCanvas(true, true);
                     }
-                }
-
-                // Add back the non-lora widgets
-                this.addNonLoraWidgets();
-
-                // Restore size
-                this.size[0] = Math.max(MINIMUM_NODE_WIDTH, this._tempWidth);
-                this.size[1] = Math.max(this._tempHeight, this.computeSize()[1]);
-            };
+                });
+            }).catch(error => {
+                console.error("[WanVideoPowerLoraLoader] Error loading loras:", error);
+                nodeType.prototype.lorasCacheLoaded = true; // Set flag even on error to avoid infinite loading
+            });
 
             // Add the missing addCustomWidget method that ComfyUI needs
             nodeType.prototype.addCustomWidget = function(widget) {
@@ -1295,17 +806,42 @@ app.registerExtension({
                     const localPos = [pos[0], pos[1] - (widget.last_y || 0)];
                     return originalMouse?.call(this, event, localPos, node);
                 };
+                
+                // Mark node as needing widget serialization
+                this.serialize_widgets = true;
 
                 return widget;
             };
 
-            nodeType.prototype.onNodeCreated = function() {
-                const result = onNodeCreated?.apply(this, arguments);
+            // Add method to add new lora widget (for the button)
+            nodeType.prototype.addNewLoraWidget = function (loraName) {
+                this.loraWidgetsCounter++; // Increment counter like the original
+                const loraWidget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
+                if (loraName) {
+                    loraWidget.setLora(loraName); // Use setLora to properly set the lora name and check for low variant
+                }
+                
+                // Ensure the widget is properly serialized
+                this.serialize_widgets = true;
+                
+                // Find the Add Lora button and insert before it to keep button at bottom
+                const addButtonIndex = this.widgets.findIndex(w => w instanceof RgthreeBetterButtonWidget && w.label === "➕ Add Lora");
+                if (addButtonIndex !== -1) {
+                    moveArrayItem(this.widgets, loraWidget, addButtonIndex);
+                } else if (this.widgetButtonSpacer) {
+                    // Fallback to spacer if button not found yet
+                    moveArrayItem(this.widgets, loraWidget, this.widgets.indexOf(this.widgetButtonSpacer));
+                }
+                
+                return loraWidget;
+            };
 
+            // Add onNodeCreated method to the node prototype for ComfyUI compatibility
+            nodeType.prototype.onNodeCreated = function() {
+                // Initialize node properties
                 this.serialize_widgets = true;
                 this.loraWidgetsCounter = 0;
                 this.widgetButtonSpacer = null;
-                this.lorasCache = []; // Cache loras for performance
                 this.properties = this.properties || {};
                 this.properties[PROP_LABEL_SHOW_STRENGTHS] = PROP_VALUE_SHOW_STRENGTHS_SINGLE;
                 if (this.properties['low_mem_load'] === undefined) {
@@ -1317,143 +853,146 @@ app.registerExtension({
                 if (this.properties['overwrite_duplicates'] === undefined) {
                     this.properties['overwrite_duplicates'] = false;
                 }
+                if (this.properties['Favorites only'] === undefined) {
+                    this.properties['Favorites only'] = loadFavoritesOnly();
+                }
 
-                // Pre-fetch loras for better performance
-                getWanVideoLoras().then((lorasDetails) => {
-                    this.lorasCache = lorasDetails.map((l) => l.file);
-                });
+                // Initialize favorites
+                this.favorites = loadFavorites();
 
+                // Add non lora widgets
                 this.addNonLoraWidgets();
 
+                // Ensure minimum size
                 const computed = this.computeSize();
                 this.size = this.size || [0, 0];
                 this.size[0] = Math.max(MINIMUM_NODE_WIDTH, this.size[0], computed[0]);
                 this.size[1] = Math.max(this.size[1], computed[1]);
+                
+                // Force a redraw to ensure the UI is visible
                 this.setDirtyCanvas(true, true);
-
-                return result;
             };
 
-            nodeType.prototype.addNewLoraWidget = function(lora) {
-                this.loraWidgetsCounter++;
-                const widget = this.addCustomWidget(new PowerLoraLoaderWidget("lora_" + this.loraWidgetsCounter));
-                if (lora)
-                    widget.setLora(lora);
-
-                // Insert before the spacer to keep Add Lora button at bottom
-                if (this.widgetButtonSpacer) {
-                    moveArrayItem(this.widgets, widget, this.widgets.indexOf(this.widgetButtonSpacer));
-                }
-                return widget;
-            };
-
-            // Add context menu methods for right-click functionality
-            nodeType.prototype.getSlotInPosition = function(canvasX, canvasY) {
-                const slot = LGraphNode.prototype.getSlotInPosition?.call(this, canvasX, canvasY);
-                if (!slot) {
-                    let lastWidget = null;
+            // Override the clone method to preserve LoRA widgets when copying
+            const originalClone = nodeType.prototype.clone;
+            nodeType.prototype.clone = function() {
+                // First, call the original clone function to get base node
+                const cloned = originalClone.apply(this, arguments);
+                
+                // Copy favorites
+                cloned.favorites = [...this.favorites];
+                
+                // Clear the cloned node's widgets to prevent duplication during addNonLoraWidgets
+                cloned.widgets = [];
+                
+                // Store the original Lora widgets' values to recreate them
+                const loraWidgetValues = [];
+                if (this.widgets) {
                     for (const widget of this.widgets) {
-                        if (!widget.last_y)
-                            return;
-                        if (canvasY > this.pos[1] + widget.last_y) {
-                            lastWidget = widget;
-                            continue;
+                        if (widget.name?.startsWith("lora_")) {
+                            loraWidgetValues.push({
+                                name: widget.name,
+                                value: { ...widget.value }
+                            });
                         }
-                        break;
-                    }
-                    if (lastWidget?.name?.startsWith("lora_")) {
-                        return { widget: lastWidget, output: { type: "LORA WIDGET" } };
                     }
                 }
-                return slot;
-            };
-
-            nodeType.prototype.getSlotMenuOptions = function(slot) {
-                if (slot?.widget?.name?.startsWith("lora_")) {
-                    const widget = slot.widget;
-                    const index = this.widgets.indexOf(widget);
-                    const canMoveUp = !!this.widgets[index - 1]?.name?.startsWith("lora_");
-                    const canMoveDown = !!this.widgets[index + 1]?.name?.startsWith("lora_");
-
-                    // Return menu items in ComfyUI's expected format for getSlotMenuOptions
-                    const menuItems = [
-                        {
-                            content: `ℹ️ Show Info`,
-                            callback: () => {
-                                widget.showLoraInfoDialog();
-                            },
-                        },
-                        null, // separator
-                        {
-                            content: `${widget.value.on ? "⚫" : "🟢"} Toggle ${widget.value.on ? "Off" : "On"}`,
-                            callback: () => {
-                                widget.value.on = !widget.value.on;
-                                this.setDirtyCanvas(true, true);
-                            },
-                        },
-                        {
-                            content: `⬆️ Move Up`,
-                            disabled: !canMoveUp,
-                            callback: () => {
-                                moveArrayItem(this.widgets, widget, index - 1);
-                                this.setDirtyCanvas(true, true);
-                            },
-                        },
-                        {
-                            content: `⬇️ Move Down`,
-                            disabled: !canMoveDown,
-                            callback: () => {
-                                moveArrayItem(this.widgets, widget, index + 1);
-                                this.setDirtyCanvas(true, true);
-                            },
-                        },
-                        {
-                            content: `🗑️ Remove`,
-                            callback: () => {
-                                removeArrayItem(this.widgets, widget);
-                                const computed = this.computeSize();
-                                this.size[1] = Math.max(this._tempHeight || 15, computed[1]);
-                                this.setDirtyCanvas(true, true);
-                            },
-                        },
-                    ];
-
-                    // Return the menu items and let ComfyUI handle the context menu creation
-                    return menuItems;
+                
+                // Add non lora widgets to the cloned node first
+                cloned.addNonLoraWidgets();
+                
+                // Then add the Lora widgets after non-Lora widgets are in place
+                for (const loraWidgetData of loraWidgetValues) {
+                    const clonedWidget = cloned.addCustomWidget(new PowerLoraLoaderWidget(loraWidgetData.name));
+                    clonedWidget.value = { ...loraWidgetData.value };
+                    clonedWidget.parent = cloned;
+                    
+                    // Move the widget to the correct position before the Add Lora button
+                    const addButtonIndex = cloned.widgets.findIndex(w => w instanceof RgthreeBetterButtonWidget && w.label === "➕ Add Lora");
+                    if (addButtonIndex !== -1) {
+                        moveArrayItem(cloned.widgets, clonedWidget, addButtonIndex);
+                    } else if (cloned.widgetButtonSpacer) {
+                        // Fallback to spacer if button not found yet
+                        moveArrayItem(cloned.widgets, clonedWidget, cloned.widgets.indexOf(cloned.widgetButtonSpacer));
+                    }
                 }
-                return LGraphNode.prototype.getSlotMenuOptions?.call(this, slot);
+                
+                // Restore size from original
+                cloned.size = [...this.size];
+                
+                return cloned;
             };
 
-            nodeType.prototype.addNonLoraWidgets = function() {
+            // Add method to add non lora widgets so they can be placed correctly
+            nodeType.prototype.addNonLoraWidgets = function () {
                 this.widgets = this.widgets || [];
-                // Add divider at position 0
-                moveArrayItem(this.widgets, this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 })), 0);
+                
+                // Check if widgets already exist to prevent duplicates
+                const hasOptionsWidget = this.widgets.find(w => w instanceof OptionsWidget);
+                const hasHeaderWidget = this.widgets.find(w => w instanceof PowerLoraLoaderHeaderWidget);
+                const hasAddButton = this.widgets.find(w => w instanceof RgthreeBetterButtonWidget && w.label === "➕ Add Lora");
+                
+                // Only add widgets if they don't already exist
+                if (!hasOptionsWidget) {
+                    // Add divider at position 0
+                    moveArrayItem(this.widgets, this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 })), 0);
 
-                // Add options widget at position 1
-                moveArrayItem(this.widgets, this.addCustomWidget(new OptionsWidget()), 1);
+                    // Add options widget at position 1
+                    moveArrayItem(this.widgets, this.addCustomWidget(new OptionsWidget()), 1);
+                }
+                
+                if (!hasHeaderWidget) {
+                    // Add header at position 2
+                    moveArrayItem(this.widgets, this.addCustomWidget(new PowerLoraLoaderHeaderWidget()), 2);
+                }
+                
+                // Add spacer before button (check if it exists)
+                if (!this.widgetButtonSpacer) {
+                    this.widgetButtonSpacer = this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 }));
+                }
 
-                // Add header at position 2
-                moveArrayItem(this.widgets, this.addCustomWidget(new PowerLoraLoaderHeaderWidget()), 2);
+                if (!hasAddButton) {
+                    // Add button (will be at the end)
+                    this.addCustomWidget(new RgthreeBetterButtonWidget("➕ Add Lora", (event, pos, node) => {
+                        const sort = node.properties["Sort by"] || "Latest";
+                        // Always load favoritesOnly from persistence to ensure it's up-to-date
+                        const favoritesOnly = loadFavoritesOnly();
+                        // Update the node property to keep it in sync
+                        node.properties["Favorites only"] = favoritesOnly;
 
-                // Add spacer before button
-                this.widgetButtonSpacer = this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 }));
-
-                // Add button (will be at the end)
-                this.addCustomWidget(new RgthreeBetterButtonWidget("➕ Add Lora", (event, pos, node) => {
-                    // Use cached loras for instant response
-                    const loras = this.lorasCache.length > 0 ? this.lorasCache : ["none"];
-                    showLoraChooser(event, (value) => {
-                        if (typeof value === "string") {
-                            if (value !== "None" && value !== "none") {
-                                this.addNewLoraWidget(value);
-                                const computed = this.computeSize();
-                                this.size[1] = Math.max(this.size[1], computed[1]);
-                                this.setDirtyCanvas(true, true);
-                            }
+                        // Ensure favorites array exists
+                        if (!node.favorites) {
+                            node.favorites = loadFavorites();
                         }
-                    }, null, [...loras]);
-                    return true;
-                }));
+
+                        const onFavoriteToggle = (loraName) => {
+                            const index = node.favorites.indexOf(loraName);
+                            if (index > -1) {
+                                node.favorites.splice(index, 1);
+                            } else {
+                                node.favorites.push(loraName);
+                            }
+                            saveFavorites(node.favorites);
+                        };
+
+                        // Load folders visible state from persistence
+                        const foldersVisible = loadFoldersVisible();
+                        
+                        // Use cached loras for instant response
+                        const loras = this.constructor.prototype.lorasCache.length > 0 ? this.constructor.prototype.lorasCache : [];
+                        showLoraPicker(event, (value) => {
+                            if (typeof value === "string") {
+                                if (value !== "None" && value !== "none") {
+                                    this.addNewLoraWidget(value);
+                                    const computed = this.computeSize();
+                                    this.size[1] = Math.max(this.size[1], computed[1]);
+                                    this.setDirtyCanvas(true, true);
+                                }
+                            }
+                        }, null, [...loras, "None"], sort, node.favorites, favoritesOnly, onFavoriteToggle, foldersVisible);
+                        return true;
+                    }));
+                }
             };
 
             // Add helper methods for header widget
@@ -1490,44 +1029,50 @@ app.registerExtension({
 
             // Add refreshComboInNode method to handle R key press for reloading definitions
             nodeType.prototype.refreshComboInNode = function(defs) {
-                console.log('[WanVideoPowerLoraLoader] Refreshing LoRA cache due to R key press');
                 // Clear the cache and force refresh
-                this.lorasCache = [];
+                this.constructor.prototype.lorasCache = [];
+                this.constructor.prototype.lorasCacheLoaded = false;
 
                 // Fetch fresh loras and update cache
                 getWanVideoLoras().then((lorasDetails) => {
-                    this.lorasCache = lorasDetails.map((l) => l.file);
-                    console.log(`[WanVideoPowerLoraLoader] Refreshed LoRA cache with ${this.lorasCache.length} items`);
+                    // Store the full lora objects with mtime data
+                    this.constructor.prototype.lorasCache = lorasDetails;
+                    this.constructor.prototype.lorasCacheLoaded = true;
 
-                    // Update any existing widgets that might need the fresh data
-                    for (const widget of this.widgets || []) {
-                        if (widget.name?.startsWith("lora_")) {
-                            // Update the widget's parent reference to this node
-                            widget.parent = this;
+                    // Update all nodes of this type
+                    app.graph._nodes.forEach(node => {
+                        if (node.type === "WanVideoPowerLoraLoader") {
+                            // Update any existing widgets that might need the fresh data
+                            for (const widget of node.widgets || []) {
+                                if (widget.name?.startsWith("lora_")) {
+                                    // Update the widget's parent reference to this node
+                                    widget.parent = node;
 
-                            // Refresh low variant detection for existing LoRAs with new cache
-                            if (widget.value?.lora && widget.value.lora !== "None") {
-                                const oldIsLow = widget.value.is_low;
-                                const oldVariantName = widget.value.low_variant_name;
+                                    // Refresh low variant detection for existing LoRAs with new cache
+                                    if (widget.value?.lora && widget.value.lora !== "None") {
+                                        const oldIsLow = widget.value.is_low;
+                                        const oldVariantName = widget.value.low_variant_name;
 
-                                // Re-run the low variant check with updated cache
-                                widget.checkLowLoraVariant(widget.value.lora);
+                                        // Re-run the low variant check with updated cache
+                                        widget.checkLowLoraVariant(widget.value.lora);
 
-                                // Log changes in low variant detection
-                                if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
-                                    console.log(`[WanVideoPowerLoraLoader] Low variant status changed for '${widget.value.lora}': ` +
-                                              `${oldIsLow} -> ${widget.value.is_low}, ` +
-                                              `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
+                                        // Log changes in low variant detection
+                                        if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
+                                            console.log(`[WanVideoPowerLoraLoader] Low variant status changed for '${widget.value.lora}': ` +
+                                                      `${oldIsLow} -> ${widget.value.is_low}, ` +
+                                                      `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
+                                        }
+                                    }
                                 }
                             }
-                        }
-                    }
 
-                    // Trigger a redraw to update the green low icons
-                    this.setDirtyCanvas(true, true);
-                    console.log('[WanVideoPowerLoraLoader] Low variant detection refreshed for all widgets');
+                            // Trigger a redraw to update the green low icons
+                            node.setDirtyCanvas(true, true);
+                        }
+                    });
                 }).catch(error => {
                     console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA cache:', error);
+                    this.constructor.prototype.lorasCacheLoaded = true; // Set flag even on error
                 });
             };
 
@@ -1563,6 +1108,260 @@ app.registerExtension({
                 type: 'boolean',
                 default: false,
             };
+            nodeType['@Favorites only'] = {
+                type: 'boolean',
+                default: false,
+            };
+            
+            // Add method to compute size properly
+            nodeType.prototype.computeSize = function(width) {
+                const minWidth = MINIMUM_NODE_WIDTH;
+                const minHeight = 100; // Base height
+                let computedHeight = minHeight;
+                
+                // Calculate height based on number of lora widgets
+                if (this.widgets) {
+                    const loraWidgets = this.widgets.filter(w => w.name?.startsWith("lora_"));
+                    if (loraWidgets.length > 0) {
+                        computedHeight += loraWidgets.length * LiteGraph.NODE_WIDGET_HEIGHT;
+                    }
+                }
+                
+                // Account for other widgets too
+                if (this.widgets) {
+                    // Count non-lora widgets that contribute to height
+                    const nonLoraWidgets = this.widgets.filter(w => !w.name?.startsWith("lora_") && 
+                                                                  !(w.computeSize === undefined));
+                    if (nonLoraWidgets.length > 0) {
+                        for (const widget of nonLoraWidgets) {
+                            if (widget.computeSize) {
+                                const widgetSize = widget.computeSize(width || this.size[0]);
+                                if (widgetSize && widgetSize[1]) {
+                                    computedHeight += widgetSize[1];
+                                } else {
+                                    computedHeight += LiteGraph.NODE_WIDGET_HEIGHT;
+                                }
+                            } else {
+                                computedHeight += LiteGraph.NODE_WIDGET_HEIGHT;
+                            }
+                        }
+                    } else {
+                        // If there are no special computeSize widgets, just add base amount for non-lora widgets
+                        const otherWidgetsCount = this.widgets.length - (this.widgets.filter(w => w.name?.startsWith("lora_")).length);
+                        computedHeight += otherWidgetsCount * LiteGraph.NODE_WIDGET_HEIGHT;
+                    }
+                }
+                
+                return [minWidth, computedHeight];
+            };
+            
+            // Add context menu methods to the node type prototype
+            nodeType.prototype.getSlotInPosition = getLoraSlotInPosition;
+            nodeType.prototype.getSlotMenuOptions = getLoraSlotMenuOptions;
+        }
+    },
+    configure(node, nodeData) {
+        if(node.type === "WanVideoPowerLoraLoader") {
+            // Clear existing widgets using ComfyUI's method but keep non-Lora widgets
+            if (node.widgets) {
+                // Keep track of non-Lora widgets to restore them
+                const nonLoraWidgets = node.widgets.filter(w => !w.name?.startsWith("lora_"));
+                node.widgets = [...nonLoraWidgets]; // Keep only non-Lora widgets
+            }
+            
+            // Initialize favorites if not already done
+            if (!node.favorites) {
+                node.favorites = loadFavorites();
+            }
+
+            // Restore Lora widgets from saved data
+            // Use nodeData.widgets_values which should contain the original widget values
+            const widgetValues = nodeData.widgets_values || [];
+            for (const widgetValue of widgetValues) {
+                if (widgetValue?.lora !== undefined) {
+                    const widget = node.addNewLoraWidget();
+                    
+                    // Ensure low_strength is preserved during restore
+                    const restoredValue = { ...widgetValue };
+                    if (restoredValue.low_strength === undefined) {
+                        restoredValue.low_strength = 1;
+                    }
+                    widget.value = restoredValue;
+                }
+            }
+
+            // Add back the non-lora widgets if they're not already there
+            if (!node.widgets || node.widgets.length === 0) {
+                node.addNonLoraWidgets();
+            }
+            
+            // Ensure proper serialization
+            node.serialize_widgets = true;
+            
+            // Update parent references for all widgets
+            for (const widget of node.widgets || []) {
+                if (widget.name?.startsWith("lora_")) {
+                    widget.parent = node;
+                    // Re-check low variant if lora is set and cache is available
+                    if (widget.value?.lora && widget.value.lora !== "None" && node.constructor.prototype.lorasCacheLoaded) {
+                        widget.checkLowLoraVariant(widget.value.lora);
+                    }
+                }
+            }
+            
+            // Force a redraw to ensure the UI is visible
+            node.setDirtyCanvas(true, true);
+        }
+    },
+    nodeCreated(node) {
+        if(node.type === "WanVideoPowerLoraLoader") {
+            // Initialize favorites for this node instance
+            node.favorites = loadFavorites();
+            
+            // Call the onNodeCreated method if it exists
+            if (typeof node.onNodeCreated === 'function') {
+                node.onNodeCreated();
+            }
+            
+            // Set up cache loading listener
+            const updateWidgetReferences = () => {
+                // Update parent references for all widgets
+                for (const widget of node.widgets || []) {
+                    if (widget.name?.startsWith("lora_")) {
+                        widget.parent = node;
+                        // Re-check low variant if lora is set
+                        if (widget.value?.lora && widget.value.lora !== "None") {
+                            widget.checkLowLoraVariant(widget.value.lora);
+                        }
+                    }
+                }
+                // Force a redraw to update the UI
+                node.setDirtyCanvas(true, true);
+            };
+            
+            // If loras cache is already loaded, update immediately
+            if (node.constructor.prototype.lorasCacheLoaded) {
+                setTimeout(updateWidgetReferences, 100);
+            } else {
+                // Set up a listener to update when cache is loaded
+                const checkCache = setInterval(() => {
+                    if (node.constructor.prototype.lorasCacheLoaded) {
+                        clearInterval(checkCache);
+                        updateWidgetReferences();
+                    }
+                }, 100);
+                
+                // Clear the interval after 10 seconds to prevent memory leaks
+                setTimeout(() => {
+                    clearInterval(checkCache);
+                }, 10000);
+            }
+        }
+    },
+    loadedGraphNode(node, app) {
+        if(node?.constructor?.nodeData?.name === "WanVideoPowerLoraLoader") {
+            // Initialize favorites for this node instance
+            node.favorites = loadFavorites();
+            
+            // Initialize properties if they don't exist
+            node.properties = node.properties || {};
+            if (node.properties['low_mem_load'] === undefined) node.properties['low_mem_load'] = true;
+            if (node.properties['merge_loras'] === undefined) node.properties['merge_loras'] = false;
+            if (node.properties['overwrite_duplicates'] === undefined) node.properties['overwrite_duplicates'] = false;
+            if (node.properties['Favorites only'] === undefined) node.properties['Favorites only'] = loadFavoritesOnly();
+            if (node.properties[PROP_LABEL_SHOW_STRENGTHS] === undefined) {
+                node.properties[PROP_LABEL_SHOW_STRENGTHS] = PROP_VALUE_SHOW_STRENGTHS_SINGLE;
+            }
+            
+            // Clear widgets array first to prevent duplicates
+            node.widgets = [];
+            
+            // Restore LoRA widgets from saved widget values
+            // node.widgets_values is an array of widget values, not an object
+            const widgetValues = node.widgets_values || [];
+            
+            // Filter out the non-Lora widgets (the options and header widgets) and only process Lora ones
+            // We need to identify which values belong to Lora widgets by checking for required Lora properties
+            for (let i = 0; i < widgetValues.length; i++) {
+                const widgetValue = widgetValues[i];
+                
+                // Check if this widget value is a Lora widget by checking for required Lora properties
+                if (widgetValue && typeof widgetValue === "object" && 
+                    'lora' in widgetValue && 'on' in widgetValue && 'strength' in widgetValue) {
+                    
+                    // Create a new widget with the saved data
+                    // We need to generate the proper widget name based on position
+                    const widgetName = `lora_${i}`;
+                    const loraWidget = new PowerLoraLoaderWidget(widgetName);
+                    loraWidget.value = { ...DEFAULT_LORA_WIDGET_DATA, ...widgetValue };
+                    loraWidget.parent = node;
+                    
+                    // Add the widget to the node
+                    node.addCustomWidget(loraWidget);
+                    
+                    // Move the widget to the correct position before the Add Lora button
+                    const addButtonIndex = node.widgets.findIndex(w => w instanceof RgthreeBetterButtonWidget && w.label === "➕ Add Lora");
+                    if (addButtonIndex !== -1) {
+                        moveArrayItem(node.widgets, loraWidget, addButtonIndex);
+                    } else if (node.widgetButtonSpacer) {
+                        // Fallback to spacer if button not found yet
+                        moveArrayItem(node.widgets, loraWidget, node.widgets.indexOf(node.widgetButtonSpacer));
+                    }
+                }
+            }
+            
+            // Add non lora widgets after the node is loaded
+            node.addNonLoraWidgets();
+            
+            // Make sure we have the right size
+            const computed = node.computeSize();
+            node.size[1] = Math.max(node.size[1], computed[1]);
+            
+            // Function to update widget parent references and check low variants
+            const updateWidgetReferences = () => {
+                // Update parent references for all widgets
+                for (const widget of node.widgets || []) {
+                    if (widget.name?.startsWith("lora_")) {
+                        widget.parent = node;
+                        // Re-check low variant if lora is set
+                        if (widget.value?.lora && widget.value.lora !== "None") {
+                            widget.checkLowLoraVariant(widget.value.lora);
+                        }
+                    }
+                }
+                // Force a redraw to update the UI
+                node.setDirtyCanvas(true, true);
+            };
+            
+            // If loras cache is already loaded, update immediately
+            if (node.constructor.prototype.lorasCacheLoaded) {
+                updateWidgetReferences();
+            } else {
+                // Set up a listener to update when cache is loaded
+                const checkCache = setInterval(() => {
+                    if (node.constructor.prototype.lorasCacheLoaded) {
+                        clearInterval(checkCache);
+                        updateWidgetReferences();
+                    }
+                }, 100); // Check every 100ms
+                
+                // Clear the interval after 10 seconds to prevent memory leaks
+                setTimeout(() => {
+                    clearInterval(checkCache);
+                }, 10000);
+            }
+        }
+    },
+    onRemoved: function () {
+        // When the node is removed, clear all non-Lora widgets
+        // to prevent UI conflicts when a new node is added.
+        if (this.widgets) {
+            for (let i = this.widgets.length - 1; i >= 0; i--) {
+                const widget = this.widgets[i];
+                if (widget.type !== 'custom' || !widget.name?.startsWith('lora_')) {
+                    this.widgets.splice(i, 1);
+                }
+            }
         }
     },
 });

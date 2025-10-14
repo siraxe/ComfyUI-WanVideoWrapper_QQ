@@ -57,18 +57,18 @@ class WanInfoDialog extends WanDialog {
 
     async injectCss(fileName) {
         const css = `
-            /* Base dialog styling - exact rgthree colors */
+            /* Base dialog styling - match power lora UI */
             .wan-dialog {
                 outline: 0;
-                border: 0;
-                border-radius: 6px;
-                background: #414141;
-                color: #fff;
-                box-shadow: inset 1px 1px 0px rgba(255, 255, 255, 0.05), inset -1px -1px 0px rgba(0, 0, 0, 0.5), 2px 2px 20px rgb(0, 0, 0);
+                border: 1px solid #000;
+                border-radius: 0px;
+                background: #1a1a1a;
+                color: #ddd;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.8);
                 max-width: 800px;
                 box-sizing: border-box;
-                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-                font-size: 1rem;
+                font-family: Arial, sans-serif;
+                font-size: 12px;
                 padding: 0;
                 max-height: calc(100% - 32px);
             }
@@ -76,19 +76,19 @@ class WanInfoDialog extends WanDialog {
                 box-sizing: inherit;
             }
             .wan-dialog-container > * {
-                padding: 8px 16px;
+                padding: 4px 8px;
             }
             .wan-dialog-container > *:first-child {
-                padding-top: 16px;
+                padding-top: 8px;
             }
             .wan-dialog-container > *:last-child {
-                padding-bottom: 16px;
+                padding-bottom: 8px;
             }
             .wan-dialog-container-title h2 {
-                font-size: 1.375rem;
+                font-size: 14px;
                 margin: 0;
                 font-weight: bold;
-                color: #fff;
+                color: #ddd;
             }
             .wan-dialog-container-content {
                 overflow: auto;
@@ -103,7 +103,7 @@ class WanInfoDialog extends WanDialog {
                 filter: blur(5px);
             }
 
-            /* Info dialog specific styling - exact rgthree */
+            /* Info dialog specific styling - match power lora UI */
             .rgthree-info-dialog {
                 width: 90vw;
                 max-width: 960px;
@@ -120,33 +120,31 @@ class WanInfoDialog extends WanDialog {
                 vertical-align: top;
             }
             .rgthree-info-dialog .rgthree-info-area > li + li {
-                margin-left: 6px;
+                margin-left: 4px;
             }
             .rgthree-info-dialog .rgthree-info-area > li:not(.-link) + li.-link {
                 margin-left: auto;
             }
             .rgthree-info-dialog .rgthree-info-area > li.rgthree-info-tag > * {
-                min-height: 24px;
-                border-radius: 4px;
+                min-height: 20px;
+                border-radius: 0px;
                 line-height: 1;
-                color: rgba(255, 255, 255, 0.85);
-                background: rgb(69, 92, 85);
-                font-size: 14px;
+                color: #ddd;
+                background: #2a2a2a;
+                font-size: 11px;
                 font-weight: bold;
                 text-decoration: none;
                 display: flex;
-                height: 1.6em;
-                padding-left: 0.5em;
-                padding-right: 0.5em;
-                padding-bottom: 0.1em;
+                height: 1.4em;
+                padding: 2px 6px;
                 align-content: center;
                 justify-content: center;
                 align-items: center;
-                box-shadow: inset 0px 0px 0 1px rgba(0, 0, 0, 0.5);
+                border: 1px solid #333;
             }
             .rgthree-info-dialog .rgthree-info-area > li.-type > * {
-                background: rgb(73, 54, 94);
-                color: rgb(228, 209, 248);
+                background: #2a2a2a;
+                color: #89B;
             }
             .rgthree-info-dialog .rgthree-info-area > li.rgthree-info-tag > * > svg {
                 width: 16px;
@@ -156,26 +154,27 @@ class WanInfoDialog extends WanDialog {
                 display: none;
             }
 
-            /* Table styling - exact rgthree */
+            /* Table styling - match power lora UI */
             .rgthree-info-dialog .rgthree-info-table {
                 border-collapse: collapse;
-                margin: 16px 0px;
+                margin: 8px 0px;
                 width: 100%;
-                font-size: 12px;
+                font-size: 11px;
             }
             .rgthree-info-dialog .rgthree-info-table td {
                 position: relative;
-                border: 1px solid rgba(255, 255, 255, 0.25);
+                border: 1px solid #333;
                 padding: 0;
                 vertical-align: top;
+                background: #1a1a1a;
             }
             .rgthree-info-dialog .rgthree-info-table td:first-child {
-                background: rgba(255, 255, 255, 0.075);
+                background: #222;
                 width: 10px;
             }
             .rgthree-info-dialog .rgthree-info-table td:first-child > *:first-child {
                 white-space: nowrap;
-                padding-right: 32px;
+                padding-right: 24px;
             }
             .rgthree-info-dialog .rgthree-info-table td:first-child small {
                 display: block;
@@ -192,106 +191,93 @@ class WanInfoDialog extends WanDialog {
             .rgthree-info-dialog .rgthree-info-table td a,
             .rgthree-info-dialog .rgthree-info-table td a:hover,
             .rgthree-info-dialog .rgthree-info-table td a:visited {
-                color: inherit;
+                color: #89B;
             }
             .rgthree-info-dialog .rgthree-info-table td svg {
-                width: 1.3333em;
-                height: 1.3333em;
-                vertical-align: -0.285em;
+                width: 1.2em;
+                height: 1.2em;
+                vertical-align: -0.2em;
             }
             .rgthree-info-dialog .rgthree-info-table td svg.logo-civitai {
-                margin-right: 0.3333em;
+                margin-right: 0.2em;
             }
             .rgthree-info-dialog .rgthree-info-table td > *:first-child {
                 display: block;
-                padding: 6px 10px;
+                padding: 4px 8px;
             }
             .rgthree-info-dialog .rgthree-info-table td > input,
             .rgthree-info-dialog .rgthree-info-table td > textarea {
-                padding: 5px 10px;
-                border: 0;
-                box-shadow: inset 1px 1px 5px 0px rgba(0, 0, 0, 0.5);
-                font: inherit;
+                padding: 4px 6px;
+                border: 1px solid #333;
+                box-shadow: none;
+                font-family: Arial, sans-serif;
+                font-size: 11px;
                 appearance: none;
-                background: #fff;
-                color: #121212;
+                background: #222;
+                color: #ddd;
                 resize: vertical;
                 width: 100%;
+            }
+            .rgthree-info-dialog .rgthree-info-table td > input:focus,
+            .rgthree-info-dialog .rgthree-info-table td > textarea:focus {
+                border-color: #555;
+                background: #2a2a2a;
+                outline: none;
             }
             .rgthree-info-dialog .rgthree-info-table tr[data-field-name=userNote] td > span:first-child {
                 white-space: pre;
             }
             .rgthree-info-dialog .rgthree-info-table td .-help {
-                border: 1px solid currentColor;
+                border: 1px solid #555;
                 position: absolute;
-                right: 5px;
-                top: 6px;
+                right: 4px;
+                top: 4px;
                 line-height: 1;
-                font-size: 11px;
+                font-size: 10px;
                 width: 12px;
                 height: 12px;
-                border-radius: 8px;
+                border-radius: 0px;
                 display: flex;
                 align-content: center;
                 justify-content: center;
                 cursor: help;
+                background: #222;
             }
             .rgthree-info-dialog .rgthree-info-table td .-help::before {
                 content: "?";
             }
 
-            /* Button styling - exact rgthree */
+            /* Button styling - match power lora UI */
             .rgthree-button {
-                --padding-top: 7px;
-                --padding-bottom: 9px;
-                --padding-x: 16px;
                 position: relative;
                 cursor: pointer;
-                border: 0;
-                border-radius: 0.25rem;
-                background: rgba(0, 0, 0, 0.5);
-                color: white;
-                font-family: system-ui, sans-serif;
-                font-size: 1rem;
+                border: 1px solid #000;
+                border-radius: 0px;
+                background: #1a1a1a;
+                color: #ddd;
+                font-family: Arial, sans-serif;
+                font-size: 11px;
                 line-height: 1;
                 white-space: nowrap;
                 text-decoration: none;
-                margin: 0.25rem;
-                box-shadow: 0px 0px 2px rgb(0, 0, 0);
-                background: #212121;
+                margin: 2px;
+                box-shadow: none;
                 transition: all 0.1s ease-in-out;
-                padding: var(--padding-top) var(--padding-x) var(--padding-bottom);
+                padding: 4px 8px;
                 display: inline-flex;
                 flex-direction: row;
                 align-items: center;
                 justify-content: center;
             }
-            .rgthree-button::before, .rgthree-button::after {
-                content: "";
-                display: block;
-                position: absolute;
-                border-radius: 0.25rem;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: 100%;
-                box-shadow: inset 1px 1px 0px rgba(255, 255, 255, 0.12), inset -1px -1px 0px rgba(0, 0, 0, 0.75);
-                background: linear-gradient(to bottom, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.15));
-                mix-blend-mode: screen;
-            }
-            .rgthree-button::after {
-                mix-blend-mode: multiply;
-            }
             .rgthree-button:hover {
-                background: #303030;
+                background: #2a2a2a;
             }
             .rgthree-button:active {
-                box-shadow: 0px 0px 0px rgba(0, 0, 0, 0);
-                background: #121212;
+                background: #333;
             }
             .rgthree-info-dialog .rgthree-info-table .rgthree-button[data-action=fetch-civitai] {
                 font-size: inherit;
-                padding: 6px 16px;
+                padding: 4px 8px;
                 margin: 2px;
             }
 
@@ -300,17 +286,18 @@ class WanInfoDialog extends WanDialog {
                 background: none;
                 border: none;
                 cursor: pointer;
-                padding: 4px;
-                color: #fff;
+                padding: 2px;
+                color: #ddd;
                 opacity: 0.7;
                 display: flex;
-                width: 28px;
-                height: 28px;
+                width: 24px;
+                height: 24px;
                 align-items: center;
                 justify-content: center;
             }
             .rgthree-button-edit:hover {
                 opacity: 1;
+                color: #89B;
             }
             .rgthree-info-dialog .rgthree-info-table tr.editable button svg + svg {
                 display: none;
@@ -322,10 +309,10 @@ class WanInfoDialog extends WanDialog {
                 display: inline-block;
             }
 
-            /* Trained words styling - exact rgthree */
+            /* Trained words styling - match power lora UI */
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list {
                 list-style: none;
-                padding: 2px 8px;
+                padding: 2px 4px;
                 margin: 0;
                 display: flex;
                 flex-direction: row;
@@ -335,35 +322,35 @@ class WanInfoDialog extends WanDialog {
             }
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list > li {
                 display: inline-flex;
-                margin: 2px;
+                margin: 1px;
                 vertical-align: top;
-                border-radius: 4px;
+                border-radius: 0px;
                 line-height: 1;
-                color: rgba(255, 255, 255, 0.85);
-                background: rgb(73, 91, 106);
-                font-size: 1.2em;
+                color: #ddd;
+                background: #2a2a2a;
+                font-size: 11px;
                 font-weight: 600;
                 text-decoration: none;
                 display: flex;
-                height: 1.6em;
+                height: 1.4em;
                 align-content: center;
                 justify-content: center;
                 align-items: center;
-                box-shadow: inset 0px 0px 0 1px rgba(0, 0, 0, 0.5);
+                border: 1px solid #333;
                 cursor: pointer;
                 white-space: nowrap;
                 max-width: 183px;
             }
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list > li:hover {
-                background: rgb(68, 109, 142);
+                background: #333;
             }
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list > li > svg {
                 width: auto;
-                height: 1.2em;
+                height: 1em;
             }
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list > li > span {
-                padding-left: 0.5em;
-                padding-right: 0.5em;
+                padding-left: 0.3em;
+                padding-right: 0.3em;
                 padding-bottom: 0.1em;
                 text-overflow: ellipsis;
                 overflow: hidden;
@@ -373,14 +360,15 @@ class WanInfoDialog extends WanDialog {
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                padding: 0 0.5em;
+                padding: 0 0.3em;
                 background: rgba(0, 0, 0, 0.2);
             }
             .rgthree-info-dialog .rgthree-info-table td > ul.rgthree-info-trained-words-list > li.-rgthree-is-selected {
-                background: rgb(42, 126, 193);
+                background: #444;
+                color: #89B;
             }
 
-            /* Images styling - exact rgthree */
+            /* Images styling - match power lora UI */
             .rgthree-info-dialog .rgthree-info-images {
                 list-style: none;
                 padding: 0;
@@ -400,9 +388,10 @@ class WanInfoDialog extends WanDialog {
                 flex-direction: column;
                 overflow: hidden;
                 padding: 0;
-                margin: 6px;
+                margin: 4px;
                 font-size: 0;
                 position: relative;
+                border: 1px solid #333;
             }
             .rgthree-info-dialog .rgthree-info-images > li figure {
                 margin: 0;
@@ -417,9 +406,9 @@ class WanInfoDialog extends WanDialog {
                 left: 0;
                 width: 100%;
                 bottom: 0;
-                padding: 12px;
-                font-size: 12px;
-                background: rgba(0, 0, 0, 0.85);
+                padding: 8px;
+                font-size: 11px;
+                background: rgba(0, 0, 0, 0.9);
                 opacity: 0;
                 transform: translateY(50px);
                 transition: all 0.25s ease-in-out;
@@ -427,9 +416,9 @@ class WanInfoDialog extends WanDialog {
             .rgthree-info-dialog .rgthree-info-images > li figure figcaption > span {
                 display: inline-block;
                 padding: 2px 4px;
-                margin: 2px;
-                border-radius: 2px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
+                margin: 1px;
+                border-radius: 0px;
+                border: 1px solid #333;
                 word-break: break-word;
             }
             .rgthree-info-dialog .rgthree-info-images > li figure figcaption > span label {
@@ -441,7 +430,7 @@ class WanInfoDialog extends WanDialog {
                 user-select: none;
             }
             .rgthree-info-dialog .rgthree-info-images > li figure figcaption > span a {
-                color: inherit;
+                color: #89B;
                 text-decoration: underline;
             }
             .rgthree-info-dialog .rgthree-info-images > li figure figcaption > span a:hover {
