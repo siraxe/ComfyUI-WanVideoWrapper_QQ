@@ -480,7 +480,7 @@ export class LoraPickerDialog {
         // Search input
         const searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.placeholder = "Search...";
+        searchInput.placeholder = "Search (multiple words supported)...";
         searchInput.addEventListener("input", () => this.renderList());
         header.appendChild(searchInput);
 
@@ -883,10 +883,32 @@ export class LoraPickerDialog {
         }
 
         if (query) {
-            filteredLoras = filteredLoras.filter(l => (typeof l === 'string' ? l : l.name).toLowerCase().includes(query));
+            filteredLoras = filteredLoras.filter(l => this.matchesSearchQuery((typeof l === 'string' ? l : l.name), query));
         }
 
         return filteredLoras;
+    }
+
+    /**
+     * Check if a LoRA name matches a multi-word search query
+     * @param {string} loraName - The LoRA name to check
+     * @param {string} query - The search query (can contain multiple words)
+     * @returns {boolean} - True if the LoRA matches all words in the query
+     */
+    matchesSearchQuery(loraName, query) {
+        if (!query || !loraName) return false;
+        
+        // Convert to lowercase for case-insensitive matching
+        const lowerLoraName = loraName.toLowerCase();
+        
+        // Split the query into individual words, filtering out empty strings
+        const searchWords = query.split(/\s+/).filter(word => word.length > 0);
+        
+        // If no valid words in query, don't filter
+        if (searchWords.length === 0) return true;
+        
+        // Check if ALL search words are present in the LoRA name
+        return searchWords.every(word => lowerLoraName.includes(word));
     }
 
     updateFolderIndicator() {
