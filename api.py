@@ -12,39 +12,6 @@ import os
 import folder_paths
 from datetime import datetime
 
-@PromptServer.instance.routes.get("/wanvideowrapper_qq/loras")
-async def get_loras_list(request):
-    """API endpoint to get a list of LoRAs with modification times."""
-    try:
-        lora_files = folder_paths.get_filename_list("loras")
-        loras_with_time = []
-        for lora_file in lora_files:
-            # Skip "None" entries that might be in the folder
-            if lora_file.lower() in ["none", "none.safetensors", "none.pt"]:
-                print(f"Skipping 'None' file: {lora_file}")
-                continue
-                
-            try:
-                full_path = folder_paths.get_full_path("loras", lora_file)
-                if full_path:
-                    mtime = os.path.getmtime(full_path)
-                    loras_with_time.append({
-                        "name": lora_file,
-                        "mtime": mtime
-                    })
-            except Exception as e:
-                print(f"Could not get modification time for {lora_file}: {e}")
-                # Still add the lora to the list, just without a modification time
-                loras_with_time.append({
-                    "name": lora_file,
-                    "mtime": 0
-                })
-
-        return web.json_response({"loras": loras_with_time})
-    except Exception as e:
-        print(f"Error getting LoRA list: {e}")
-        return web.json_response({"error": str(e)}, status=500)
-
 def get_bg_folder_path():
     """Get the path to the bg folder where A.jpg and ref_image.jpg are stored"""
     # Look for the bg folder relative to this file

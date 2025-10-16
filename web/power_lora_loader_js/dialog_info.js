@@ -483,7 +483,36 @@ class WanInfoDialog extends WanDialog {
         if (!(info === null || info === void 0 ? void 0 : info.file)) {
             return;
         }
-        if (action === "fetch-civitai") {
+        if (action === "refresh-info") {
+            // Show loading state
+            target.textContent = "Refreshing...";
+            target.disabled = true;
+            
+            try {
+                this.modelInfo = await this.refreshModelInfo(info.file);
+                this.setContent(this.getInfoContent());
+                this.setTitle(((_a = this.modelInfo) === null || _a === void 0 ? void 0 : _a["name"]) || ((_b = this.modelInfo) === null || _b === void 0 ? void 0 : _b["file"]) || "Unknown");
+                
+                // Show success message
+                rgthree.showMessage({
+                    id: "refresh-info-" + generateId(4),
+                    type: "success",
+                    message: "LoRA information refreshed successfully",
+                    timeout: 3000,
+                });
+            } catch (error) {
+                console.error("Error refreshing LoRA info:", error);
+                
+                // Show error message
+                rgthree.showMessage({
+                    id: "refresh-info-error-" + generateId(4),
+                    type: "error",
+                    message: "Failed to refresh LoRA information",
+                    timeout: 3000,
+                });
+            }
+        }
+        else if (action === "fetch-civitai") {
             this.modelInfo = await this.refreshModelInfo(info.file);
             this.setContent(this.getInfoContent());
             this.setTitle(((_a = this.modelInfo) === null || _a === void 0 ? void 0 : _a["name"]) || ((_b = this.modelInfo) === null || _b === void 0 ? void 0 : _b["file"]) || "Unknown");
@@ -564,7 +593,7 @@ class WanInfoDialog extends WanDialog {
       </ul>
 
       <table class="rgthree-info-table">
-        ${infoTableRow("File", info.file || "")}
+        ${infoTableRow("File", `${info.file || ""} <button class="rgthree-button" data-action="refresh-info" style="margin-left: 8px; padding: 2px 6px; font-size: 10px;">↻ Refresh</button>`)}
         ${infoTableRow("Hash (sha256)", info.sha256 || "")}
         ${civitaiLink
             ? infoTableRow("Civitai", `<a href="${civitaiLink}" target="_blank">${logoCivitai}View on Civitai</a>`)

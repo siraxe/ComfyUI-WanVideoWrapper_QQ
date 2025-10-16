@@ -2,6 +2,7 @@ import { app } from "../../../scripts/app.js";
 
 // Function to show context menu for LoRA list items
 function showLoraListContextMenu(event, loraName) {
+    console.log("[LoraPickerDialog] Opening context menu for:", loraName); // Debug log
     // Remove any existing context menu
     const existingMenu = document.getElementById('lora-list-context-menu');
     if (existingMenu) {
@@ -362,6 +363,7 @@ export class LoraPickerDialog {
         });
         this.options = options;
         this.element = null;
+        this.refreshCallback = options.refreshCallback || null;
         // Sidebar width configuration - change this value to adjust width
         this.sidebarWidth = 150;
         // Load favorites only state from persistence if not provided
@@ -443,7 +445,7 @@ export class LoraPickerDialog {
         toggleZone.addEventListener("click", (e) => {
             e.stopPropagation(); // Prevent event bubbling
             this.options.foldersVisible = !this.options.foldersVisible;
-            const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(3)");
+            const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(4)");
             if (foldersContainer) {
                 const foldersText = foldersContainer.querySelector("span");
                 const indicatorLine = foldersContainer.querySelector("div[style*='position: absolute']");
@@ -471,6 +473,16 @@ export class LoraPickerDialog {
                 searchInput.focus();
             }
         }, 10);
+        
+        // Add keyboard listener for R key to refresh
+        this.keydownHandler = (e) => {
+            if (e.key === 'R' && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+                if (this.refreshCallback) {
+                    this.refreshCallback();
+                }
+            }
+        };
+        document.addEventListener('keydown', this.keydownHandler);
     }
 
     createHeader() {
@@ -501,6 +513,35 @@ export class LoraPickerDialog {
             this.renderList();
         });
         header.appendChild(sortDropdown);
+
+        // Add refresh button
+        const refreshContainer = document.createElement("div");
+        refreshContainer.style.display = "flex";
+        refreshContainer.style.alignItems = "center";
+        refreshContainer.style.gap = "5px";
+        refreshContainer.style.cursor = "pointer";
+        refreshContainer.style.margin = "0 10px";
+        refreshContainer.style.padding = "4px 8px";
+        refreshContainer.style.borderRadius = "4px";
+        refreshContainer.style.backgroundColor = "#1a1a1a";
+        refreshContainer.style.userSelect = "none";
+        refreshContainer.title = "Refresh LoRA List (R)";
+        
+        const refreshIcon = document.createElement("span");
+        refreshIcon.textContent = "↻";
+        refreshIcon.style.fontSize = "14px";
+        refreshIcon.style.color = "#aaa";
+        refreshIcon.style.userSelect = "none";
+        
+        refreshContainer.appendChild(refreshIcon);
+        
+        refreshContainer.addEventListener("click", () => {
+            if (this.refreshCallback) {
+                this.refreshCallback();
+            }
+        });
+        
+        header.appendChild(refreshContainer);
 
         // Folders button
         const foldersContainer = document.createElement("div");
@@ -783,7 +824,6 @@ export class LoraPickerDialog {
                 if (this.options.onFavoriteToggle) {
                     this.options.onFavoriteToggle(name);
                 }
-                this.renderList();
             });
             
             starContainer.appendChild(star);
@@ -797,7 +837,9 @@ export class LoraPickerDialog {
 
             item.addEventListener("click", () => {
                 if (this.options.callback) {
-                    this.options.callback(name); // Use the full name for the callback
+                    // Use the full name (including folder path) for the callback
+                    // This ensures the Python code gets the complete path information
+                    this.options.callback(name);
                 }
                 this.close();
             });
@@ -815,43 +857,37 @@ export class LoraPickerDialog {
 
     sortLoras(loras) {
         const sort = this.options.sort || "Latest";
-        // Handle different lora formats
-        let loraNames = loras.map(l => (typeof l === 'string' ? l : l.name));
-
+        
+        // Sort the loras array directly based on the sort option
+        const sortedLoras = [...loras];
+        
         if (sort === "Latest") {
-            // For string-only loras (from cache), fall back to alphabetical sorting
-            const hasMtimeData = loras.some(l => typeof l !== 'string' && l.mtime);
-            
-            if (hasMtimeData) {
-                loraNames.sort((a, b) => {
-                    const aData = loras.find(l => (typeof l === 'string' ? l : l.name) === a);
-                    const bData = loras.find(l => (typeof l === 'string' ? l : l.name) === b);
-                    return (bData?.mtime || 0) - (aData?.mtime || 0);
-                });
-            } else {
-                // Fall back to alphabetical if no mtime data available
-                loraNames.sort((a, b) => a.localeCompare(b));
-            }
+            sortedLoras.sort((a, b) => {
+                const aMtime = (typeof a === 'object' && a.mtime) ? a.mtime : 0;
+                const bMtime = (typeof b === 'object' && b.mtime) ? b.mtime : 0;
+                return bMtime - aMtime; // Descending order (newest first)
+            });
         } else if (sort === "Oldest") {
-            // For string-only loras (from cache), fall back to alphabetical sorting
-            const hasMtimeData = loras.some(l => typeof l !== 'string' && l.mtime);
-            
-            if (hasMtimeData) {
-                loraNames.sort((a, b) => {
-                    const aData = loras.find(l => (typeof l === 'string' ? l : l.name) === a);
-                    const bData = loras.find(l => (typeof l === 'string' ? l : l.name) === b);
-                    return (aData?.mtime || 0) - (bData?.mtime || 0);
-                });
-            } else {
-                // Fall back to alphabetical if no mtime data available
-                loraNames.sort((a, b) => a.localeCompare(b));
-            }
+            sortedLoras.sort((a, b) => {
+                const aMtime = (typeof a === 'object' && a.mtime) ? a.mtime : 0;
+                const bMtime = (typeof b === 'object' && b.mtime) ? b.mtime : 0;
+                return aMtime - bMtime; // Ascending order (oldest first)
+            });
         } else if (sort === "A-Z") {
-            loraNames.sort((a, b) => a.localeCompare(b));
+            sortedLoras.sort((a, b) => {
+                const aName = typeof a === 'string' ? a : a.name;
+                const bName = typeof b === 'string' ? b : b.name;
+                return aName.localeCompare(bName);
+            });
         } else if (sort === "Z-A") {
-            loraNames.sort((a, b) => b.localeCompare(a));
+            sortedLoras.sort((a, b) => {
+                const aName = typeof a === 'string' ? a : a.name;
+                const bName = typeof b === 'string' ? b : b.name;
+                return bName.localeCompare(aName);
+            });
         }
-        return loraNames.map(name => loras.find(l => (typeof l === 'string' ? l : l.name) === name));
+        
+        return sortedLoras;
     }
 
     filterLoras(loras) {
@@ -913,7 +949,7 @@ export class LoraPickerDialog {
 
     updateFolderIndicator() {
         // Find and update the indicator line in the folders button
-        const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(3)");
+        const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(4)");
         if (foldersContainer) {
             // Find the indicator line (it's now positioned absolutely at the bottom)
             const indicatorLine = foldersContainer.querySelector("div[style*='position: absolute']");
@@ -931,5 +967,27 @@ export class LoraPickerDialog {
         if (this.overlay) {
             this.overlay.remove();
         }
+        if (this.keydownHandler) {
+            document.removeEventListener('keydown', this.keydownHandler);
+        }
+    }
+    
+    updateLoras(newLoras) {
+        // Filter out any "None" entries from the new loras list
+        this.loras = (newLoras || []).filter(l => {
+            const name = typeof l === 'string' ? l : l.name;
+            return name && name.toLowerCase() !== "none";
+        });
+        // Re-extract folders from the updated lora list
+        this.folders = this.extractFolders();
+        // Re-render folders in sidebar if it exists
+        if (this.sidebar) {
+            const sidebarContent = this.sidebar.querySelector(".lora-picker-sidebar-content");
+            if (sidebarContent) {
+                this.renderFoldersInSidebar(sidebarContent);
+            }
+        }
+        // Re-render the list
+        this.renderList();
     }
 }

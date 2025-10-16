@@ -579,6 +579,9 @@ app.registerExtension({
             element.style.padding = "0";
             element.style.display = "block";
 
+            // Add a debug message when the node is initialized or pasted
+            console.log("PowerSplineEditor node initialized/pasted with data:", this.properties);
+            
             // fake image widget to allow copy/paste (set value to null and override draw to prevent "image null" text)
             const fakeimagewidget = this.addWidget("COMBO", "image", null, () => { }, { values: [] });
             hideWidgetForGood(this, fakeimagewidget)

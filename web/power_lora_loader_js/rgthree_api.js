@@ -42,7 +42,9 @@ class RgthreeApi {
     }
     getLoras(force = false) {
         if (!this.getLorasPromise || force) {
-            this.getLorasPromise = this.fetchJson("/loras?format=details", { cache: "no-store" });
+            // Add a timestamp to prevent caching when force is true
+            const url = force ? `/loras?format=details&t=${Date.now()}` : "/loras?format=details";
+            this.getLorasPromise = this.fetchJson(url, { cache: "no-store" });
         }
         return this.getLorasPromise;
     }
@@ -85,7 +87,13 @@ class RgthreeApi {
         return infos;
     }
     async refreshLorasInfo(options = {}) {
-        return this.refreshModelsInfo({ type: "loras", ...options });
+        // First clear the promise cache
+        this.getLorasPromise = null;
+        // Then refresh the models info
+        const result = await this.refreshModelsInfo({ type: "loras", ...options });
+        // Finally, force a refresh of the loras list with cache busting
+        await this.getLoras(true);
+        return result;
     }
     async refreshCheckpointsInfo(options = {}) {
         return this.refreshModelsInfo({ type: "checkpoints", ...options });

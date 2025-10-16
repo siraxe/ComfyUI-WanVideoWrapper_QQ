@@ -1,19 +1,18 @@
-
 import { app } from "../../../scripts/app.js";
 import { rgthreeApi } from "./rgthree_api.js";
-import { RgthreeBetterButtonWidget, RgthreeDividerWidget, CombinedOptionsWidget, PowerLoraLoaderHeaderWidget, PowerLoraLoaderWidget } from "./widgets.js";
+import { RgthreeBetterButtonWidget, RgthreeDividerWidget, StrengthCopyWidget, PowerLoraLoaderHeaderWidget, PowerLoraLoaderWidget } from "./widgets.js";
 import { LoraPickerDialog } from "./lora_picker_dialog.js";
 import { getLoraSlotInPosition, getLoraSlotMenuOptions } from "./lora_context_menu.js";
 
 let lorasCache = null;
 // Clear cache to ensure new format is used
-localStorage.removeItem("wanVideoPowerLoraLoader.lorasCache");
+localStorage.removeItem("powerLoraLoaderV2.lorasCache");
 
 const MINIMUM_NODE_WIDTH = 480;
 
 async function getLoras(forceRefresh = false) {
     // Check if we have cached data in localStorage
-    const cachedData = localStorage.getItem("wanVideoPowerLoraLoader.lorasCache");
+    const cachedData = localStorage.getItem("powerLoraLoaderV2.lorasCache");
     if (cachedData && lorasCache && !forceRefresh) {
         return lorasCache;
     }
@@ -21,7 +20,7 @@ async function getLoras(forceRefresh = false) {
     // Clear cache if force refresh is requested
     if (forceRefresh) {
         lorasCache = null;
-        localStorage.removeItem("wanVideoPowerLoraLoader.lorasCache");
+        localStorage.removeItem("powerLoraLoaderV2.lorasCache");
     }
     
     try {
@@ -39,7 +38,7 @@ async function getLoras(forceRefresh = false) {
         });
         
         // Cache the data in localStorage
-        localStorage.setItem("wanVideoPowerLoraLoader.lorasCache", JSON.stringify(lorasCache));
+        localStorage.setItem("powerLoraLoaderV2.lorasCache", JSON.stringify(lorasCache));
         
         return lorasCache;
     }
@@ -51,11 +50,11 @@ async function getLoras(forceRefresh = false) {
 
 // Functions to persist favorites
 function saveFavorites(favorites) {
-    localStorage.setItem("wanVideoPowerLoraLoader.favorites", JSON.stringify(favorites));
+    localStorage.setItem("powerLoraLoaderV2.favorites", JSON.stringify(favorites));
 }
 
 function loadFavorites() {
-    const favorites = localStorage.getItem("wanVideoPowerLoraLoader.favorites");
+    const favorites = localStorage.getItem("powerLoraLoaderV2.favorites");
     return favorites !== null ? JSON.parse(favorites) : [];
 }
 
@@ -97,9 +96,9 @@ function showLoraPicker(event, callback) {
 }
 
 app.registerExtension({
-    name: "WanVideo.PowerLoraLoader",
+    name: "WanVideo.PowerLoraLoaderV2",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        if (nodeData.name === "WanVideoPowerLoraLoader") {
+        if (nodeData.name === "PowerLoraLoaderV2") {
             nodeType.prototype.lorasCache = [];
 
             nodeType.prototype.addCustomWidget = function(widget) {
@@ -116,11 +115,11 @@ app.registerExtension({
                 onNodeCreated?.apply(this, arguments);
                 this.serialize_widgets = true;
                 this.loraWidgetsCounter = 0;
+                this.hasClip = false; // Initialize clip connection state
                 this.properties = this.properties || {};
-                this.properties['low_mem_load'] = true;
-                this.properties['merge_loras'] = false;  // Default to false to allow users to enable it
-                this.properties['overwrite_duplicates'] = false;
+                this.properties['Show Strengths'] = "Single Strength";
                 this.addNonLoraWidgets();
+                
                 
                 // Ensure minimum size
                 const computed = this.computeSize();
@@ -133,6 +132,11 @@ app.registerExtension({
             nodeType.prototype.onConfigure = function (info) {
                 onConfigure?.apply(this, arguments);
                 this.loraWidgetsCounter = 0;
+
+                // Restore hasClip state if it exists
+                if (info.hasClip !== undefined) {
+                    this.hasClip = info.hasClip;
+                }
 
                 if (this.widgets) {
                     const widgets_to_remove = [...this.widgets];
@@ -173,7 +177,8 @@ app.registerExtension({
             };
 
             nodeType.prototype.addNonLoraWidgets = function () {
-                this.addCustomWidget(new CombinedOptionsWidget());
+                // Only use StrengthCopyWidget for PowerLoraLoaderV2
+                this.addCustomWidget(new StrengthCopyWidget());
                 this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 }));
                 this.addCustomWidget(new PowerLoraLoaderHeaderWidget());
                 this.widgetButtonSpacer = this.addCustomWidget(new RgthreeDividerWidget({ marginTop: 4, marginBottom: 0, thickness: 0 }));
@@ -271,6 +276,26 @@ app.registerExtension({
 
             nodeType.prototype.getSlotInPosition = getLoraSlotInPosition;
             nodeType.prototype.getSlotMenuOptions = getLoraSlotMenuOptions;
+            
+            // Store clip connection state for Python code to check
+            const originalOnConnectionsChange = nodeType.prototype.onConnectionsChange;
+            nodeType.prototype.onConnectionsChange = function(type, slotIndex, isConnected, link_info, ioSlot) {
+                originalOnConnectionsChange?.apply(this, arguments);
+                
+                // Store the clip connection state
+                if (type === LiteGraph.INPUT && slotIndex === 2) { // clip is at index 2
+                    this.hasClip = isConnected;
+                    this.setDirtyCanvas(true, true);
+                }
+            };
+            
+            // Override serialize to include hasClip state
+            const originalOnSerialize = nodeType.prototype.serialize;
+            nodeType.prototype.serialize = function() {
+                const data = originalOnSerialize?.apply(this, arguments) || {};
+                data.hasClip = this.hasClip;
+                return data;
+            };
 
             // Pre-load loras
             getLoras().then(loras => {
@@ -283,7 +308,7 @@ app.registerExtension({
                 rgthreeApi.refreshLorasInfo().then(() => {
                     // Clear the cache and force refresh
                     lorasCache = null;
-                    localStorage.removeItem("wanVideoPowerLoraLoader.lorasCache");
+                    localStorage.removeItem("powerLoraLoaderV2.lorasCache");
 
                     // Fetch fresh loras and update cache
                     getLoras(true).then((lorasDetails) => {
@@ -291,7 +316,7 @@ app.registerExtension({
 
                         // Update all nodes of this type
                         app.graph._nodes.forEach(node => {
-                            if (node.type === "WanVideoPowerLoraLoader") {
+                            if (node.type === "PowerLoraLoaderV2") {
                                 // Update any existing widgets that might need the fresh data
                                 for (const widget of node.widgets || []) {
                                     if (widget.name?.startsWith("lora_")) {
@@ -308,7 +333,7 @@ app.registerExtension({
 
                                             // Log changes in low variant detection
                                             if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
-                                                console.log(`[WanVideoPowerLoraLoader] Low variant status changed for '${widget.value.lora}': ` +
+                                                console.log(`[PowerLoraLoaderV2] Low variant status changed for '${widget.value.lora}': ` +
                                                           `${oldIsLow} -> ${widget.value.is_low}, ` +
                                                           `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
                                             }
@@ -321,10 +346,10 @@ app.registerExtension({
                             }
                         });
                     }).catch(error => {
-                        console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA cache:', error);
+                        console.error('[PowerLoraLoaderV2] Error refreshing LoRA cache:', error);
                     });
                 }).catch(error => {
-                    console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA info:', error);
+                    console.error('[PowerLoraLoaderV2] Error refreshing LoRA info:', error);
                 });
             };
         }

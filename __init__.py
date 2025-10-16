@@ -4,7 +4,7 @@ import re
 
 # Import everything from the nodes directory
 from .nodes.nodes import *
-from .nodes.power_lora import *
+from .nodes.power_loras import *
 
 from .nodes.power_spline_editor import *
 

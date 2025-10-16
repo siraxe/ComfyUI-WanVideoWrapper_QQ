@@ -255,10 +255,12 @@ class PowerSplineEditor:
         if offset > 0:
             # Positive: remove LAST N frames, add N to start_pause
             # This waits at start position, then animates to N frames before end
-            return points[:-offset_abs] if offset_abs > 0 else points, offset_abs, 0
+            modified_points = points[:-offset_abs] if offset_abs > 0 else points
+            return modified_points, offset_abs, 0
         else:
             # Negative: remove last N frames, add to end pause
-            return points[:-offset_abs] if offset_abs > 0 else points, 0, offset_abs
+            modified_points = points[:-offset_abs] if offset_abs > 0 else points
+            return modified_points, 0, offset_abs
 
     def splinedata(self, mask_width, mask_height, coordinates, points_store, bg_img,
                    ref_image=None, coord_in=None, frames=None):
