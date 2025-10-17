@@ -59,7 +59,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 "trailing": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "border_width": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
                 "border_color": ("STRING", {"default": 'black'}),
-                "frames": ("INT", {"forceInput": True}),
+                "frames": ("INT", {"forceInput": True},{"default": 121 }),
+                "ati_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "ati_p_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "preview_enabled": ("BOOLEAN", {"default": True}),
             }
         }
@@ -880,7 +882,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
     # Main Node Method
     # ----------------------------
     def drawshapemask(self, coordinates, bg_image,
-                      shape_width, shape_height, shape_color, bg_color, blur_radius, shape, intensity,
+                      shape_width, shape_height, shape_color, bg_color, blur_radius, shape, intensity, ati_p_fade_start, ati_fade_start,
                       trailing=1.0, border_width=0, border_color='black', frames=None, preview_enabled=True):
         """
         Main entry point. Orchestrates:
@@ -1048,11 +1050,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         # Special cases: no animated coords but static points exist -> set batch size accordingly
         if not processed_coords_list:
             if static_points:
-                if p_coords_use_driver and p_driver_path_processed:
-                    batch_size = total_frames
-                else:
-                    batch_size = 1
-                    total_frames = 1
+                # Always use total_frames for static points to ensure proper spline generation
+                batch_size = total_frames
                 processed_coords_list = []
                 path_pause_frames = []
             else:
@@ -1175,23 +1174,149 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             # Return minimal 1x1 pixel preview for efficiency when preview is disabled
             preview_output = torch.zeros([batch_size, 1, 1, 3], dtype=torch.float32)
 
-        # ----- Build output coordinates JSON (basic: first path across frames) -----
+        # ----- Build output coordinates JSON (format expected by ATI nodes) -----
+        # Follow the same format as WanVideoATITracksVisualize
+        # Pad to 121 frames, then subsample to 81 frames with visibility in the third component
         output_coords_json = "[]"
+        all_coords = []
+        FIXED_LENGTH = 121  # Match the FIXED_LENGTH in nodes_g.py
+        
+        # Process animated paths (affected by ati_fade_start)
         if processed_coords_list:
             try:
-                first_path_coords = []
-                path_start_p, path_end_p = path_pause_frames[0]
-                for i in range(total_frames):
-                    if i < path_start_p:
-                        coord_index = 0
-                    elif i >= total_frames - path_end_p:
-                        coord_index = len(processed_coords_list[0]) - 1
-                    else:
-                        coord_index = i - path_start_p
-                    coord_index = max(0, min(coord_index, len(processed_coords_list[0]) - 1))
-                    first_path_coords.append(processed_coords_list[0][coord_index])
-                output_coords_json = json.dumps(first_path_coords)
+                # Calculate the fade start frame by multiplying percentage by total frames
+                fade_start_frame = int(ati_fade_start * total_frames) if ati_fade_start > 0 else 0
+                
+                for path_idx, path_coords in enumerate(processed_coords_list):
+                    path_start_p, path_end_p = path_pause_frames[path_idx]
+                    single_path_coords = []
+                    for i in range(total_frames):
+                        if i < path_start_p:
+                            coord_index = 0
+                        elif i >= total_frames - path_end_p:
+                            coord_index = len(path_coords) - 1
+                        else:
+                            coord_index = i - path_start_p
+                        coord_index = max(0, min(coord_index, len(path_coords) - 1))
+                        
+                        # Extract x, y and determine visibility
+                        coord = path_coords[coord_index]
+                        
+                        # Determine visibility based on ati_fade_start
+                        if ati_fade_start == 0 or i < fade_start_frame:
+                            visibility = 1  # Visible
+                        else:
+                            visibility = 0  # Invisible after fade_start_frame
+                        
+                        single_path_coords.append({
+                            "x": int(coord["x"]),
+                            "y": int(coord["y"]),
+                            "v": visibility
+                        })
+                    
+                    # Pad to FIXED_LENGTH (121 frames) if needed
+                    if len(single_path_coords) < FIXED_LENGTH:
+                        # Pad with the last point repeated
+                        last_point = single_path_coords[-1].copy()
+                        last_point["v"] = 0  # Make padded points invisible
+                        while len(single_path_coords) < FIXED_LENGTH:
+                            single_path_coords.append(last_point.copy())
+                    elif len(single_path_coords) > FIXED_LENGTH:
+                        # Truncate to FIXED_LENGTH
+                        single_path_coords = single_path_coords[:FIXED_LENGTH]
+                    
+                    # Convert to the format expected by ATI: [x, y, visibility]
+                    # This will be further processed by the ATI node like WanVideoATITracksVisualize
+                    all_coords.append(single_path_coords)
             except Exception:
-                output_coords_json = "[]"
+                pass
+        
+        # Process static points (p_coordinates) - affected by ati_p_fade_start
+        if static_points:
+            try:
+                # Calculate the fade start frame by multiplying percentage by total frames
+                fade_start_frame = int(ati_p_fade_start * total_frames) if ati_p_fade_start > 0 else 0
+                
+                for point in static_points:
+                    single_point_spline = []
+                    for i in range(total_frames):
+                        if ati_p_fade_start == 0 or i < fade_start_frame:
+                            # Keep the point at its original position
+                            visibility = 1  # Visible
+                        else:
+                            # Keep the point at its last position but set visibility to 0
+                            visibility = 0  # Invisible
+                        
+                        single_point_spline.append({
+                            "x": int(point["x"]),
+                            "y": int(point["y"]),
+                            "v": visibility
+                        })
+                    
+                    # Pad to FIXED_LENGTH (121 frames) if needed
+                    if len(single_point_spline) < FIXED_LENGTH:
+                        # Pad with the last point repeated but invisible
+                        last_point = single_point_spline[-1].copy()
+                        last_point["v"] = 0  # Make padded points invisible
+                        while len(single_point_spline) < FIXED_LENGTH:
+                            single_point_spline.append(last_point.copy())
+                    elif len(single_point_spline) > FIXED_LENGTH:
+                        # Truncate to FIXED_LENGTH
+                        single_point_spline = single_point_spline[:FIXED_LENGTH]
+                    
+                    all_coords.append(single_point_spline)
+            except Exception as e:
+                print(f"Error processing static points: {e}")
+                pass
+        
+        # Ensure we have at least one track to avoid the ATI error
+        if not all_coords:
+            # Create a default track at origin if no coordinates exist
+            default_track = []
+            for i in range(FIXED_LENGTH):
+                default_track.append({
+                    "x": 0,
+                    "y": 0,
+                    "v": 1 if i < total_frames else 0  # Visible for original frames, invisible for padding
+                })
+            all_coords.append(default_track)
+        
+        # Format output as a JSON string that ATI nodes can parse
+        # Follow the same format as WanVideoATITracksVisualize
+        try:
+            # Convert tracks to the format that matches what WanVideoATITracksVisualize expects
+            # The tracks will be padded to 121 frames and subsampled to 81 frames by the ATI node
+            clean_tracks = []
+            for track in all_coords:
+                clean_track = []
+                for point in track:
+                    # Include visibility if it exists, default to 1 if not
+                    v = int(point.get("v", 1))
+                    clean_track.append({
+                        "x": int(point["x"]),
+                        "y": int(point["y"]),
+                        "v": v
+                    })
+                clean_tracks.append(clean_track)
+            
+            # Format output according to the number of tracks:
+            # - If there's only one track, output it as a single list: [{...}, {...}]
+            # - If there are multiple tracks, output as a list of lists: [[{...}], [{...}]]
+            if len(clean_tracks) == 1:
+                output_coords_json = json.dumps(clean_tracks[0])
+            else:
+                output_coords_json = json.dumps(clean_tracks)
+            
+            # Verify the JSON can be parsed correctly
+            test_parse = json.loads(output_coords_json)
+            
+            # Debug output
+            print(f"DrawShapeOnPath: Generated {len(clean_tracks)} tracks for ATI nodes (padded to {FIXED_LENGTH} frames)")
+            for i, track in enumerate(clean_tracks):
+                print(f"  Track {i}: {len(track)} points")
+        except Exception as e:
+            # Fallback to empty array if there's an issue
+            print(f"DrawShapeOnPath: Error generating tracks: {e}")
+            output_coords_json = "[]"
 
         return (out_images, out_masks, output_coords_json, preview_output)

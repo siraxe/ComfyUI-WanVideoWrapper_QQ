@@ -14,7 +14,7 @@ class PowerSplineEditor:
             "required": {
                 "points_store": ("STRING", {"default": "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]", "multiline": False}),
                 "coordinates": ("STRING", {"multiline": False}),
-                "mask_width": ("INT", {"default": 600, "min": 8, "max": 4096, "step": 8}),
+                "mask_width": ("INT", {"default": 640, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 480, "min": 8, "max": 4096, "step": 8}),
                 "bg_img": (["None", "A", "B", "C"], {"default": "None", "tooltip": "Select background image to overlay at 60% opacity"}),
             },

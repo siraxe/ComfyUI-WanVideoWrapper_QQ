@@ -26,16 +26,16 @@ export class NodeSizeManager {
             buttonBarHeight: options.buttonBarHeight || (LiteGraph.NODE_WIDGET_HEIGHT || 30),
 
             // === CANVAS DIMENSIONS ===
-            canvasWidth: options.canvasWidth || 600,
+            canvasWidth: options.canvasWidth || 640,
             canvasHeight: options.canvasHeight || 480,
             canvasExtraWidth: options.canvasExtraWidth || 45,
-            minCanvasWidth: options.minCanvasWidth || 600,
+            minCanvasWidth: options.minCanvasWidth || 640,
             maxCanvasWidth: options.maxCanvasWidth || 8192,
             minCanvasHeight: options.minCanvasHeight || 480,
             maxCanvasHeight: options.maxCanvasHeight || 8192,
 
             // === NODE CONSTRAINTS ===
-            minNodeWidth: options.minNodeWidth || 600,
+            minNodeWidth: options.minNodeWidth || 640,
             minNodeHeight: options.minNodeHeight || 480,
         };
 

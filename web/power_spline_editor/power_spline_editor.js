@@ -1719,7 +1719,7 @@ app.registerExtension({
                     this.imgData = imgData;
                     try {
                         const size = JSON.stringify(this.imgData).length;
-                        if (size < 600 * 480) { // 1MB limit
+                        if (size < 640 * 480) { // 1MB limit
                             sessionStorage.setItem(`spline-editor-img-${this.uuid}`, JSON.stringify(this.imgData));
                         } else {
                             console.warn("Spline Editor: Image not saved to session storage because it is too large.", size);

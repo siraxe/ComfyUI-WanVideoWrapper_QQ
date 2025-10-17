@@ -7,3 +7,4 @@ nodes/__pycache__/
 wanvideo_cached_samples.pt
 ref_image.jpg
 QWEN.md
+ComfyUI-WanVideoWrapper/

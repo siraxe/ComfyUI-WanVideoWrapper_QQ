@@ -7,6 +7,7 @@ from .nodes.nodes import *
 from .nodes.power_loras import *
 
 from .nodes.power_spline_editor import *
+from .ATI.nodes import *
 
 from .nodes.draw_shapes import *
 from .nodes.draw_joints import *
@@ -37,8 +38,8 @@ current_module = sys.modules[__name__]
 for name, obj in inspect.getmembers(current_module):
     if inspect.isclass(obj):
         module_name = getattr(obj, '__module__', '')
-        # Check if the class is defined in one of the modules within the .nodes package
-        if module_name.startswith(__name__ + '.nodes'):
+        # Check if the class is defined in one of the modules within the .nodes package or ATI package
+        if module_name.startswith(__name__ + '.nodes') or module_name.startswith(__name__ + '.ATI'):
              # --- ADDED CHECK: Exclude classes with "Math" in the name ---
              if "Math" in obj.__name__:
                  continue # Skip this class
