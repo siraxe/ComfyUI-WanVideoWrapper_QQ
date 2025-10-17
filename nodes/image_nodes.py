@@ -443,12 +443,286 @@ class ImageRadialZoomBlur_GPU:
         # ComfyUI requires CPU tensor output for saving etc.
         return output_bhwc.cpu()
 
+class WanScaleAB:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image_A": ("IMAGE",),
+                "A1size": ("INT", {"default": 512, "min": 64, "max": 2048, "step": 16}),
+                "A2scale": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 2.0, "step": 0.1}),
+                "scaling_method": (["bilinear", "nearest", "bicubic", "area", "lanczos"], {"default": "bilinear"}),
+                "Scale_to": (["A_crop", "B_crop","A_stretch", "B_stretch",], {"default": "A_crop"}),
+            },
+            "optional": {
+                "image_B": ("IMAGE",),
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE", "IMAGE", "IMAGE", "IMAGE")
+    RETURN_NAMES = ("image_A1", "image_A2", "image_B1", "image_B2")
+    FUNCTION = "scale_images"
+    CATEGORY = "WanVideoWrapper_QQ/image"
+    
+    def scale_images(self, image_A, A1size, A2scale, scaling_method, Scale_to, image_B=None):
+        # If B_stretch is selected and image_B is present, use modular approach
+        if image_B is not None and Scale_to == "B_stretch":
+            # Step 1: Calculate image_B2 and image_B1 dimensions using image_A's methods
+            b_s1, b_s2 = self._calculate_s1_s2(image_B, A1size)
+            
+            # Get image_B dimensions for aspect ratio
+            _, b_h, b_w, _ = image_B.shape
+            
+            # Calculate image_B1 dimensions (like image_A1)
+            if b_h >= b_w:
+                b_target_h = b_s1 * A2scale
+                b_target_w = b_s2 * A2scale
+            else:
+                b_target_h = b_s2 * A2scale
+                b_target_w = b_s1 * A2scale
+            
+            # Round up to multiples of 16
+            b_target_h = self._round_up_to_multiple(b_target_h, 16)
+            b_target_w = self._round_up_to_multiple(b_target_w, 16)
+            
+            # Step 2: Now reverse the process - use these dimensions for image_A
+            # Calculate image_A2 and image_A1 using image_B's calculated dimensions
+            image_A2 = self._scale_image(image_A, b_s1, b_s2, scaling_method)
+            image_A1 = self._scale_image(image_A, int(b_target_h), int(b_target_w), scaling_method)
+            
+            # Step 3: Create image_B outputs using the calculated dimensions
+            image_B2 = self._scale_image(image_B, b_s1, b_s2, scaling_method)
+            image_B1 = self._scale_image(image_B, int(b_target_h), int(b_target_w), scaling_method)
+        elif image_B is not None and Scale_to == "B_crop":
+            # For B_crop, we need to use the same approach as A_crop but reversed
+            # Step 1: Calculate image_A2 dimensions using standard method
+            a_s1, a_s2 = self._calculate_s1_s2(image_A, A1size)
+            
+            # Step 2: Scale and crop image_B to match image_A2's dimensions
+            image_B2 = self._scale_and_crop_to_match(image_B, a_s1, a_s2, scaling_method)
+            
+            # Step 3: Calculate image_A1 dimensions
+            _, a_h, a_w, _ = image_A.shape
+            if a_h >= a_w:
+                a_target_h = a_s1 * A2scale
+                a_target_w = a_s2 * A2scale
+            else:
+                a_target_h = a_s2 * A2scale
+                a_target_w = a_s1 * A2scale
+            
+            # Round up to multiples of 16
+            a_target_h = self._round_up_to_multiple(a_target_h, 16)
+            a_target_w = self._round_up_to_multiple(a_target_w, 16)
+            
+            # Step 4: Scale image_A to its target dimensions
+            image_A1 = self._scale_image(image_A, int(a_target_h), int(a_target_w), scaling_method)
+            image_A2 = self._scale_image(image_A, a_s1, a_s2, scaling_method)
+            
+            # Step 5: Scale image_B1 using the exact same dimensions as image_A1
+            # This ensures perfect matching between the outputs
+            image_B1 = self._scale_image(image_B, int(a_target_h), int(a_target_w), scaling_method)
+        else:
+            # Original logic for other Scale_to options
+            # Calculate s1 and s2 for image_A2
+            s1, s2 = self._calculate_s1_s2(image_A, A1size)
+            
+            # Get original dimensions of image_A
+            _, h, w, _ = image_A.shape
+            
+            # Process image_A1 with new scaling logic
+            if h >= w:
+                target_height = s1 * A2scale
+                target_width = s2 * A2scale
+            else:
+                target_height = s2 * A2scale
+                target_width = s1 * A2scale
+            
+            # Find closest target dimensions divisible by 16 (rounding up)
+            target_height = self._round_up_to_multiple(target_height, 16)
+            target_width = self._round_up_to_multiple(target_width, 16)
+            
+            # Scale image_A by stretching to target dimensions
+            image_A1 = self._scale_image(image_A, int(target_height), int(target_width), scaling_method)
+            
+            # Process image_A2 with special logic if image_B is not provided
+            if image_B is None:
+                image_A2 = self._scale_image(image_A, s1, s2, scaling_method)
+            else:
+                # If image_B is provided, scale image_A to maintain aspect ratio using s1 and s2
+                image_A2 = self._scale_image(image_A, s1, s2, scaling_method)
+            
+            # Process image_B if provided
+            if image_B is not None:
+                if Scale_to == "A_stretch":
+                    # Scale image_B to match image_A2 and image_A1 sizes
+                    image_B1 = self._scale_image(image_B, int(target_height), int(target_width), scaling_method)
+                    image_B2 = self._scale_image(image_B, s1, s2, scaling_method)
+                elif Scale_to == "A_crop":
+                    # Scale and crop image_B to match image_A2 dimensions
+                    image_B2 = self._scale_and_crop_to_match(image_B, s1, s2, scaling_method)
+                    # Scale image_B1 using the exact same dimensions as image_A1
+                    # This ensures perfect matching between the outputs
+                    image_B1 = self._scale_image(image_B, int(target_height), int(target_width), scaling_method)
+                else:
+                    # Default behavior for other Scale_to options (for now)
+                    # Get original dimensions
+                    _, h, w, _ = image_B.shape
+                    # Calculate new dimensions based on scale
+                    new_h = int(h * A2scale)
+                    new_w = int(w * A2scale)
+                    image_B1 = self._scale_image(image_B, new_h, new_w, scaling_method)
+                    image_B2 = self._scale_image(image_B, new_h, new_w, scaling_method)
+            else:
+                # Return empty tensors if image_B is not provided
+                image_B1 = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+                image_B2 = torch.zeros((1, 64, 64, 3), dtype=torch.float32)
+        
+        return (image_A1, image_A2, image_B1, image_B2)
+    
+    def _calculate_s1_s2(self, image_A, A1size):
+        """
+        Calculate s1 and s2 based on the special scaling rules.
+        
+        s1: Find the closest number to A1size that can divide the largest side of image_A fully once,
+            then adjust to be divisible by 16 (rounding up if needed)
+        s2: Proportionally scale the smallest side to match s1, then adjust to be divisible by 16 (rounding up)
+        """
+        # Get original dimensions
+        _, h, w, _ = image_A.shape
+        
+        # Determine which is the largest and smallest side
+        if h >= w:
+            largest_side = h
+            smallest_side = w
+        else:
+            largest_side = w
+            smallest_side = h
+        
+        # Step 1: Find s1
+        # Find how many times A1size fits into the largest side
+        times_fit = largest_side // A1size
+        if times_fit == 0:
+            times_fit = 1  # Ensure at least once
+        
+        # Calculate the closest number that could divide the largest side by A1size fully once
+        base_s1 = A1size * times_fit
+        
+        # Find the closest number to base_s1 that is divisible by 16
+        s1 = self._round_up_to_multiple(base_s1, 16)
+        
+        # Step 2: Find s2
+        # Calculate the proportional scaling factor
+        scale_factor = s1 / largest_side
+        
+        # Apply this scaling to the smallest side
+        scaled_smallest = smallest_side * scale_factor
+        
+        # Find s2 as the closest multiple of 16 (rounding up)
+        s2 = self._round_up_to_multiple(scaled_smallest, 16)
+        
+        # Determine the final dimensions based on original orientation
+        if h >= w:
+            # Height was the largest side
+            return s1, s2
+        else:
+            # Width was the largest side
+            return s2, s1
+    
+    def _round_up_to_multiple(self, value, multiple):
+        """Round up value to the nearest multiple of 'multiple'."""
+        import math
+        return int(math.ceil(value / multiple) * multiple)
+    
+    
+    def _scale_and_crop_to_match(self, image, target_h, target_w, method):
+        """
+        Scale image proportionally to match the largest side of target dimensions,
+        then crop from center to exactly match target dimensions.
+        """
+        # Get original dimensions
+        _, h, w, _ = image.shape
+        
+        # Determine which dimension to match
+        if target_h >= target_w:
+            # Target height is larger, match height
+            scale_factor = target_h / h
+            scaled_h = target_h
+            scaled_w = int(w * scale_factor)
+        else:
+            # Target width is larger, match width
+            scale_factor = target_w / w
+            scaled_h = int(h * scale_factor)
+            scaled_w = target_w
+        
+        # Scale the image
+        scaled_image = self._scale_image(image, scaled_h, scaled_w, method)
+        
+        # Calculate crop amounts to center the image
+        if scaled_h > target_h:
+            # Need to crop height
+            crop_h = (scaled_h - target_h) // 2
+            cropped_image = scaled_image[:, crop_h:crop_h+target_h, :, :]
+        else:
+            # No height cropping needed
+            cropped_image = scaled_image
+        
+        if scaled_w > target_w:
+            # Need to crop width
+            crop_w = (scaled_w - target_w) // 2
+            cropped_image = cropped_image[:, :, crop_w:crop_w+target_w, :]
+        
+        # Ensure the final dimensions match exactly
+        final_h, final_w = cropped_image.shape[1], cropped_image.shape[2]
+        if final_h != target_h or final_w != target_w:
+            # If dimensions still don't match, force resize
+            cropped_image = self._scale_image(cropped_image, target_h, target_w, method)
+        
+        return cropped_image
+    
+    def _scale_image(self, image, height, width, method):
+        """Helper function to scale an image to the specified dimensions."""
+        # Convert from BHWC to BCHW for F.interpolate
+        image_bchw = image.permute(0, 3, 1, 2)
+        
+        # Determine interpolation mode based on method string
+        if method == "bilinear":
+            mode = 'bilinear'
+            align_corners = False
+        elif method == "nearest":
+            mode = 'nearest'
+            align_corners = None
+        elif method == "bicubic":
+            mode = 'bicubic'
+            align_corners = False
+        elif method == "area":
+            mode = 'area'
+            align_corners = None
+        elif method == "lanczos":
+            # PyTorch doesn't have lanczos, use bicubic as approximation
+            mode = 'bicubic'
+            align_corners = False
+        else:
+            # Default to bilinear
+            mode = 'bilinear'
+            align_corners = False
+        
+        # Perform interpolation
+        if align_corners is not None:
+            resized = F.interpolate(image_bchw, size=(height, width), mode=mode, align_corners=align_corners)
+        else:
+            resized = F.interpolate(image_bchw, size=(height, width), mode=mode)
+        
+        # Convert back to BHWC
+        return resized.permute(0, 2, 3, 1)
+
 NODE_CLASS_MAPPINGS = {
     "ImageRadialZoomBlur_GPU": ImageRadialZoomBlur_GPU,
-    "ImageBlen_GPU": ImageBlend_GPU
+    "ImageBlend_GPU": ImageBlend_GPU,
+    "WanScaleAB": WanScaleAB
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageRadialZoomBlur_GPU": "Image Radial Zoom Blur (GPU)",
-    "ImageBlend_GPU" : "Image Blend (GPU)"
+    "ImageBlend_GPU": "Image Blend (GPU)",
+    "WanScaleAB": "Wan Scale AB"
 }
