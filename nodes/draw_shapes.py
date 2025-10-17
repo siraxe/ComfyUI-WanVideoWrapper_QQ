@@ -1176,10 +1176,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
         # ----- Build output coordinates JSON (format expected by ATI nodes) -----
         # Follow the same format as WanVideoATITracksVisualize
-        # Pad to 121 frames, then subsample to 81 frames with visibility in the third component
+        # Generate coordinate tracks with visibility in the third component
         output_coords_json = "[]"
         all_coords = []
-        FIXED_LENGTH = 121  # Match the FIXED_LENGTH in nodes_g.py
         
         # Process animated paths (affected by ati_fade_start)
         if processed_coords_list:
@@ -1214,17 +1213,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             "v": visibility
                         })
                     
-                    # Pad to FIXED_LENGTH (121 frames) if needed
-                    if len(single_path_coords) < FIXED_LENGTH:
-                        # Pad with the last point repeated
-                        last_point = single_path_coords[-1].copy()
-                        last_point["v"] = 0  # Make padded points invisible
-                        while len(single_path_coords) < FIXED_LENGTH:
-                            single_path_coords.append(last_point.copy())
-                    elif len(single_path_coords) > FIXED_LENGTH:
-                        # Truncate to FIXED_LENGTH
-                        single_path_coords = single_path_coords[:FIXED_LENGTH]
-                    
                     # Convert to the format expected by ATI: [x, y, visibility]
                     # This will be further processed by the ATI node like WanVideoATITracksVisualize
                     all_coords.append(single_path_coords)
@@ -1253,17 +1241,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             "v": visibility
                         })
                     
-                    # Pad to FIXED_LENGTH (121 frames) if needed
-                    if len(single_point_spline) < FIXED_LENGTH:
-                        # Pad with the last point repeated but invisible
-                        last_point = single_point_spline[-1].copy()
-                        last_point["v"] = 0  # Make padded points invisible
-                        while len(single_point_spline) < FIXED_LENGTH:
-                            single_point_spline.append(last_point.copy())
-                    elif len(single_point_spline) > FIXED_LENGTH:
-                        # Truncate to FIXED_LENGTH
-                        single_point_spline = single_point_spline[:FIXED_LENGTH]
-                    
                     all_coords.append(single_point_spline)
             except Exception as e:
                 print(f"Error processing static points: {e}")
@@ -1273,11 +1250,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         if not all_coords:
             # Create a default track at origin if no coordinates exist
             default_track = []
-            for i in range(FIXED_LENGTH):
+            for i in range(total_frames):
                 default_track.append({
                     "x": 0,
                     "y": 0,
-                    "v": 1 if i < total_frames else 0  # Visible for original frames, invisible for padding
+                    "v": 1
                 })
             all_coords.append(default_track)
         
@@ -1311,7 +1288,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             test_parse = json.loads(output_coords_json)
             
             # Debug output
-            print(f"DrawShapeOnPath: Generated {len(clean_tracks)} tracks for ATI nodes (padded to {FIXED_LENGTH} frames)")
+            print(f"DrawShapeOnPath: Generated {len(clean_tracks)} tracks for ATI nodes")
             for i, track in enumerate(clean_tracks):
                 print(f"  Track {i}: {len(track)} points")
         except Exception as e:
