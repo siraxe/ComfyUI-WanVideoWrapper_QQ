@@ -11,15 +11,27 @@ from ..utility.utility import pil2tensor, tensor2pil
 from ..utility import draw_utils
 from ..utility.driver_utils import apply_driver_offset, rotate_path, smooth_path, interpolate_path
 
-
-# ----------------------------
-# Helper Types
-# ----------------------------
 Coord = Dict[str, Any]  # expects {'x': float, 'y': float, ...}
 Path = List[Coord]
 
-
-
+# Constants
+DEFAULT_FRAME_WIDTH = 512
+DEFAULT_FRAME_HEIGHT = 512
+DEFAULT_TOTAL_FRAMES = 16
+DEFAULT_SHAPE_SIZE = 40
+PREVIEW_SCALE_FACTOR = 0.5
+DRIVER_SCALE_FACTOR = 1.0
+ACCELERATION_THRESHOLD = 0.001
+TRAILING_WEIGHT_FACTOR = 0.5
+ALPHA_BLEND_FACTOR = 0.5
+MIN_SHAPE_SIZE = 2
+MAX_SHAPE_SIZE = 1000
+MIN_BLUR_RADIUS = 0.0
+MAX_BLUR_RADIUS = 100.0
+MIN_INTENSITY = 0.01
+MAX_INTENSITY = 100.0
+MIN_BORDER_WIDTH = 0
+MAX_BORDER_WIDTH = 100
 
 
 class DrawShapeOnPath:
@@ -48,20 +60,20 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 ),
                 "bg_image": ("IMAGE",),
                 "coordinates": ("STRING", {"forceInput": True}),
-                "shape_width": ("INT", {"default": 40, "min": 2, "max": 1000, "step": 5}),
-                "shape_height": ("INT", {"default": 40, "min": 2, "max": 1000, "step": 5}),
+                "shape_width": ("INT", {"default": DEFAULT_SHAPE_SIZE, "min": MIN_SHAPE_SIZE, "max": MAX_SHAPE_SIZE, "step": 5}),
+                "shape_height": ("INT", {"default": DEFAULT_SHAPE_SIZE, "min": MIN_SHAPE_SIZE, "max": MAX_SHAPE_SIZE, "step": 5}),
                 "shape_color": ("STRING", {"default": 'white'}),
                 "bg_color": ("STRING", {"default": 'black'}),
-                "blur_radius": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100, "step": 1.0}),
-                "intensity": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 100.0, "step": 0.01}),
+                "blur_radius": ("FLOAT", {"default": 1.0, "min": MIN_BLUR_RADIUS, "max": MAX_BLUR_RADIUS, "step": 1.0}),
+                "intensity": ("FLOAT", {"default": 1.0, "min": MIN_INTENSITY, "max": MAX_INTENSITY, "step": 0.01}),
             },
             "optional": {
                 "trailing": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "border_width": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
+                "border_width": ("INT", {"default": MIN_BORDER_WIDTH, "min": MIN_BORDER_WIDTH, "max": MAX_BORDER_WIDTH, "step": 1}),
                 "border_color": ("STRING", {"default": 'black'}),
                 "frames": ("INT", {"forceInput": True},{"default": 121 }),
-                "ati_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "ati_p_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "animated_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "static_fade_start": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "preview_enabled": ("BOOLEAN", {"default": True}),
             }
         }
@@ -69,6 +81,78 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
     # ----------------------------
     # Low-level drawing helper
     # ----------------------------
+    def _draw_shape_at_location(self, draw: ImageDraw.ImageDraw, location_x: float, location_y: float,
+                               shape: str, shape_width: float, shape_height: float,
+                               shape_color: str, border_width: int, border_color: str) -> None:
+        """
+        Draw a single shape at the specified location.
+        This consolidates the repeated shape drawing logic.
+        """
+        if shape in ('circle', 'square'):
+            left_up_point = (location_x - shape_width / 2.0, location_y - shape_height / 2.0)
+            right_down_point = (location_x + shape_width / 2.0, location_y + shape_height / 2.0)
+            two_points = [left_up_point, right_down_point]
+
+            if shape == 'circle':
+                if border_width > 0:
+                    draw.ellipse(two_points, fill=shape_color, outline=border_color, width=border_width)
+                else:
+                    draw.ellipse(two_points, fill=shape_color)
+            else:  # square
+                if border_width > 0:
+                    draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
+                else:
+                    draw.rectangle(two_points, fill=shape_color)
+
+        elif shape == 'triangle':
+            left = (location_x - shape_width / 2.0, location_y + shape_height / 2.0)
+            right = (location_x + shape_width / 2.0, location_y + shape_height / 2.0)
+            top = (location_x, location_y - shape_height / 2.0)
+            poly_points = [top, left, right]
+            if border_width > 0:
+                try:
+                    draw.polygon(poly_points, fill=shape_color, outline=border_color)
+                except TypeError:
+                    draw.polygon(poly_points, fill=shape_color)
+            else:
+                draw.polygon(poly_points, fill=shape_color)
+
+    def _calculate_driver_offset(self, frame_index: int, interpolated_driver: Path,
+                                pause_frames: Tuple[int, int], total_frames: int,
+                                driver_scale: float = DRIVER_SCALE_FACTOR,
+                                frame_width: int = DEFAULT_FRAME_WIDTH,
+                                frame_height: int = DEFAULT_FRAME_HEIGHT) -> Tuple[float, float]:
+        """
+        Calculate driver offset for a given frame based on interpolated driver path.
+
+        Driver paths define motion that can be applied to other coordinates.
+        The offset is computed relative to the driver's first keyframe position
+        to ensure consistent motion regardless of the driver's starting position.
+
+        Returns (offset_x, offset_y).
+        """
+        start_p, end_p = pause_frames
+        if frame_index < start_p:
+            driver_index = 0
+        elif frame_index >= total_frames - end_p:
+            driver_index = len(interpolated_driver) - 1
+        else:
+            driver_index = frame_index - start_p
+
+        if 0 <= driver_index < len(interpolated_driver):
+            ref_x = float(interpolated_driver[0]['x'])
+            ref_y = float(interpolated_driver[0]['y'])
+            current_x = float(interpolated_driver[driver_index]['x'])
+            current_y = float(interpolated_driver[driver_index]['y'])
+
+            # Driver offset is computed relative to the driver's first keyframe
+            # The driver path is in normalized coordinates (0-1), so we need to scale it to frame dimensions
+            offset_x = (current_x - ref_x) * driver_scale * frame_width
+            offset_y = (current_y - ref_y) * driver_scale * frame_height
+            return offset_x, offset_y
+
+        return 0.0, 0.0
+
     def _draw_single_frame_pil(self, frame_index: int, processed_coords_list: List[Path],
                                path_pause_frames: List[Tuple[int, int]], total_frames: int,
                                frame_width: int, frame_height: int,
@@ -76,17 +160,26 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                shape_color: str, bg_color: str,
                                blur_radius: float, shape: str,
                                border_width: int, border_color: str,
-                               static_points: Optional[List[Coord]] = None,
-                               p_coords_use_driver: bool = False,
-                               p_driver_path: Optional[Path] = None,
-                               p_coords_pause_frames: Tuple[int, int] = (0, 0),
+                               static_point_layers: Optional[List[List[Coord]]] = None,
+                               static_points_use_driver: bool = False,
+                               static_points_driver_path: Optional[Path] = None,
+                               static_points_pause_frames: Tuple[int, int] = (0, 0),
                                coords_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
                                scales_list: Optional[List[float]] = None,
-                               static_points_scale: float = 1.0) -> Image.Image:
+                               static_points_scale: float = 1.0,
+                               static_points_scales_list: Optional[List[float]] = None,
+                               static_points_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
+                               static_points_interpolated_drivers: Optional[List[Dict[str, Any]]] = None) -> Image.Image:
         """
         Draw one frame using PIL.
         This function is thread-safe and used by ThreadPoolExecutor in drawshapemask.
         Returns a PIL RGB image.
+
+        Coordinate System:
+        - All coordinates are expected in pixel coordinates relative to frame dimensions
+        - Static points (p_coordinates) represent fixed positions that can be driven by driver paths
+        - Animated paths contain sequences of coordinates representing motion over time
+        - Driver paths are in normalized coordinates (0-1) and get scaled to frame dimensions
         """
         image = Image.new("RGB", (frame_width, frame_height), bg_color)
         draw = ImageDraw.Draw(image)
@@ -100,157 +193,154 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             current_width *= scale
             current_height *= scale
 
-        # Draw static points (p_coordinates), optionally driven by p_driver_path
-        if static_points:
-            driver_offset_x = driver_offset_y = 0.0
-            if p_coords_use_driver and p_driver_path and p_coords_pause_frames:
-                p_start_p, p_end_p = p_coords_pause_frames
-                p_animation_frames = max(1, total_frames - p_start_p - p_end_p)
-                if frame_index < p_start_p:
-                    driver_index = 0
-                elif frame_index >= total_frames - p_end_p:
-                    driver_index = len(p_driver_path) - 1
-                else:
-                    driver_index = frame_index - p_start_p
-
-                if 0 <= driver_index < len(p_driver_path):
-                    ref_x = float(p_driver_path[0]['x'])
-                    ref_y = float(p_driver_path[0]['y'])
-                    current_x = float(p_driver_path[driver_index]['x'])
-                    current_y = float(p_driver_path[driver_index]['y'])
-                    driver_offset_x = current_x - ref_x
-                    driver_offset_y = current_y - ref_y
-
-            # Apply scale to shape dimensions for static points using the dedicated parameter
-            static_width = float(shape_width) * static_points_scale
-            static_height = float(shape_height) * static_points_scale
-
-            # Draw each static point with driver offset applied
-            for point in static_points:
-                try:
-                    location_x = point['x'] + driver_offset_x
-                    location_y = point['y'] + driver_offset_y
-                except (KeyError, TypeError):
+        # Draw static points (p_coordinates), optionally driven by static_points_driver_path
+        # Static points are individual points that stay in one location but can be moved by driver paths
+        # They differ from animated paths which contain multiple coordinate points over time
+        if static_point_layers:
+            # Draw each layer of static points with its own driver if available
+            for layer_idx, static_points in enumerate(static_point_layers):
+                if not static_points:
                     continue
 
-                if shape in ('circle', 'square'):
-                    left_up_point = (location_x - static_width / 2.0, location_y - static_height / 2.0)
-                    right_down_point = (location_x + static_width / 2.0, location_y + static_height / 2.0)
-                    two_points = [left_up_point, right_down_point]
+                # Apply scale to shape dimensions for static points using per-layer scales if available
+                layer_scale = static_points_scale
+                if static_points_scales_list and layer_idx < len(static_points_scales_list):
+                    layer_scale = float(static_points_scales_list[layer_idx])
 
-                    if shape == 'circle':
-                        if border_width > 0:
-                            draw.ellipse(two_points, fill=shape_color, outline=border_color, width=border_width)
-                        else:
-                            draw.ellipse(two_points, fill=shape_color)
-                    else:  # square
-                        if border_width > 0:
-                            draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
-                        else:
-                            draw.rectangle(two_points, fill=shape_color)
+                static_width = float(shape_width) * layer_scale
+                static_height = float(shape_height) * layer_scale
 
-                elif shape == 'triangle':
-                    left = (location_x - static_width / 2.0, location_y + static_height / 2.0)
-                    right = (location_x + static_width / 2.0, location_y + static_height / 2.0)
-                    top = (location_x, location_y - static_height / 2.0)
-                    poly_points = [top, left, right]
-                    if border_width > 0:
-                        try:
-                            draw.polygon(poly_points, fill=shape_color, outline=border_color)
-                        except TypeError:
-                            draw.polygon(poly_points, fill=shape_color)
-                    else:
-                        draw.polygon(poly_points, fill=shape_color)
+                # Get the driver for this layer if available
+                layer_driver_info = None
+                if static_points_use_driver and layer_idx < len(static_points_interpolated_drivers):
+                    layer_driver_info = static_points_interpolated_drivers[layer_idx]
+
+                # Draw each point in this layer with the layer's driver offset applied
+                for point_idx, point in enumerate(static_points):
+                    driver_offset_x = driver_offset_y = 0.0
+
+                    # Use the layer's driver if available
+                    if layer_driver_info and isinstance(layer_driver_info, dict):
+                        interpolated_driver = layer_driver_info.get('path')
+                        driver_d_scale = layer_driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
+
+                        if interpolated_driver and len(interpolated_driver) > 0:
+                            driver_offset_x, driver_offset_y = self._calculate_driver_offset(
+                                frame_index, interpolated_driver, static_points_pause_frames,
+                                total_frames, driver_d_scale, frame_width, frame_height
+                            )
+                    elif static_points_use_driver and static_points_interpolated_drivers and len(static_points_interpolated_drivers) > 0:
+                        # Use the first interpolated driver for all layers (legacy fallback)
+                        driver_info = static_points_interpolated_drivers[0]
+                        if driver_info and isinstance(driver_info, dict):
+                            interpolated_driver = driver_info.get('path')
+                            if interpolated_driver and len(interpolated_driver) > 0:
+                                driver_offset_x, driver_offset_y = self._calculate_driver_offset(
+                                    frame_index, interpolated_driver, static_points_pause_frames,
+                                    total_frames, DRIVER_SCALE_FACTOR, frame_width, frame_height
+                                )
+
+                    try:
+                        location_x = point['x'] + driver_offset_x
+                        location_y = point['y'] + driver_offset_y
+                    except (KeyError, TypeError):
+                        continue
+
+                    # Draw the shape at the computed location using the helper method
+                    self._draw_shape_at_location(draw, location_x, location_y, shape,
+                                               static_width, static_height, shape_color,
+                                               border_width, border_color)
 
         # Draw animated paths
+        # Animated paths contain sequences of coordinates that change over time
+        # Each path represents the motion of a shape through the frames
         for path_idx, coords in enumerate(processed_coords_list):
             if not isinstance(coords, list) or len(coords) == 0:
                 continue
 
-            # Determine per-path frame mapping
-            path_start_p, path_end_p = path_pause_frames[path_idx]
-            path_animation_frames = max(1, total_frames - path_start_p - path_end_p)
-            if frame_index < path_start_p:
-                coord_index = 0
-            elif frame_index >= total_frames - path_end_p:
-                coord_index = path_animation_frames - 1
-            else:
-                coord_index = frame_index - path_start_p
+            # Check if this is a points-type layer with driver info
+            # Points mode means the layer contains multiple points that should all be drawn simultaneously
+            # rather than a single coordinate that changes over time
+            is_points_mode_with_driver = (
+                coords_driver_info_list and
+                path_idx < len(coords_driver_info_list) and
+                coords_driver_info_list[path_idx] and
+                coords_driver_info_list[path_idx].get('is_points_mode', False)
+            )
 
-            if coord_index < 0 or coord_index >= len(coords):
-                continue
-
-            try:
-                location_x = coords[coord_index]['x']
-                location_y = coords[coord_index]['y']
-            except (KeyError, IndexError, TypeError):
-                continue
-
-            # Apply per-path scale if scales_list is provided
-            path_current_width = float(shape_width)
-            path_current_height = float(shape_height)
-            if scales_list and path_idx < len(scales_list):
-                scale = float(scales_list[path_idx])
-                path_current_width *= scale
-                path_current_height *= scale
-
-            # Apply per-path driver offset (if present)
-            driver_offset_x = driver_offset_y = 0.0
-            if coords_driver_info_list and path_idx < len(coords_driver_info_list):
+            if is_points_mode_with_driver:
+                # For points-type layers with driver, draw all points with driver offset applied
+                # In points mode, all points in the layer receive the same driver offset for this frame
                 driver_info = coords_driver_info_list[path_idx]
-                if driver_info and isinstance(driver_info, dict):
-                    interpolated_driver = driver_info.get('interpolated_path')
-                    driver_pause_frames = driver_info.get('pause_frames', (0, 0))
-                    d_scale = driver_info.get('d_scale', 1.0)
-                    if interpolated_driver and len(interpolated_driver) > 0:
-                        d_start_p, d_end_p = driver_pause_frames
-                        if frame_index < d_start_p:
-                            driver_index = 0
-                        elif frame_index >= total_frames - d_end_p:
-                            driver_index = len(interpolated_driver) - 1
-                        else:
-                            driver_index = frame_index - d_start_p
-
-                        if 0 <= driver_index < len(interpolated_driver):
-                            ref_x = float(interpolated_driver[0]['x'])
-                            ref_y = float(interpolated_driver[0]['y'])
-                            current_x = float(interpolated_driver[driver_index]['x'])
-                            current_y = float(interpolated_driver[driver_index]['y'])
-                            driver_offset_x = (current_x - ref_x) * d_scale
-                            driver_offset_y = (current_y - ref_y) * d_scale
-
-            location_x += driver_offset_x
-            location_y += driver_offset_y
-
-            # Draw the shape at the computed location
-            if shape in ('circle', 'square'):
-                left_up_point = (location_x - path_current_width / 2.0, location_y - path_current_height / 2.0)
-                right_down_point = (location_x + path_current_width / 2.0, location_y + path_current_height / 2.0)
-                two_points = [left_up_point, right_down_point]
-
-                if shape == 'circle':
-                    if border_width > 0:
-                        draw.ellipse(two_points, fill=shape_color, outline=border_color, width=border_width)
-                    else:
-                        draw.ellipse(two_points, fill=shape_color)
-                else:  # square
-                    if border_width > 0:
-                        draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
-                    else:
-                        draw.rectangle(two_points, fill=shape_color)
-
-            elif shape == 'triangle':
-                left = (location_x - path_current_width / 2.0, location_y + path_current_height / 2.0)
-                right = (location_x + path_current_width / 2.0, location_y + path_current_height / 2.0)
-                top = (location_x, location_y - path_current_height / 2.0)
-                poly_points = [top, left, right]
-                if border_width > 0:
+                interpolated_driver = driver_info.get('interpolated_path')
+                driver_pause_frames = driver_info.get('pause_frames', (0, 0))
+                d_scale = driver_info.get('d_scale', 1.0)
+                
+                # Calculate driver offset for this frame using helper method
+                driver_offset_x, driver_offset_y = self._calculate_driver_offset(
+                    frame_index, interpolated_driver, driver_pause_frames,
+                    total_frames, d_scale, frame_width, frame_height
+                )
+                    
+                    
+                # Apply per-path scale if scales_list is provided
+                path_current_width = float(shape_width)
+                path_current_height = float(shape_height)
+                if scales_list and path_idx < len(scales_list):
+                    scale = float(scales_list[path_idx])
+                    path_current_width *= scale
+                    path_current_height *= scale
+                
+                # Draw all points with the same driver offset
+                for point in coords:
                     try:
-                        draw.polygon(poly_points, fill=shape_color, outline=border_color)
-                    except TypeError:
-                        draw.polygon(poly_points, fill=shape_color)
+                        location_x = point['x'] + driver_offset_x
+                        location_y = point['y'] + driver_offset_y
+                    except (KeyError, TypeError):
+                        continue
+
+                    # Draw the shape at the computed location using the helper method
+                    self._draw_shape_at_location(draw, location_x, location_y, shape,
+                                               path_current_width, path_current_height, shape_color,
+                                               border_width, border_color)
+            else:
+                # Regular path drawing (non-points or points without driver)
+                # Determine which coordinate from the path should be used for this frame
+                # This handles pausing at the start and end of path animations
+                path_start_p, path_end_p = path_pause_frames[path_idx]
+                path_animation_frames = max(1, total_frames - path_start_p - path_end_p)
+                if frame_index < path_start_p:
+                    coord_index = 0
+                elif frame_index >= total_frames - path_end_p:
+                    coord_index = path_animation_frames - 1
                 else:
-                    draw.polygon(poly_points, fill=shape_color)
+                    coord_index = frame_index - path_start_p
+
+                if coord_index < 0 or coord_index >= len(coords):
+                    continue
+
+                try:
+                    location_x = coords[coord_index]['x']
+                    location_y = coords[coord_index]['y']
+                except (KeyError, IndexError, TypeError):
+                    continue
+
+                # Apply per-path scale if scales_list is provided
+                path_current_width = float(shape_width)
+                path_current_height = float(shape_height)
+                if scales_list and path_idx < len(scales_list):
+                    scale = float(scales_list[path_idx])
+                    path_current_width *= scale
+                    path_current_height *= scale
+
+                # Driver offsets are now pre-applied to processed_coords_list in drawshapemask
+                # No need to apply them again here
+                # This ensures the driven layer's interpolation is preserved and the driver offset is added on top
+
+                # Draw the shape at the computed location using the helper method
+                self._draw_shape_at_location(draw, location_x, location_y, shape,
+                                           path_current_width, path_current_height, shape_color,
+                                           border_width, border_color)
 
         if blur_radius and blur_radius > 0.0:
             image = image.filter(ImageFilter.GaussianBlur(blur_radius))
@@ -260,17 +350,21 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
     def _draw_splines_on_preview(self, preview_tensor: torch.Tensor, processed_coords_list: List[Path],
                                  path_pause_frames: List[Tuple[int, int]], total_frames: int,
                                  coords_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
-                                 static_points: Optional[List[Coord]] = None,
-                                 p_coords_use_driver: bool = False,
-                                 p_driver_path: Optional[Path] = None,
-                                 start_p_frames_meta=0, end_p_frames_meta=0) -> torch.Tensor:
+                                 static_point_layers: Optional[List[List[Coord]]] = None,
+                                 static_points_use_driver: bool = False,
+                                 static_points_driver_path: Optional[Path] = None,
+                                 start_p_frames_meta=0, end_p_frames_meta=0,
+                                 static_points_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
+                                 static_points_interpolated_drivers: Optional[List[Dict[str, Any]]] = None,
+                                 frame_width: int = DEFAULT_FRAME_WIDTH, frame_height: int = DEFAULT_FRAME_HEIGHT,
+                                 ati_tracks: Optional[List[List[Dict[str, Any]]]] = None) -> torch.Tensor:
         """
         Draw thin orange splines on the preview frames to visualize the paths.
         Works on already scaled (50%) preview tensor in BHWC format.
         Returns modified tensor.
         """
         batch_size, scaled_height, scaled_width, channels = preview_tensor.shape
-        scale_factor = 0.5  # Preview is scaled to 50%
+        scale_factor = PREVIEW_SCALE_FACTOR  # Preview is scaled to 50%
 
         # Convert tensor to list of PIL images for drawing
         preview_pil_list = []
@@ -279,101 +373,29 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             pil_img = Image.fromarray(frame_np, mode='RGB')
             preview_pil_list.append(pil_img)
 
-        # Draw splines on each frame
-        for frame_idx in range(batch_size):
-            draw = ImageDraw.Draw(preview_pil_list[frame_idx])
+  
+        # Draw orange lines using ATI tracks (all coordinate paths including p_coordinates)
+        if ati_tracks and len(ati_tracks) > 0:
+            for frame_idx in range(batch_size):
+                draw = ImageDraw.Draw(preview_pil_list[frame_idx])
 
-            # Draw animated paths splines
-            for path_idx, coords in enumerate(processed_coords_list):
-                if not isinstance(coords, list) or len(coords) == 0:
-                    continue
-
-                path_start_p, path_end_p = path_pause_frames[path_idx]
-
-                # Collect all path points with driver offsets applied
-                path_points_with_offsets = []
-                for coord_idx in range(len(coords)):
-                    try:
-                        location_x = coords[coord_idx]['x']
-                        location_y = coords[coord_idx]['y']
-                    except (KeyError, IndexError, TypeError):
+                for track_idx, track in enumerate(ati_tracks):
+                    if not track or len(track) == 0:
                         continue
 
-                    # Apply per-path driver offset (same logic as in _draw_single_frame_pil)
-                    driver_offset_x = driver_offset_y = 0.0
-                    if coords_driver_info_list and path_idx < len(coords_driver_info_list):
-                        driver_info = coords_driver_info_list[path_idx]
-                        if driver_info and isinstance(driver_info, dict):
-                            interpolated_driver = driver_info.get('interpolated_path')
-                            driver_pause_frames = driver_info.get('pause_frames', (0, 0))
-                            d_scale = driver_info.get('d_scale', 1.0)
-                            if interpolated_driver and len(interpolated_driver) > 0:
-                                # Map coord_idx to frame_idx considering pause frames
-                                frame_for_coord = coord_idx + path_start_p
-                                d_start_p, d_end_p = driver_pause_frames
-                                if frame_for_coord < d_start_p:
-                                    driver_index = 0
-                                elif frame_for_coord >= total_frames - d_end_p:
-                                    driver_index = len(interpolated_driver) - 1
-                                else:
-                                    driver_index = frame_for_coord - d_start_p
+                    # Collect points for this track, apply preview scaling
+                    track_points = []
+                    for point in track:
+                        try:
+                            x = int(point.get('x', 0)) * scale_factor
+                            y = int(point.get('y', 0)) * scale_factor
+                            track_points.append((x, y))
+                        except (ValueError, TypeError):
+                            continue
 
-                                if 0 <= driver_index < len(interpolated_driver):
-                                    ref_x = float(interpolated_driver[0]['x'])
-                                    ref_y = float(interpolated_driver[0]['y'])
-                                    current_x = float(interpolated_driver[driver_index]['x'])
-                                    current_y = float(interpolated_driver[driver_index]['y'])
-                                    driver_offset_x = (current_x - ref_x) * d_scale
-                                    driver_offset_y = (current_y - ref_y) * d_scale
-
-                    location_x += driver_offset_x
-                    location_y += driver_offset_y
-
-                    # Scale coordinates to match 50% preview size
-                    path_points_with_offsets.append((location_x * scale_factor, location_y * scale_factor))
-
-                # Draw the spline as connected line segments
-                if len(path_points_with_offsets) > 1:
-                    draw.line(path_points_with_offsets, fill='orange', width=2)
-
-            # Draw static points paths (if using driver)
-            if static_points and p_coords_use_driver and p_driver_path:
-                # Extract pause frame info
-                start_p_frames = start_p_frames_meta
-                end_p_frames = end_p_frames_meta
-                if isinstance(start_p_frames, dict):
-                    start_p_frames = start_p_frames.get("p", 0)
-                if isinstance(end_p_frames, dict):
-                    end_p_frames = end_p_frames.get("p", 0)
-                if isinstance(start_p_frames, list):
-                    start_p_frames = start_p_frames[0] if start_p_frames else 0
-                if isinstance(end_p_frames, list):
-                    end_p_frames = end_p_frames[0] if end_p_frames else 0
-
-                # Draw driver path trajectory for each static point
-                driver_trajectory = []
-                for driver_idx in range(len(p_driver_path)):
-                    try:
-                        ref_x = float(p_driver_path[0]['x'])
-                        ref_y = float(p_driver_path[0]['y'])
-                        current_x = float(p_driver_path[driver_idx]['x'])
-                        current_y = float(p_driver_path[driver_idx]['y'])
-                        driver_offset_x = current_x - ref_x
-                        driver_offset_y = current_y - ref_y
-
-                        # Apply offset to first static point (as example)
-                        if static_points:
-                            base_x = static_points[0]['x']
-                            base_y = static_points[0]['y']
-                            driver_trajectory.append((
-                                (base_x + driver_offset_x) * scale_factor,
-                                (base_y + driver_offset_y) * scale_factor
-                            ))
-                    except (KeyError, IndexError, TypeError):
-                        continue
-
-                if len(driver_trajectory) > 1:
-                    draw.line(driver_trajectory, fill='orange', width=2)
+                    # Draw orange line if we have multiple points
+                    if len(track_points) > 1:
+                        draw.line(track_points, fill='orange', width=2)
 
         # Convert PIL images back to tensor
         result_frames = []
@@ -421,8 +443,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             "scales": 1.0,
             "drivers": None,
             "p_coordinates_use_driver": False,
-            "p_driver_path": None,
-            "p_driver_smooth": 0.0,
+            "static_points_driver_path": None,
+            "static_points_driver_smooth": 0.0,
             "coord_width": None,
             "coord_height": None
         }
@@ -437,7 +459,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     coordinates_data = json.dumps(parsed["coordinates"])
                 if "p_coordinates" in parsed:
                     p_coordinates_data = json.dumps(parsed["p_coordinates"])
-                for k in ("start_p_frames", "end_p_frames", "offsets", "interpolations", "easing_functions", "easing_paths", "easing_strengths", "accelerations", "scales", "drivers", "p_coordinates_use_driver", "p_driver_path", "p_driver_smooth", "coord_width", "coord_height"):
+                for k in ("start_p_frames", "end_p_frames", "offsets", "interpolations", "easing_functions", "easing_paths", "easing_strengths", "accelerations", "scales", "drivers", "p_coordinates_use_driver", "static_points_driver_path", "static_points_driver_smooth", "coord_width", "coord_height"):
                     if k in parsed:
                         metadata[k] = parsed[k]
             else:
@@ -449,34 +471,43 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
         return coordinates_data, p_coordinates_data, metadata
 
-    def _parse_static_points(self, p_coordinates_json: Optional[str]) -> List[Coord]:
+    def _parse_static_points(self, p_coordinates_json: Optional[str]) -> List[List[Coord]]:
         """
-        Parse static p_coordinates JSON string into a flat list of coordinate dicts.
+        Parse static p_coordinates JSON string into a list of point layers.
+        Each layer is a list of coordinate dicts.
         Returns [] if none or invalid.
         """
         if not p_coordinates_json:
             return []
 
-        static_points: List[Coord] = []
+        static_point_layers: List[List[Coord]] = []
         try:
             parsed = self._safe_json_load(p_coordinates_json)
             if isinstance(parsed, list):
                 # Could be list of dicts or list of lists
                 if parsed and isinstance(parsed[0], dict):
+                    # Single layer of points
+                    layer = []
                     for p in parsed:
                         if isinstance(p, dict) and 'x' in p and 'y' in p:
-                            static_points.append({'x': float(p['x']), 'y': float(p['y']), **{k: v for k, v in p.items() if k not in ('x', 'y')}})
+                            layer.append({'x': float(p['x']), 'y': float(p['y']), **{k: v for k, v in p.items() if k not in ('x', 'y')}})
+                    static_point_layers.append(layer)
                 else:
-                    # Flatten nested lists
+                    # Multiple layers - preserve structure
                     for sub in parsed:
                         if isinstance(sub, list):
+                            layer = []
                             for p in sub:
                                 if isinstance(p, dict) and 'x' in p and 'y' in p:
-                                    static_points.append({'x': float(p['x']), 'y': float(p['y']), **{k: v for k, v in p.items() if k not in ('x', 'y')}})
+                                    layer.append({'x': float(p['x']), 'y': float(p['y']), **{k: v for k, v in p.items() if k not in ('x', 'y')}})
+                            static_point_layers.append(layer)
+                        elif isinstance(sub, dict) and 'x' in sub and 'y' in sub:
+                            # Single point as a layer
+                            static_point_layers.append([{'x': float(sub['x']), 'y': float(sub['y']), **{k: v for k, v in sub.items() if k not in ('x', 'y')}}])
         except Exception:
             # On any parse error, return empty list
             return []
-        return static_points
+        return static_point_layers
 
     def _compute_frame_dimensions(self, bg_image: torch.Tensor) -> Tuple[int, int]:
         """
@@ -487,47 +518,54 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             _, frame_height, frame_width, _ = bg_image.shape
             return frame_width, frame_height
         except Exception:
-            return 512, 512
+            return DEFAULT_FRAME_WIDTH, DEFAULT_FRAME_HEIGHT
 
-    def _scale_points_and_drivers(self, static_points: List[Coord], p_driver_path: Optional[Path],
+    def _scale_points_and_drivers(self, static_point_layers: List[List[Coord]], static_points_driver_path: Optional[Path],
                                   coord_width: Optional[float], coord_height: Optional[float],
-                                  frame_width: int, frame_height: int) -> Tuple[List[Coord], Optional[Path]]:
+                                  frame_width: int, frame_height: int) -> Tuple[List[List[Coord]], Optional[Path]]:
         """
-        Scale static points and driver path if coordinate space differs from frame size.
-        Returns tuple (scaled_static_points, scaled_driver_path_or_none).
+        Scale static point layers and driver path if coordinate space differs from frame size.
+
+        The coordinate system can be normalized (0-1) or use absolute pixel values.
+        This method ensures all coordinates are properly scaled to match the output frame dimensions.
+
+        Returns tuple (scaled_static_point_layers, scaled_driver_path_or_none).
         """
         if not coord_width or not coord_height:
-            return static_points, p_driver_path
+            return static_point_layers, static_points_driver_path
 
         scale_x = float(frame_width) / float(coord_width) if coord_width and coord_width != 0 else 1.0
         scale_y = float(frame_height) / float(coord_height) if coord_height and coord_height != 0 else 1.0
 
         if scale_x == 1.0 and scale_y == 1.0:
-            return static_points, p_driver_path
+            return static_point_layers, static_points_driver_path
 
-        scaled_static = []
-        for p in static_points:
-            sp = {**p}
-            sp['x'] = float(p['x']) * scale_x
-            sp['y'] = float(p['y']) * scale_y
-            scaled_static.append(sp)
+        scaled_static_layers = []
+        for layer in static_point_layers:
+            scaled_layer = []
+            for p in layer:
+                sp = {**p}
+                sp['x'] = float(p['x']) * scale_x
+                sp['y'] = float(p['y']) * scale_y
+                scaled_layer.append(sp)
+            scaled_static_layers.append(scaled_layer)
 
         scaled_driver = None
-        if p_driver_path:
+        if static_points_driver_path:
             scaled_driver = []
-            for p in p_driver_path:
+            for p in static_points_driver_path:
                 if isinstance(p, dict) and 'x' in p and 'y' in p:
                     sp = {**p}
                     sp['x'] = float(p['x']) * scale_x
                     sp['y'] = float(p['y']) * scale_y
                     scaled_driver.append(sp)
 
-        return scaled_static, scaled_driver
+        return scaled_static_layers, scaled_driver
 
-    def _process_p_driver_path(self, raw_path: Optional[Path], total_frames: int, smooth_strength: float,
+    def _process_static_points_driver_path(self, raw_path: Optional[Path], total_frames: int, smooth_strength: float,
                                easing_function: str, easing_path: str, easing_strength: float) -> Optional[Path]:
         """
-        Interpolate p_driver_path to match total_frames and optionally smooth it.
+        Interpolate static_points_driver_path to match total_frames and optionally smooth it.
         Returns processed path or None.
         """
         if not raw_path:
@@ -544,7 +582,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     curr = processed[i]
                     prev = processed[i - 1]
                     nxt = processed[i + 1]
-                    neighbor_weight = smooth_strength * 0.5
+                    neighbor_weight = smooth_strength * TRAILING_WEIGHT_FACTOR
                     current_weight = 1.0 - (2 * neighbor_weight)
                     sx = (current_weight * float(curr['x']) + neighbor_weight * float(prev['x']) + neighbor_weight * float(nxt['x']))
                     sy = (current_weight * float(curr['y']) + neighbor_weight * float(prev['y']) + neighbor_weight * float(nxt['y']))
@@ -775,7 +813,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 
                 # Apply acceleration remapping if acceleration is not zero
                 path_acceleration = float(accelerations_list[i]) if i < len(accelerations_list) else 0.00
-                if abs(path_acceleration) > 0.001:  # Only apply if acceleration is not close to zero
+                if abs(path_acceleration) > ACCELERATION_THRESHOLD:  # Only apply if acceleration is not close to zero
                     processed_path = draw_utils.InterpMath.apply_acceleration_remapping(processed_path, path_acceleration)
 
                 # Prepare per-path driver interpolation (for per-frame offsets)
@@ -784,6 +822,13 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     raw_driver_path = path_driver_info.get('path')
                     driver_rotate = path_driver_info.get('rotate', 0)
                     driver_d_scale = path_driver_info.get('d_scale', 1.0)
+                    
+                    # Use driver's own interpolation parameters if available, otherwise fall back to driven layer's parameters
+                    driver_easing_function = path_driver_info.get('easing_function', path_easing_function)
+                    driver_easing_path = path_driver_info.get('easing_path', path_easing_path)
+                    driver_easing_strength = path_driver_info.get('easing_strength', path_easing_strength)
+                    driver_acceleration = path_driver_info.get('acceleration', 0.00)
+                    
                     if raw_driver_path and len(raw_driver_path) > 0:
                         transformed_driver = raw_driver_path
                         # NOTE: Driver paths are already scaled in drawshapemask() at lines 391-415
@@ -793,9 +838,14 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             transformed_driver = rotate_path(transformed_driver, driver_rotate)
                         # d_scale will be applied during rendering to the offset
                         interpolated_driver = draw_utils.InterpMath.interpolate_or_downsample_path(
-                            transformed_driver, total_frames, path_easing_function, path_easing_path, bounce_between=0.0, easing_strength=path_easing_strength
+                            transformed_driver, total_frames, driver_easing_function, driver_easing_path, bounce_between=0.0, easing_strength=driver_easing_strength
                         )
-                        driver_info_for_frame = {'interpolated_path': interpolated_driver, 'pause_frames': (path_start_p, path_end_p), 'd_scale': driver_d_scale}
+                        
+                        # Apply acceleration remapping if acceleration is not zero
+                        if abs(driver_acceleration) > ACCELERATION_THRESHOLD:  # Only apply if acceleration is not close to zero
+                            interpolated_driver = draw_utils.InterpMath.apply_acceleration_remapping(interpolated_driver, driver_acceleration)
+                        
+                        driver_info_for_frame = {'interpolated_path': interpolated_driver, 'pause_frames': (path_start_p, path_end_p), 'd_scale': driver_d_scale, 'easing_function': driver_easing_function, 'easing_path': driver_easing_path, 'easing_strength': driver_easing_strength}
 
                 # Apply offset timing (modify processed_path and adjust pauses)
                 if path_offset != 0:
@@ -882,7 +932,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
     # Main Node Method
     # ----------------------------
     def drawshapemask(self, coordinates, bg_image,
-                      shape_width, shape_height, shape_color, bg_color, blur_radius, shape, intensity, ati_p_fade_start, ati_fade_start,
+                      shape_width, shape_height, shape_color, bg_color, blur_radius, shape, intensity, static_fade_start, animated_fade_start,
                       trailing=1.0, border_width=0, border_color='black', frames=None, preview_enabled=True):
         """
         Main entry point. Orchestrates:
@@ -895,46 +945,93 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         """
 
         # ----- Use passed parameters -----
-        total_frames = int(frames) if frames is not None else 16  # Use default value of 16 if not provided
+        total_frames = int(frames) if frames is not None else DEFAULT_TOTAL_FRAMES
         # Note: easing_function, easing_path, and easing_strength are now passed directly as parameters
 
         # ----- Parse coordinate metadata & static points -----
         coordinates_data, p_coordinates_data, meta = self._parse_coordinate_metadata(coordinates)
-        static_points = self._parse_static_points(p_coordinates_data)
+        static_point_layers = self._parse_static_points(p_coordinates_data)
 
-        # Driver metadata for p_coordinates (older and newer logic)
-        p_coords_use_driver = bool(meta.get("p_coordinates_use_driver", False))
-        p_driver_path_raw = meta.get("p_driver_path", None)
-        p_driver_smooth = float(meta.get("p_driver_smooth", 0.0))
+        # Driver metadata for static points (older and newer logic)
+        static_points_use_driver = bool(meta.get("p_coordinates_use_driver", False))
+        static_points_driver_path_raw = meta.get("static_points_driver_path", None)
+        static_points_driver_smooth = float(meta.get("static_points_driver_smooth", 0.0))
+
+        # Store driver info for each static point path (for points layers)
+        static_points_driver_info_list = []
 
         # Attempt to find a driver path inside drivers metadata if present
-        if isinstance(meta.get("drivers"), dict) and not p_driver_path_raw:
+        if isinstance(meta.get("drivers"), dict):
             p_drivers = meta["drivers"].get("p")
-            raw_driver_path = None
+            # Check if we have drivers for static points
             if isinstance(p_drivers, list) and p_drivers:
-                for d in p_drivers:
-                    if isinstance(d, dict) and 'path' in d and isinstance(d['path'], list) and d['path']:
-                        raw_driver_path = d['path']
-                        break
-            if raw_driver_path:
-                p_driver_path_raw = raw_driver_path
-                p_coords_use_driver = True
+                # Process each driver for static points
+                for driver_info in p_drivers:
+                    if isinstance(driver_info, dict) and 'path' in driver_info and isinstance(driver_info['path'], list) and driver_info['path']:
+                        # Store driver info for each static point path
+                        static_points_driver_info_list.append(driver_info)
+                        if not static_points_driver_path_raw:  # Keep the first one for backward compatibility
+                            static_points_driver_path_raw = driver_info['path']
+                            static_points_use_driver = True
 
         # ----- Frame dimensions and scaling -----
         frame_width, frame_height = self._compute_frame_dimensions(bg_image)
         coord_width = meta.get("coord_width", None)
         coord_height = meta.get("coord_height", None)
 
-        # Scale static points and p_driver_path if necessary
-        static_points, p_driver_path_processed = self._scale_points_and_drivers(static_points, p_driver_path_raw, coord_width, coord_height, frame_width, frame_height)
+        # Scale static points and static_points_driver_path if necessary
+        static_point_layers, static_points_driver_path_processed = self._scale_points_and_drivers(static_point_layers, static_points_driver_path_raw, coord_width, coord_height, frame_width, frame_height)
 
-        # Interpolate p_driver_path to total_frames and apply smoothing
-        # For p_coordinates, use the easing parameters from metadata
+        # Interpolate static_points_driver_path to total_frames and apply smoothing
+        # For static points, use the easing parameters from metadata
         easing_function = meta.get("easing_functions", "in_out")
         easing_path = meta.get("easing_paths", "full")
         easing_strength = meta.get("easing_strengths", 1.0)
-        if p_coords_use_driver and p_driver_path_processed:
-            p_driver_path_processed = self._process_p_driver_path(p_driver_path_processed, total_frames, p_driver_smooth, easing_function, easing_path, easing_strength)
+
+        # Store interpolated driver paths for each static point layer
+        static_points_interpolated_drivers = []
+        if static_points_use_driver and static_points_driver_info_list:
+            for driver_info in static_points_driver_info_list:
+                if driver_info and isinstance(driver_info, dict):
+                    driver_path = driver_info.get('path')
+                    driver_d_scale = driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
+
+                    # Use driver's own interpolation parameters if available, otherwise fall back to defaults
+                    driver_easing_function = driver_info.get('easing_function', easing_function)
+                    driver_easing_path = driver_info.get('easing_path', easing_path)
+                    driver_easing_strength = driver_info.get('easing_strength', easing_strength)
+
+                    if driver_path and len(driver_path) > 0:
+                        # Interpolate this driver path to match total_frames using its own interpolation parameters
+                        interpolated = self._process_static_points_driver_path(
+                            driver_path, total_frames, static_points_driver_smooth,
+                            driver_easing_function, driver_easing_path, driver_easing_strength
+                        )
+                        static_points_interpolated_drivers.append({
+                            'path': interpolated,
+                            'd_scale': driver_d_scale,
+                            'easing_function': driver_easing_function,
+                            'easing_path': driver_easing_path,
+                            'easing_strength': driver_easing_strength
+                        })
+        elif static_points_use_driver and static_points_driver_path_processed:
+            # Use the single driver for all layers (legacy mode)
+            static_points_interpolated_drivers = [{
+                'path': static_points_driver_path_processed,
+                'd_scale': DRIVER_SCALE_FACTOR,  # No scaling for legacy single driver
+                'easing_function': easing_function,
+                'easing_path': easing_path,
+                'easing_strength': easing_strength
+            }]
+        else:
+            static_points_interpolated_drivers = []
+
+        # Code-side fallback: automatically enable static_points_use_driver if drivers.p exists
+        if isinstance(meta.get("drivers"), dict) and meta["drivers"].get("p"):
+            static_points_use_driver = True
+
+        if static_points_use_driver and static_points_driver_path_processed:
+            static_points_driver_path_processed = self._process_static_points_driver_path(static_points_driver_path_processed, total_frames, static_points_driver_smooth, easing_function, easing_path, easing_strength)
 
         # ----- Parse animated coordinates list (coords_list_raw) -----
         coords_list_raw: List[Path] = []
@@ -1013,14 +1110,17 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         # ----- Build interpolated/resampled animated paths -----
         # Handle different formats for easing parameters - could be single values, lists, or objects
         easing_functions_meta = meta.get("easing_functions", "in_out")
-        easing_paths_meta = meta.get("easing_paths", "full") 
+        easing_paths_meta = meta.get("easing_paths", "full")
         easing_strengths_meta = meta.get("easing_strengths", 1.0)
         accelerations_meta = meta.get("accelerations", 0.00)
+        
+        # Get interpolations metadata to check for points mode
+        interpolations_meta = meta.get("interpolations", 'linear')
         
         processed_coords_list, path_pause_frames, coords_driver_info_list, scales_list = self._build_interpolated_paths(
             coords_list_raw, total_frames,
             meta.get("start_p_frames", 0), meta.get("end_p_frames", 0),
-            meta.get("offsets", 0), meta.get("interpolations", 'linear'),
+            meta.get("offsets", 0), interpolations_meta,
             meta.get("drivers", None),
             easing_functions_meta,
             easing_paths_meta,
@@ -1030,14 +1130,83 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             coord_width, coord_height, frame_width, frame_height
         )
         
+        # Normalize interpolations list to check for points mode
+        num_paths = len(processed_coords_list)
+        interpolations_list = []
+        if isinstance(interpolations_meta, dict):
+            c_inter = interpolations_meta.get("c", 'linear')
+            if isinstance(c_inter, str):
+                interpolations_list = [c_inter] * num_paths
+            elif isinstance(c_inter, list):
+                interpolations_list = c_inter + ['linear'] * (num_paths - len(c_inter))
+            else:
+                interpolations_list = ['linear'] * num_paths
+        elif isinstance(interpolations_meta, str):
+            interpolations_list = [interpolations_meta] * num_paths
+        elif isinstance(interpolations_meta, list):
+            interpolations_list = interpolations_meta + ['linear'] * (num_paths - len(interpolations_meta))
+        else:
+            interpolations_list = ['linear'] * num_paths
+        
+        # Apply driver offsets to processed coordinates after they've been interpolated with their own easing
+        # This ensures that the driven layer's interpolation is preserved and the driver offset is added on top
+        for path_idx, coords in enumerate(processed_coords_list):
+            if path_idx < len(coords_driver_info_list) and coords_driver_info_list[path_idx]:
+                driver_info = coords_driver_info_list[path_idx]
+                if driver_info and isinstance(driver_info, dict):
+                    interpolated_driver = driver_info.get('interpolated_path')
+                    driver_pause_frames = driver_info.get('pause_frames', (0, 0))
+                    d_scale = driver_info.get('d_scale', 1.0)
+                    if interpolated_driver and len(interpolated_driver) > 0:
+                        d_start_p, d_end_p = driver_pause_frames
+                        
+                        # Check if this is a "points" type layer
+                        if path_idx < len(interpolations_list) and interpolations_list[path_idx] == 'points':
+                            # For points mode, DON'T apply offsets here to processed_coords_list
+                            # The offsets will be applied per-frame in _draw_single_frame_pil
+                            # Just mark this as a points-mode layer with driver
+                            coords_driver_info_list[path_idx] = {
+                                'interpolated_path': interpolated_driver,
+                                'pause_frames': driver_pause_frames,
+                                'd_scale': d_scale,
+                                'easing_function': driver_info.get('easing_function', 'linear'),
+                                'easing_path': driver_info.get('easing_path', 'full'),
+                                'easing_strength': driver_info.get('easing_strength', 1.0),
+                                'is_points_mode': True
+                            }
+                        else:
+                            # For non-points layers, apply driver offset to each frame of the processed path
+                            for frame_idx in range(len(coords)):
+                                if frame_idx < d_start_p:
+                                    driver_index = 0
+                                elif frame_idx >= total_frames - d_end_p:
+                                    driver_index = len(interpolated_driver) - 1
+                                else:
+                                    driver_index = frame_idx - d_start_p
+                                
+                                if 0 <= driver_index < len(interpolated_driver):
+                                    ref_x = float(interpolated_driver[0]['x'])
+                                    ref_y = float(interpolated_driver[0]['y'])
+                                    current_x = float(interpolated_driver[driver_index]['x'])
+                                    current_y = float(interpolated_driver[driver_index]['y'])
+                                    driver_offset_x = (current_x - ref_x) * d_scale
+                                    driver_offset_y = (current_y - ref_y) * d_scale
+                                    
+                                    # Apply the offset to the already interpolated coordinate
+                                    coords[frame_idx]['x'] += driver_offset_x
+                                    coords[frame_idx]['y'] += driver_offset_y
+        
         # Extract scale for static points (p_coordinates) from scales metadata
         scales_meta = meta.get("scales", 1.0)
         static_points_scale = 1.0
+        static_points_scales_list = None  # Per-layer scales for p_coordinates
+
         if isinstance(scales_meta, dict):
             # New format: {"p": [...], "c": [...]} where "p" is for static points
             p_scales = scales_meta.get("p", [1.0])
             if isinstance(p_scales, list) and len(p_scales) > 0:
                 static_points_scale = float(p_scales[0])
+                static_points_scales_list = p_scales  # Store full list for per-layer scaling
             elif isinstance(p_scales, (int, float)):
                 static_points_scale = float(p_scales)
         elif isinstance(scales_meta, (int, float)):
@@ -1047,9 +1216,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             # List format: first value for static points
             static_points_scale = float(scales_meta[0]) if scales_meta else 1.0
 
-        # Special cases: no animated coords but static points exist -> set batch size accordingly
+        # Special cases: no animated coords but static point layers exist -> set batch size accordingly
         if not processed_coords_list:
-            if static_points:
+            if static_point_layers:
                 # Always use total_frames for static points to ensure proper spline generation
                 batch_size = total_frames
                 processed_coords_list = []
@@ -1097,19 +1266,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 i, processed_coords_list, path_pause_frames, total_frames,
                 frame_width, frame_height, shape_width, shape_height,
                 shape_color, bg_color, blur_radius, shape, border_width, border_color,
-                static_points, p_coords_use_driver, p_driver_path_processed, (start_p_frames, end_p_frames), coords_driver_info_list, scales_list
+                static_point_layers, static_points_use_driver, static_points_driver_path_processed, (start_p_frames, end_p_frames), coords_driver_info_list, scales_list, static_points_scale, static_points_scales_list, static_points_driver_info_list, static_points_interpolated_drivers
             ))
 
         try:
-            # Update args_list to include the static_points_scale parameter
-            updated_args_list = []
-            for args in args_list:
-                # args is a tuple that includes all the parameters for _draw_single_frame_pil
-                # We need to add static_points_scale to the end
-                updated_args = args + (static_points_scale,)
-                updated_args_list.append(updated_args)
-            args_list = updated_args_list
-            
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 results = list(executor.map(lambda p: self._draw_single_frame_pil(*p), args_list))
                 pil_images = results
@@ -1120,59 +1280,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         # ----- Post-processing into tensors (apply trailing & intensity) -----
         out_images, out_masks = self._postprocess_frames_to_tensors(pil_images, frame_width, frame_height, trailing, intensity)
 
-        # ----- Create preview output: bg_image duplicated with splines under shapes -----
-        if preview_enabled:
-            # First, duplicate and scale the background
-            bg_frame = bg_image[0]  # Shape: [H, W, C]
-            bg_frames_duplicated = bg_frame.unsqueeze(0).repeat(batch_size, 1, 1, 1)  # [B, H, W, C]
-
-            # Scale background to 50% size
-            bg_frames_duplicated = bg_frames_duplicated.permute(0, 3, 1, 2)  # BHWC -> BCHW
-            scaled_height = bg_frames_duplicated.shape[2] // 2
-            scaled_width = bg_frames_duplicated.shape[3] // 2
-            bg_frames_duplicated = torch.nn.functional.interpolate(
-                bg_frames_duplicated,
-                size=(scaled_height, scaled_width),
-                mode='bilinear',
-                align_corners=False
-            )
-            bg_frames_duplicated = bg_frames_duplicated.permute(0, 2, 3, 1)  # BCHW -> BHWC
-
-            # Draw orange splines on the background frames
-            preview_with_splines = self._draw_splines_on_preview(
-                bg_frames_duplicated, processed_coords_list, path_pause_frames,
-                total_frames, coords_driver_info_list, static_points,
-                p_coords_use_driver, p_driver_path_processed,
-                meta.get("start_p_frames", 0), meta.get("end_p_frames", 0)
-            )
-
-            # Now composite the drawn shapes at 50% opacity on top of bg+splines
-            preview_frames = []
-            for i in range(batch_size):
-                # Scale the drawn frame to 50%
-                drawn_frame = out_images[i].unsqueeze(0)  # [1, H, W, C]
-                drawn_frame = drawn_frame.permute(0, 3, 1, 2)  # -> [1, C, H, W]
-                drawn_frame = torch.nn.functional.interpolate(
-                    drawn_frame,
-                    size=(scaled_height, scaled_width),
-                    mode='bilinear',
-                    align_corners=False
-                )
-                drawn_frame = drawn_frame.permute(0, 2, 3, 1).squeeze(0)  # -> [H, W, C]
-
-                # Convert to same device/dtype as preview_with_splines
-                drawn_frame = drawn_frame.to(device=preview_with_splines.device, dtype=preview_with_splines.dtype)
-
-                # Normal alpha blending: (bg+splines) * (1 - alpha) + drawn * alpha, where alpha = 0.5
-                preview_frame = preview_with_splines[i] * 0.5 + drawn_frame * 0.5
-                preview_frame = torch.clamp(preview_frame, 0.0, 1.0)
-                preview_frames.append(preview_frame.unsqueeze(0))
-
-            # Stack all preview frames into a batch
-            preview_output = torch.cat(preview_frames, dim=0)
-        else:
-            # Return minimal 1x1 pixel preview for efficiency when preview is disabled
-            preview_output = torch.zeros([batch_size, 1, 1, 3], dtype=torch.float32)
+        # Note: Preview will be created after building ATI tracks (below)
 
         # ----- Build output coordinates JSON (format expected by ATI nodes) -----
         # Follow the same format as WanVideoATITracksVisualize
@@ -1180,11 +1288,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         output_coords_json = "[]"
         all_coords = []
         
-        # Process animated paths (affected by ati_fade_start)
+        # Process animated paths (affected by animated_fade_start)
         if processed_coords_list:
             try:
                 # Calculate the fade start frame by multiplying percentage by total frames
-                fade_start_frame = int(ati_fade_start * total_frames) if ati_fade_start > 0 else 0
+                fade_start_frame = int(animated_fade_start * total_frames) if animated_fade_start > 0 else 0
                 
                 for path_idx, path_coords in enumerate(processed_coords_list):
                     path_start_p, path_end_p = path_pause_frames[path_idx]
@@ -1198,18 +1306,24 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             coord_index = i - path_start_p
                         coord_index = max(0, min(coord_index, len(path_coords) - 1))
                         
-                        # Extract x, y and determine visibility
+                        # Extract x, y
                         coord = path_coords[coord_index]
+                        location_x = float(coord["x"])
+                        location_y = float(coord["y"])
                         
-                        # Determine visibility based on ati_fade_start
-                        if ati_fade_start == 0 or i < fade_start_frame:
+                        # Driver offsets are now pre-applied to processed_coords_list in drawshapemask
+                        # No need to apply them again here
+                        # This ensures the driven layer's interpolation is preserved and the driver offset is added on top
+                        
+                        # Determine visibility based on animated_fade_start
+                        if animated_fade_start == 0 or i < fade_start_frame:
                             visibility = 1  # Visible
                         else:
                             visibility = 0  # Invisible after fade_start_frame
                         
                         single_path_coords.append({
-                            "x": int(coord["x"]),
-                            "y": int(coord["y"]),
+                            "x": int(location_x),
+                            "y": int(location_y),
                             "v": visibility
                         })
                     
@@ -1219,29 +1333,110 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             except Exception:
                 pass
         
-        # Process static points (p_coordinates) - affected by ati_p_fade_start
-        if static_points:
+        # Process static points (p_coordinates) - affected by static_fade_start
+        if static_point_layers:
             try:
                 # Calculate the fade start frame by multiplying percentage by total frames
-                fade_start_frame = int(ati_p_fade_start * total_frames) if ati_p_fade_start > 0 else 0
-                
-                for point in static_points:
-                    single_point_spline = []
-                    for i in range(total_frames):
-                        if ati_p_fade_start == 0 or i < fade_start_frame:
-                            # Keep the point at its original position
-                            visibility = 1  # Visible
-                        else:
-                            # Keep the point at its last position but set visibility to 0
-                            visibility = 0  # Invisible
-                        
-                        single_point_spline.append({
-                            "x": int(point["x"]),
-                            "y": int(point["y"]),
-                            "v": visibility
-                        })
-                    
-                    all_coords.append(single_point_spline)
+                fade_start_frame = int(static_fade_start * total_frames) if static_fade_start > 0 else 0
+
+                # Process each layer of static points
+                for layer_idx, static_points in enumerate(static_point_layers):
+                    if not static_points:
+                        continue
+
+                    # Get the driver for this layer if available
+                    layer_driver_info = None
+                    if static_points_use_driver and layer_idx < len(static_points_interpolated_drivers):
+                        layer_driver_info = static_points_interpolated_drivers[layer_idx]
+
+                    # Process each point in this layer
+                    for point_idx, point in enumerate(static_points):
+                        single_point_spline = []
+                        for i in range(total_frames):
+                            # Apply driver offset for static points
+                            driver_offset_x = driver_offset_y = 0.0
+
+                            # Use the layer's driver if available
+                            if layer_driver_info and isinstance(layer_driver_info, dict):
+                                interpolated_driver = layer_driver_info.get('path')
+                                driver_d_scale = layer_driver_info.get('d_scale', 1.0)
+
+                                if interpolated_driver and len(interpolated_driver) > 0:
+                                    # Apply the same logic as for animated paths
+                                    p_start_p, p_end_p = meta.get("start_p_frames", 0), meta.get("end_p_frames", 0)
+                                    # Handle dictionary case (from metadata parsing)
+                                    if isinstance(p_start_p, dict):
+                                        p_start_p = p_start_p.get("p", 0)
+                                        p_end_p = p_end_p.get("p", 0)
+                                    # Handle list case (from metadata parsing)
+                                    if isinstance(p_start_p, list):
+                                        p_start_p = p_start_p[0] if p_start_p else 0
+                                        p_end_p = p_end_p[0] if p_end_p else 0
+
+                                    if i < p_start_p:
+                                        driver_index = 0
+                                    elif i >= total_frames - p_end_p:
+                                        driver_index = len(interpolated_driver) - 1
+                                    else:
+                                        driver_index = i - p_start_p
+
+                                    if 0 <= driver_index < len(interpolated_driver):
+                                        ref_x = float(interpolated_driver[0]['x'])
+                                        ref_y = float(interpolated_driver[0]['y'])
+                                        current_x = float(interpolated_driver[driver_index]['x'])
+                                        current_y = float(interpolated_driver[driver_index]['y'])
+                                        # For p_coordinates, we need to compute the driver offset relative to the driver's first keyframe
+                                        # This ensures the point follows the driver path correctly
+                                        driver_offset_x = (current_x - ref_x) * driver_d_scale * frame_width  # Scale by frame dimensions
+                                        driver_offset_y = (current_y - ref_y) * driver_d_scale * frame_height
+                            elif static_points_use_driver and static_points_interpolated_drivers and len(static_points_interpolated_drivers) > 0:
+                                # Use the first interpolated driver for all layers (legacy mode)
+                                driver_info = static_points_interpolated_drivers[0]
+                                if driver_info and isinstance(driver_info, dict):
+                                    interpolated_driver = driver_info.get('path')
+                                    if interpolated_driver and len(interpolated_driver) > 0:
+                                        p_start_p, p_end_p = meta.get("start_p_frames", 0), meta.get("end_p_frames", 0)
+                                        # Handle dictionary case (from metadata parsing)
+                                        if isinstance(p_start_p, dict):
+                                            p_start_p = p_start_p.get("p", 0)
+                                            p_end_p = p_end_p.get("p", 0)
+                                        # Handle list case (from metadata parsing)
+                                        if isinstance(p_start_p, list):
+                                            p_start_p = p_start_p[0] if p_start_p else 0
+                                            p_end_p = p_end_p[0] if p_end_p else 0
+
+                                        if i < p_start_p:
+                                            driver_index = 0
+                                        elif i >= total_frames - p_end_p:
+                                            driver_index = len(interpolated_driver) - 1
+                                        else:
+                                            driver_index = i - p_start_p
+
+                                        if 0 <= driver_index < len(interpolated_driver):
+                                            ref_x = float(interpolated_driver[0]['x'])
+                                            ref_y = float(interpolated_driver[0]['y'])
+                                            current_x = float(interpolated_driver[driver_index]['x'])
+                                            current_y = float(interpolated_driver[driver_index]['y'])
+                                            # For p_coordinates, we need to compute the driver offset relative to the driver's first keyframe
+                                            # This ensures the point follows the driver path correctly
+                                            driver_offset_x = (current_x - ref_x) * frame_width  # Scale by frame dimensions
+                                            driver_offset_y = (current_y - ref_y) * frame_height
+
+                            location_x = float(point["x"]) + driver_offset_x
+                            location_y = float(point["y"]) + driver_offset_y
+
+                            if static_fade_start == 0 or i < fade_start_frame:
+                                visibility = 1  # Visible
+                            else:
+                                visibility = 0  # Invisible after fade_start_frame
+
+                            single_point_spline.append({
+                                "x": int(location_x),
+                                "y": int(location_y),
+                                "v": visibility
+                            })
+
+                        all_coords.append(single_point_spline)
             except Exception as e:
                 print(f"Error processing static points: {e}")
                 pass
@@ -1286,14 +1481,64 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             
             # Verify the JSON can be parsed correctly
             test_parse = json.loads(output_coords_json)
-            
-            # Debug output
-            print(f"DrawShapeOnPath: Generated {len(clean_tracks)} tracks for ATI nodes")
-            for i, track in enumerate(clean_tracks):
-                print(f"  Track {i}: {len(track)} points")
         except Exception as e:
             # Fallback to empty array if there's an issue
-            print(f"DrawShapeOnPath: Error generating tracks: {e}")
             output_coords_json = "[]"
+
+        # ----- Create preview output: bg_image duplicated with splines under shapes -----
+        if preview_enabled:
+            # First, duplicate and scale the background
+            bg_frame = bg_image[0]  # Shape: [H, W, C]
+            bg_frames_duplicated = bg_frame.unsqueeze(0).repeat(batch_size, 1, 1, 1)  # [B, H, W, C]
+
+            # Scale background to 50% size
+            bg_frames_duplicated = bg_frames_duplicated.permute(0, 3, 1, 2)  # BHWC -> BCHW
+            scaled_height = bg_frames_duplicated.shape[2] // 2
+            scaled_width = bg_frames_duplicated.shape[3] // 2
+            bg_frames_duplicated = torch.nn.functional.interpolate(
+                bg_frames_duplicated,
+                size=(scaled_height, scaled_width),
+                mode='bilinear',
+                align_corners=False
+            )
+            bg_frames_duplicated = bg_frames_duplicated.permute(0, 2, 3, 1)  # BCHW -> BHWC
+
+            # Draw orange splines using ATI tracks (now available after building them)
+            preview_with_splines = self._draw_splines_on_preview(
+                bg_frames_duplicated, processed_coords_list, path_pause_frames,
+                total_frames, coords_driver_info_list, static_point_layers,
+                static_points_use_driver, static_points_driver_path_processed,
+                meta.get("start_p_frames", 0), meta.get("end_p_frames", 0),
+                static_points_driver_info_list, static_points_interpolated_drivers,
+                frame_width, frame_height, clean_tracks
+            )
+
+            # Now composite the drawn shapes at 50% opacity on top of bg+splines
+            preview_frames = []
+            for i in range(batch_size):
+                # Scale the drawn frame to 50%
+                drawn_frame = out_images[i].unsqueeze(0)  # [1, H, W, C]
+                drawn_frame = drawn_frame.permute(0, 3, 1, 2)  # -> [1, C, H, W]
+                drawn_frame = torch.nn.functional.interpolate(
+                    drawn_frame,
+                    size=(scaled_height, scaled_width),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                drawn_frame = drawn_frame.permute(0, 2, 3, 1).squeeze(0)  # -> [H, W, C]
+
+                # Convert to same device/dtype as preview_with_splines
+                drawn_frame = drawn_frame.to(device=preview_with_splines.device, dtype=preview_with_splines.dtype)
+
+                # Normal alpha blending: (bg+splines) * (1 - alpha) + drawn * alpha, where alpha = 0.5
+                preview_frame = preview_with_splines[i] * ALPHA_BLEND_FACTOR + drawn_frame * ALPHA_BLEND_FACTOR
+                preview_frame = torch.clamp(preview_frame, 0.0, 1.0)
+                preview_frames.append(preview_frame.unsqueeze(0))
+
+            # Stack all preview frames into a batch
+            preview_output = torch.cat(preview_frames, dim=0)
+        else:
+            # Return minimal 1x1 pixel preview for efficiency when preview is disabled
+            preview_output = torch.zeros([batch_size, 1, 1, 3], dtype=torch.float32)
 
         return (out_images, out_masks, output_coords_json, preview_output)

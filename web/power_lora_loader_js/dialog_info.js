@@ -517,6 +517,27 @@ class WanInfoDialog extends WanDialog {
             this.setContent(this.getInfoContent());
             this.setTitle(((_a = this.modelInfo) === null || _a === void 0 ? void 0 : _a["name"]) || ((_b = this.modelInfo) === null || _b === void 0 ? void 0 : _b["file"]) || "Unknown");
         }
+        else if (action === "copy-positive") {
+            // Get the positive prompt from the data attribute
+            const positivePrompt = target.getAttribute("data-positive") ? decodeURIComponent(target.getAttribute("data-positive")) : "";
+            
+            if (positivePrompt) {
+                await navigator.clipboard.writeText(positivePrompt);
+                rgthree.showMessage({
+                    id: "copy-positive-" + generateId(4),
+                    type: "success",
+                    message: "Positive prompt copied to clipboard",
+                    timeout: 3000,
+                });
+            } else {
+                rgthree.showMessage({
+                    id: "copy-positive-error-" + generateId(4),
+                    type: "error",
+                    message: "No positive prompt found to copy",
+                    timeout: 3000,
+                });
+            }
+        }
         else if (action === "copy-trained-words") {
             const selected = queryAll(".-rgthree-is-selected", target.closest("tr"));
             const text = selected.map((el) => el.getAttribute("data-word")).join(", ");
@@ -633,7 +654,7 @@ class WanInfoDialog extends WanDialog {
             : `<img src="${img.url}" />`}
             <figcaption><!--
               -->${imgInfoField("", img.civitaiUrl
-            ? `<a href="${img.civitaiUrl}" target="_blank">civitai${link}</a>`
+            ? `<a href="${img.civitaiUrl}" target="_blank">civitai${link}</a> ${img.positive ? `<button class="rgthree-button" data-action="copy-positive" data-positive="${encodeURIComponent(img.positive)}" style="margin-left: 4px; padding: 1px 4px; font-size: 9px;">Copy+</button>` : ""}`
             : undefined)}<!--
               -->${imgInfoField("seed", img.seed)}<!--
               -->${imgInfoField("steps", img.steps)}<!--

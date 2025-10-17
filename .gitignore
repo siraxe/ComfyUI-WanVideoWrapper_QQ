@@ -1,10 +1,12 @@
 __pycache__/
 nodes/__pycache__/
-.clade
+.claude
+.claude-code-router
 .env
 .env2
 .env 22
 wanvideo_cached_samples.pt
+wanvideo_cached_videos.pt
 ref_image.jpg
 QWEN.md
 ComfyUI-WanVideoWrapper/

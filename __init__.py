@@ -15,6 +15,7 @@ from .nodes.draw_image import *
 from .nodes.image_nodes import *
 from .nodes.image_nodes_extra import *
 from .nodes.image_to_video import *
+from .nodes.video_nodes_extra import *
 
 from .nodes.vace_utils import *
 from .nodes.cache_samples import *

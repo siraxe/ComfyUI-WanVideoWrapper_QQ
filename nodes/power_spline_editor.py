@@ -533,15 +533,35 @@ class PowerSplineEditor:
                         elif driver_name in layer_map:
                             # Driver layer found
                             driver_coords = layer_map[driver_name]
+                            
+                            # Find the driver layer's interpolation parameters
+                            driver_easing_function = 'linear'  # Default
+                            driver_easing_path = 'full'  # Default
+                            driver_easing_strength = 1.0  # Default
+                            driver_acceleration = 0.00  # Default
+                            
+                            # Search for the driver layer in all_splines to get its interpolation parameters
+                            for driver_spline_data in all_splines:
+                                if isinstance(driver_spline_data, dict) and driver_spline_data.get('name', '') == driver_name:
+                                    driver_easing_function = driver_spline_data.get('easing', 'linear')
+                                    driver_easing_config = driver_spline_data.get('easingConfig', {'path': 'full', 'strength': 1.0, 'acceleration': 0.00})
+                                    driver_easing_path = driver_easing_config.get('path', 'full')
+                                    driver_easing_strength = driver_easing_config.get('strength', 1.0)
+                                    driver_acceleration = driver_easing_config.get('acceleration', 0.00)
+                                    break
 
                             # Store driver info for ALL interpolation modes
                             # Let draw_shapes.py apply the offset at the right time
                             driver_info_for_layer = {
                                 "path": driver_coords,
                                 "rotate": driver_rotate,
-                                "d_scale": driver_d_scale
+                                "d_scale": driver_d_scale,
+                                "easing_function": driver_easing_function,
+                                "easing_path": driver_easing_path,
+                                "easing_strength": driver_easing_strength,
+                                "acceleration": driver_acceleration
                             }
-                            print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale})")
+                            print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale}, easing={driver_easing_function})")
                         else:
                             print(f"Warning: Driver layer '{driver_name}' not found for layer '{current_spline_name}'. Available layers: {list(layer_map.keys())}")
                 # --- END DRIVER LOGIC ---
