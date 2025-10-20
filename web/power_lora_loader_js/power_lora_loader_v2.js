@@ -1,90 +1,49 @@
 import { app } from "../../../scripts/app.js";
 import { rgthree } from "../rgthree/common/rgthree.js";
-import { rgthreeApi as wanvidApi } from "./rgthree_api.js";
 import { RgthreeBetterButtonWidget, RgthreeDividerWidget, StrengthCopyWidget, PowerLoraLoaderHeaderWidget, PowerLoraLoaderWidget } from "./widgets.js";
 import { LoraPickerDialog } from "./lora_picker_dialog.js";
 import { getLoraSlotInPosition, getLoraSlotMenuOptions } from "./lora_context_menu.js";
-
-let lorasCache = null;
-// Clear cache to ensure new format is used
-localStorage.removeItem("powerLoraLoaderV2.lorasCache");
+import { modelDataManager, UIManager } from "./pull_info.js";
 
 const MINIMUM_NODE_WIDTH = 480;
 
+// Unified data fetching using pull_info.js
 async function getLoras(forceRefresh = false) {
-    // Check if we have cached data in localStorage
-    const cachedData = localStorage.getItem("powerLoraLoaderV2.lorasCache");
-    if (cachedData && lorasCache && !forceRefresh) {
-        return lorasCache;
-    }
-    
-    // Clear cache if force refresh is requested
-    if (forceRefresh) {
-        lorasCache = null;
-        localStorage.removeItem("powerLoraLoaderV2.lorasCache");
-    }
-    
-    try {
-        // Use rgthreeApi with forceRefresh parameter
-        const lorasData = await wanvidApi.getLoras(forceRefresh);
-        // Convert rgthreeApi format to our expected format
-        lorasCache = lorasData.map(lora => {
-            if (typeof lora === 'string') {
-                return { name: lora, mtime: 0 };
-            }
-            return {
-                name: lora.name || lora.filename || lora.file || JSON.stringify(lora),
-                mtime: lora.mtime || lora.modified || lora.modified_time || 0
-            };
-        });
-        
-        // Cache the data in localStorage
-        localStorage.setItem("powerLoraLoaderV2.lorasCache", JSON.stringify(lorasCache));
-        
-        return lorasCache;
-    }
-    catch (error) {
-        console.error("Failed to fetch loras:", error);
-        return [];
-    }
+    return modelDataManager.getItems('loras', forceRefresh);
 }
 
-// Functions to persist favorites
+// Functions to persist favorites using pull_info.js
 function saveFavorites(favorites) {
-    localStorage.setItem("powerLoraLoaderV2.favorites", JSON.stringify(favorites));
+    UIManager.saveFavorites(favorites, 'loras');
 }
 
 function loadFavorites() {
-    const favorites = localStorage.getItem("powerLoraLoaderV2.favorites");
-    return favorites !== null ? JSON.parse(favorites) : [];
+    return UIManager.loadFavorites('loras');
 }
 
-// Functions to persist UI state
+// Functions to persist UI state using pull_info.js
 function saveFoldersVisible(foldersVisible) {
-    localStorage.setItem("powerLoraLoaderV2.foldersVisible", JSON.stringify(foldersVisible));
+    UIManager.saveUIProperty('foldersVisible', foldersVisible, 'loras');
 }
 
 function loadFoldersVisible() {
-    const foldersVisible = localStorage.getItem("powerLoraLoaderV2.foldersVisible");
-    return foldersVisible !== null ? JSON.parse(foldersVisible) : false;
+    return UIManager.loadUIProperty('foldersVisible', 'loras', false);
 }
 
 function saveSelectedFolder(selectedFolder) {
-    localStorage.setItem("powerLoraLoaderV2.selectedFolder", JSON.stringify(selectedFolder));
+    UIManager.saveUIProperty('selectedFolder', selectedFolder, 'loras');
 }
 
 function loadSelectedFolder() {
-    const selectedFolder = localStorage.getItem("powerLoraLoaderV2.selectedFolder");
-    return selectedFolder !== null ? JSON.parse(selectedFolder) : null;
+    return UIManager.loadUIProperty('selectedFolder', 'loras', null);
 }
 
 function saveEyeRefreshState(eyeRefreshState) {
-    localStorage.setItem("powerLoraLoaderV2.eyeRefreshState", JSON.stringify(eyeRefreshState));
+    UIManager.saveUIProperty('eyeRefreshState', eyeRefreshState, 'loras');
 }
 
 function loadEyeRefreshState() {
-    const eyeRefreshState = localStorage.getItem("powerLoraLoaderV2.eyeRefreshState");
-    return eyeRefreshState !== null ? JSON.parse(eyeRefreshState) : false;
+    return UIManager.loadUIProperty('eyeRefreshState', 'loras', false);
 }
 
 function showLoraPicker(event, callback, node = null) {
@@ -116,6 +75,7 @@ function showLoraPicker(event, callback, node = null) {
             sort: "Latest",
             favorites: savedFavorites,
             favoritesOnly: false,
+            itemType: 'loras', // Explicitly set item type for unified system
             onFavoriteToggle: (loraName) => {
                 const index = savedFavorites.indexOf(loraName);
                 if (index !== -1) {
@@ -125,7 +85,7 @@ function showLoraPicker(event, callback, node = null) {
                     // Add to favorites
                     savedFavorites.push(loraName);
                 }
-                // Save to localStorage
+                // Save to localStorage using unified system
                 saveFavorites(savedFavorites);
                 // Update dialog's favorites
                 dialog.options.favorites = savedFavorites;
@@ -133,9 +93,25 @@ function showLoraPicker(event, callback, node = null) {
                 dialog.renderList();
             },
             foldersVisible: foldersVisible,
-            refreshCallback: () => {
-                // Bulk refresh removed - refresh individual LoRAs through their dialogs instead
-                console.log('[PowerLoraLoaderV2] Individual LoRA refresh available in LoRA info dialog');
+            refreshCallback: async () => {
+                // Perform actual refresh of the LoRA list using unified system
+                try {
+                    console.log('[PowerLoraLoaderV2] Refreshing LoRA list...');
+                    const freshLoras = await getLoras(true);
+                    dialog.updateLoras(freshLoras);
+
+                    // Also refresh preview availability for blue dots using unified system
+                    console.log('[PowerLoraLoaderV2] Refreshing preview availability...');
+                    await modelDataManager.getPreviewAvailability('loras');
+
+                    // Re-render the list to show updated blue dots
+                    console.log('[PowerLoraLoaderV2] Re-rendering list to show updated blue dots...');
+                    dialog.renderList();
+
+                    console.log('[PowerLoraLoaderV2] LoRA list refreshed successfully');
+                } catch (error) {
+                    console.error('[PowerLoraLoaderV2] Error refreshing LoRA list:', error);
+                }
             }
         });
 
@@ -428,12 +404,10 @@ app.registerExtension({
             
             // Add refreshComboInNode method to handle R key press for reloading definitions
             nodeType.prototype.refreshComboInNode = function(defs) {
-                // Use wanvidApi to refresh the LoRA list
-                // Bulk refresh removed - just clear cache and refresh list
-                lorasCache = null;
-                localStorage.removeItem("powerLoraLoaderV2.lorasCache");
+                // Use unified system to refresh the LoRA list
+                modelDataManager.clearCaches('loras');
 
-                                  // Fetch fresh loras and update cache
+                // Fetch fresh loras and update cache
                 getLoras(true).then((lorasDetails) => {
                     nodeType.prototype.lorasCache = lorasDetails;
 
@@ -463,7 +437,9 @@ app.registerExtension({
                                     }
 
                                     // Trigger a value change to update the UI
-                                    widget.callback(widget.value);
+                                    if (widget.callback && typeof widget.callback === 'function') {
+                                        widget.callback(widget.value);
+                                    }
                                 }
                             }
 

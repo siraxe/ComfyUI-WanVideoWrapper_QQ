@@ -1,6 +1,7 @@
 import os
 from typing import Union
 import folder_paths
+import comfy.sd
 
 
 class AnyType(str):
@@ -236,7 +237,7 @@ class WanVideoPowerLoraLoader:
                 # Add to high loras summary
                 high_loras_summary.append((strength_model, lora_filename))
 
-                if is_low and low_variant_name:
+                if is_low and low_variant_name and value.get('low_active', True):
                     # Use low_strength for the low variant LoRA, fallback to strength_model if not available
                     low_strength = value.get('low_strength', strength_model)
                     # Ensure low_strength is not None
@@ -443,7 +444,7 @@ class PowerLoraLoaderV2:
                 # Add to high loras summary
                 high_loras_summary.append((strength_model, lora_filename))
 
-                if is_low and low_variant_name:
+                if is_low and low_variant_name and value.get('low_active', True):
                     # Use low_strength for the low variant LoRA, fallback to strength_model if not available
                     low_strength = value.get('low_strength', strength_model)
                     # Ensure low_strength is not None
@@ -503,12 +504,65 @@ class PowerLoraLoaderV2:
             # Clip connected, return all three outputs
             return (model, model_low, clip)
 
+class CheckpointLoader_v2:
+    """A power checkpoint loader v2 that provides PowerLoraLoaderV2-style UI for model checkpoints."""
+
+    def __init__(self):
+        self.properties = {}
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {},
+            "optional": FlexibleOptionalInputType(type=any_type, data={}),
+            "hidden": {
+                "ui_state": ("STRING", {"default": "{}"}),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL", "CLIP", "VAE")
+    RETURN_NAMES = ("MODEL", "CLIP", "VAE")
+    FUNCTION = "load_checkpoint"
+    CATEGORY = "WanVideoWrapper_QQ/loaders"
+    DESCRIPTION = "Power Checkpoint Loader v2 - Load model checkpoints with advanced UI"
+
+    def load_checkpoint(self, **kwargs):
+        """Load the selected checkpoint model."""
+        # Find the checkpoint widget data
+        checkpoint_name = None
+
+        for key, value in kwargs.items():
+            if key.startswith('model_') and isinstance(value, dict) and 'on' in value and 'model' in value:
+                # Check if model is enabled and has valid data
+                if not value['on']:
+                    continue
+
+                model_name = value['model']
+                if not model_name or model_name.lower() == "none":
+                    continue
+
+                checkpoint_name = model_name
+                break
+
+        if checkpoint_name is None:
+            raise ValueError("No checkpoint model selected or enabled")
+
+        # Use ComfyUI's CheckpointLoaderSimple to load the checkpoint
+        try:
+            ckpt_path = folder_paths.get_full_path_or_raise("checkpoints", checkpoint_name)
+            out = comfy.sd.load_checkpoint_guess_config(ckpt_path, output_vae=True, output_clip=True, embedding_directory=folder_paths.get_folder_paths("embeddings"))
+            return out[:3]
+        except Exception as e:
+            raise RuntimeError(f"Failed to load checkpoint '{checkpoint_name}': {str(e)}")
+
 NODE_CLASS_MAPPINGS = {
     "WanVideoPowerLoraLoader": WanVideoPowerLoraLoader,
     "PowerLoraLoaderV2": PowerLoraLoaderV2,
+    "CheckpointLoader_v2": CheckpointLoader_v2,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoPowerLoraLoader": "Wan Video Power Lora Loader",
     "PowerLoraLoaderV2": "Power Lora Loader V2",
+    "CheckpointLoader_v2": "Power Checkpoint Loader V2",
 }

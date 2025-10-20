@@ -150,18 +150,28 @@ export class ImageUtils {
      * @param {Blob} imageBlob - Processed image blob
      * @param {string} loraPath - Optional relative path within loras directory
      * @param {string} suffix - Optional suffix for filename (e.g., '_01', '_02')
+     * @param {string} type - Type of item ('loras' or 'checkpoints')
      * @returns {Promise<Object>} - API response
      */
-    static async savePreviewImage(loraName, imageBlob, loraPath = '', suffix = '') {
+    static async savePreviewImage(loraName, imageBlob, loraPath = '', suffix = '', type = 'loras') {
         const formData = new FormData();
 
         // Create a unique filename with optional suffix
         const filename = `${loraName}${suffix}.jpg`;
 
         formData.append('image', imageBlob, filename);
-        formData.append('lora_name', loraName);
-        formData.append('lora_path', loraPath);
+        if (type === 'checkpoints') {
+            formData.append('model_name', loraName);
+            formData.append('model_path', loraPath);
+            // Also include lora_name for compatibility
+            formData.append('lora_name', loraName);
+            formData.append('lora_path', loraPath);
+        } else {
+            formData.append('lora_name', loraName);
+            formData.append('lora_path', loraPath);
+        }
         formData.append('suffix', suffix);
+        formData.append('is_model', type === 'checkpoints' ? 'true' : 'false');
 
         try {
             const response = await fetch('/wanvid/api/lora/preview-image', {
@@ -185,12 +195,13 @@ export class ImageUtils {
      * @param {Object} mediaInfo - Media object from dialog info
      * @param {string} loraName - Name of the LoRA
      * @param {string} loraPath - Optional relative path within loras directory
+     * @param {string} type - Type of item ('loras' or 'checkpoints')
      * @returns {Promise<Object>} - Result of the operation
      */
-    static async generateAndSavePreview(mediaInfo, loraName, loraPath = '') {
+    static async generateAndSavePreview(mediaInfo, loraName, loraPath = '', type = 'loras') {
         try {
             const frameInfo = mediaInfo.type === 'video' ? 'middle frame' : 'image';
-            console.log(`[ImageUtils] Generating preview for ${loraName} from ${mediaInfo.type} (${frameInfo})`);
+            console.log(`[ImageUtils] Generating preview for ${loraName} (${type}) from ${mediaInfo.type} (${frameInfo})`);
 
             // Validate inputs
             if (!mediaInfo || !mediaInfo.url) {
@@ -210,13 +221,13 @@ export class ImageUtils {
             }
 
             // Save through backend API
-            const result = await this.savePreviewImage(loraName, imageBlob, loraPath);
+            const result = await this.savePreviewImage(loraName, imageBlob, loraPath, '', type);
 
-            console.log(`[ImageUtils] Preview saved successfully:`, result);
+            console.log(`[ImageUtils] Preview saved successfully for ${loraName} (${type}):`, result);
             return result;
 
         } catch (error) {
-            console.error(`[ImageUtils] Failed to generate preview for ${loraName}:`, error);
+            console.error(`[ImageUtils] Failed to generate preview for ${loraName} (${type}):`, error);
             throw error;
         }
     }
@@ -227,9 +238,10 @@ export class ImageUtils {
      * @param {string} loraName - Name of the LoRA
      * @param {string} loraPath - Optional relative path within loras directory
      * @param {number} maxImages - Maximum number of preview images to generate
+     * @param {string} type - Type of item ('loras' or 'checkpoints')
      * @returns {Promise<Array>} - Array of results for each generated preview
      */
-    static async generateMultiplePreviews(info, loraName, loraPath = '', maxImages = 3) {
+    static async generateMultiplePreviews(info, loraName, loraPath = '', maxImages = 3, type = 'loras') {
         try {
             if (!info || !info.images || !info.images.length) {
                 throw new Error('No images available in info data');
@@ -262,7 +274,7 @@ export class ImageUtils {
                     }
 
                     // Save with suffix
-                    const result = await this.savePreviewImage(loraName, imageBlob, loraPath, suffix);
+                    const result = await this.savePreviewImage(loraName, imageBlob, loraPath, suffix, type);
                     result.suffix = suffix;
                     results.push(result);
 
@@ -293,14 +305,15 @@ export class ImageUtils {
  * @param {Object} info - Dialog info object containing images array
  * @param {string} loraName - Name of the LoRA
  * @param {string} loraPath - Optional relative path within loras directory
+ * @param {string} type - Type of item ('loras' or 'checkpoints')
  * @returns {Promise<Object>} - Result of the operation
  */
-export async function generatePreviewFromFirstImage(info, loraName, loraPath = '') {
+export async function generatePreviewFromFirstImage(info, loraName, loraPath = '', type = 'loras') {
     if (!info || !info.images || !info.images.length) {
         throw new Error('No images available in info data');
     }
 
-    return ImageUtils.generateMultiplePreviews(info, loraName, loraPath, 3);
+    return ImageUtils.generateMultiplePreviews(info, loraName, loraPath, 3, type);
 }
 
 /**

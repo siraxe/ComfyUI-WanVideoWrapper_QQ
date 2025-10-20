@@ -1,5 +1,10 @@
 import { app } from "../../../scripts/app.js";
 
+// Import batch fetch service
+import { batchFetchService } from "./batch_fetch_service.js";
+import { renameLoRAFiles } from "./rename_utils.js";
+import { CHECKPOINT_INFO_SERVICE } from "./model_info_service.js";
+
 // Function to show context menu for LoRA list items
 function showLoraListContextMenu(event, loraName) {
     console.log("[LoraPickerDialog] Opening context menu for:", loraName); // Debug log
@@ -73,9 +78,82 @@ function showLoraListContextMenu(event, loraName) {
         return item;
     };
 
+    // Function to show LoRA in Windows Explorer
+    const showInExplorer = (loraName) => {
+        // Use the ComfyUI API to open Explorer for the LoRA file
+        fetch('/wanvideo_wrapper/open_explorer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ lora_name: loraName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Explorer opened successfully for:', loraName);
+            } else {
+                console.error('Failed to open Explorer:', data.error || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            console.error('Error opening Explorer:', error);
+        });
+    };
+
+    // Check if we're in model mode by accessing the dialog instance
+    const dialogElement = document.querySelector('.lora-picker-dialog');
+    const dialogInstance = dialogElement && dialogElement.dialogInstance;
+    const isModelMode = dialogInstance && dialogInstance.options && dialogInstance.options.isModelMode;
+
     // Add menu items
     menu.appendChild(createMenuItem('ℹ️', 'Show Info', () => {
-        showLoraInfoDialog(loraName);
+        if (isModelMode) {
+            showModelInfoDialog(loraName);
+        } else {
+            showLoraInfoDialog(loraName);
+        }
+    }));
+
+    menu.appendChild(createMenuItem('📁', 'Show in Explorer', () => {
+        if (isModelMode) {
+            // For models, use the same API but the function is in power_model_loader_v2.js
+            fetch('/wanvideo_wrapper/open_explorer', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ lora_name: loraName }) // API expects lora_name but works for models too
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Explorer opened successfully for model:', loraName);
+                } else {
+                    console.error('Failed to open Explorer for model:', data.error || 'Unknown error');
+                }
+            })
+            .catch(error => {
+                console.error('Error opening Explorer for model:', error);
+            });
+        } else {
+            showInExplorer(loraName);
+        }
+    }));
+
+    menu.appendChild(createMenuItem('✏️', 'Rename', () => {
+        // Use the same dialog instance to create refresh callback
+        const refreshCallback = (dialogInstance && dialogInstance.refreshCallback)
+            ? dialogInstance.refreshCallback
+            : null;
+
+        if (isModelMode) {
+            // For models, we can use renameLoRAFiles with a different variant name
+            // or create a model-specific rename function if needed
+            renameLoRAFiles(loraName, 'model', refreshCallback);
+        } else {
+            renameLoRAFiles(loraName, 'high', refreshCallback);
+        }
     }));
 
     document.body.appendChild(menu);
@@ -107,6 +185,9 @@ function showLoraInfoDialog(loraName) {
     // Import and show the LoRA info dialog
     import("./dialog_info.js").then(({ WanLoraInfoDialog }) => {
         const infoDialog = new WanLoraInfoDialog(loraName).show();
+        // Store the item type for use in preview generation
+        infoDialog.itemType = 'loras';
+        console.log(`[LoraPickerDialog Debug] Created LoRA dialog with itemType: ${infoDialog.itemType}`);
         infoDialog.addEventListener("close", ((e) => {
             if (e.detail.dirty) {
                 // Dialog was modified, could trigger refresh if needed
@@ -122,6 +203,87 @@ File: ${loraName}`;
         alert(loraInfo);
     });
 }
+
+// Function to show Model info dialog using the same simple approach as LoRA widgets
+function showModelInfoDialog(modelName) {
+    if (!modelName || modelName === "None") {
+        app.ui.dialog.show("No model selected");
+        return;
+    }
+
+    console.log(`[LoraPickerDialog] Opening info dialog for model: ${modelName}`);
+
+    // Import the dialog dynamically and create a model-specific info dialog
+    import("./dialog_info.js").then(({ WanLoraInfoDialog }) => {
+        // Create a model-specific info dialog by extending WanLoraInfoDialog
+        class WanModelInfoDialog extends WanLoraInfoDialog {
+            async getModelInfo(file) {
+                console.log(`[LoraPickerDialog] Fetching info for model: ${file}`);
+                try {
+                    const info = await CHECKPOINT_INFO_SERVICE.getInfo(file, false, false);
+                    console.log(`[LoraPickerDialog] Model info received:`, info);
+                    return info;
+                } catch (error) {
+                    console.error(`[LoraPickerDialog] Error fetching model info:`, error);
+                    // Fallback to basic info
+                    return {
+                        file: file,
+                        name: file,
+                        info: {},
+                        mtime: Date.now() / 1000
+                    };
+                }
+            }
+
+            // Override refreshModelInfo to use CHECKPOINT_INFO_SERVICE instead of LORA_INFO_SERVICE
+            async refreshModelInfo(file) {
+                console.log(`[LoraPickerDialog] Refreshing model info for: ${file}`);
+                console.log(`[LoraPickerDialog] Using CHECKPOINT_INFO_SERVICE for Civitai fetch`);
+                try {
+                    const info = await CHECKPOINT_INFO_SERVICE.refreshInfo(file);
+                    console.log(`[LoraPickerDialog] Model info refreshed from Civitai:`, info);
+                    return info;
+                } catch (error) {
+                    console.error(`[LoraPickerDialog] Error refreshing model info from Civitai:`, error);
+                    // Return existing info on error instead of failing
+                    return this.modelInfo || {
+                        file: file,
+                        name: file,
+                        info: {},
+                        mtime: Date.now() / 1000
+                    };
+                }
+            }
+
+            // Override the save method to use CHECKPOINT_INFO_SERVICE
+            async savePartialInfo(info, fieldName, newValue) {
+                console.log(`[LoraPickerDialog] Saving model info: ${fieldName} = ${newValue}`);
+                try {
+                    await CHECKPOINT_INFO_SERVICE.savePartialInfo(info.file, { [fieldName]: newValue });
+                    console.log(`[LoraPickerDialog] Model info saved successfully`);
+                    return true;
+                } catch (error) {
+                    console.error(`[LoraPickerDialog] Error saving model info:`, error);
+                    return false;
+                }
+            }
+        }
+
+        // Create and show the dialog
+        const dialog = new WanModelInfoDialog(modelName);
+        // Store the item type for use in preview generation
+        dialog.itemType = 'checkpoints';
+        console.log(`[LoraPickerDialog Debug] Created model dialog with itemType: ${dialog.itemType}`);
+        dialog.show();
+    }).catch(error => {
+        // Fallback to simple alert if dialog fails to load
+        console.error("Failed to load model info dialog:", error);
+        const modelInfo = `Model Information:\n\nFile: ${modelName}`;
+        alert(modelInfo);
+    });
+}
+
+
 
 const style = document.createElement('style');
 style.textContent = `
@@ -617,7 +779,9 @@ export class LoraPickerDialog {
         this.currentPreviewLora = null;
         this.previewAvailabilityCache = new Set();
         this.folders = this.extractFolders();
-        this.loadPreviewAvailability();
+
+        // Note: Don't call loadPreviewAvailability() here - it will be called in show() method
+        // This prevents race conditions and ensures proper async loading
     }
 
     show() {
@@ -721,6 +885,9 @@ export class LoraPickerDialog {
         // Add to body
         document.body.appendChild(this.element);
 
+        // Store reference to dialog instance for access by rename function
+        this.element.dialogInstance = this;
+
         // Position preview area relative to dialog
         this.updatePreviewPosition();
 
@@ -741,6 +908,10 @@ export class LoraPickerDialog {
                     this.previewArea.classList.remove("visible");
                 }
             }
+        }).catch(error => {
+            console.error('Error loading preview availability:', error);
+            // Still render list even if preview loading fails
+            this.renderList();
         });
 
         // Focus on the search input automatically
@@ -891,7 +1062,22 @@ export class LoraPickerDialog {
         refreshContainer.addEventListener("click", () => {
             if (this.refreshCallback) {
                 this.refreshCallback();
+                // After refresh, reload preview availability to update blue dots
+                this.loadPreviewAvailability().then(() => {
+                    // Re-render the list to show updated blue indicators
+                    this.renderList();
+                }).catch(error => {
+                    console.error('Error refreshing preview availability:', error);
+                    // Still render list even if preview refresh fails
+                    this.renderList();
+                });
             }
+        });
+
+        // Add context menu for refresh button
+        refreshContainer.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            this.showRefreshContextMenu(e);
         });
         
         header.appendChild(refreshContainer);
@@ -1245,7 +1431,14 @@ export class LoraPickerDialog {
             // Add hover event handlers for preview
             item.addEventListener("mouseenter", () => {
                 if (this.eyeRefreshState) {
-                    this.showPreview(name);
+                    if (this.hasPreview(name)) {
+                        this.showPreview(name);
+                    } else {
+                        this.hidePreview();
+                    }
+                } else {
+                    // Also hide preview if eye refresh is OFF
+                    this.hidePreview();
                 }
             });
 
@@ -1375,6 +1568,10 @@ export class LoraPickerDialog {
     }
 
     showPreview(loraName) {
+        if (!this.hasPreview(loraName)) {
+            return;
+        }
+
         // If we're already showing preview for this LoRA, don't do anything
         if (this.currentPreviewLora === loraName) {
             return;
@@ -1525,51 +1722,47 @@ export class LoraPickerDialog {
         }
     }
 
-    loadSinglePreviewImage(filename, subfolder, suffix) {
-        return new Promise((resolve, reject) => {
-            // Build the API URL
-            const apiUrl = new URL('/wanvid/api/loras/preview', window.location.origin);
-            apiUrl.searchParams.set('file', filename);
-            if (subfolder) {
-                apiUrl.searchParams.set('subfolder', subfolder);
-            }
-            if (suffix) {
-                apiUrl.searchParams.set('suffix', suffix);
-            }
+    async loadSinglePreviewImage(filename, subfolder, suffix) {
+        try {
+            // Determine item type based on options
+            const itemType = this.options && this.options.itemType ? this.options.itemType :
+                           (this.options && this.options.isModelMode ? 'checkpoints' : 'loras');
 
-            const imagePath = apiUrl.pathname + apiUrl.search;
+            // Use unified system from pull_info.js
+            const { modelDataManager } = await import('./pull_info.js');
+            const imageUrl = modelDataManager.getPreviewImageUrl(filename, itemType, suffix, subfolder);
 
-            // Create a new image object to test loading
-            const testImage = new Image();
-
-            testImage.onload = () => {
-                resolve(imagePath);
-            };
-
-            testImage.onerror = () => {
-                reject(new Error(`Failed to load image: ${imagePath}`));
-            };
-
-            // Start loading the image
-            testImage.src = imagePath;
-        });
+            // Test if the image loads successfully
+            return new Promise((resolve, reject) => {
+                const testImage = new Image();
+                testImage.onload = () => resolve(imageUrl);
+                testImage.onerror = () => reject(new Error(`Failed to load image: ${imageUrl}`));
+                testImage.src = imageUrl;
+            });
+        } catch (error) {
+            throw new Error(`Error building preview URL: ${error.message}`);
+        }
     }
 
     async loadPreviewAvailability() {
+        // Determine item type based on options
+        const itemType = this.options && this.options.itemType ? this.options.itemType :
+                       (this.options && this.options.isModelMode ? 'checkpoints' : 'loras');
+
+        // Use unified system from pull_info.js
         try {
-            const response = await fetch('/wanvid/api/loras/previews');
-            if (response.ok) {
-                const data = await response.json();
-                if (data.status === 200 && data.previews) {
-                    this.previewAvailabilityCache.clear();
-                    data.previews.forEach(preview => {
-                        this.previewAvailabilityCache.add(preview.lora);
-                    });
-                }
+                const { modelDataManager } = await import('./pull_info.js');
+                const previewAvailability = await modelDataManager.getPreviewAvailability(itemType);
+
+            // Update our cache
+                this.previewAvailabilityCache.clear();
+                previewAvailability.forEach(itemName => {
+                    this.previewAvailabilityCache.add(itemName);
+                });
+            } catch (error) {
+                console.error('[Preview] Error loading preview availability:', error);
+                // Don't clear cache on error, keep existing data
             }
-        } catch (error) {
-            console.error('[Preview] Error loading preview availability:', error);
-        }
     }
 
     hasPreview(loraName) {
@@ -1578,45 +1771,18 @@ export class LoraPickerDialog {
 
     async loadPreviewJsonData(filename, subfolder) {
         try {
-            // The JSON file keeps the trailing underscore from the base filename
-            // So if images are: filename_01.jpg, filename_02.jpg
-            // The JSON is: filename_.json (with trailing underscore)
-            const jsonFilename = filename + '.json';
+            // Determine item type based on options
+            const itemType = this.options && this.options.itemType ? this.options.itemType :
+                           (this.options && this.options.isModelMode ? 'checkpoints' : 'loras');
 
-            // Try different approaches to access JSON files
-            // The modified /wanvid/api/loras/preview endpoint now supports JSON files!
-            const attempts = [
-                // Method 1: Try the modified preview endpoint that now supports JSON (highest priority)
-                `/wanvid/api/loras/preview?file=${jsonFilename}${subfolder ? '&subfolder=' + subfolder : ''}`,
-                // Method 2: Standard ComfyUI API with correct _power_preview path
-                `/api/view?filename=${jsonFilename}&subfolder=${subfolder}/_power_preview&type=models`,
-                // Method 3: Alternative _power_preview path structure
-                `/api/view?filename=${jsonFilename}&subfolder=_power_preview/${subfolder}&type=models`,
-                // Method 4: Try without subfolder in the filename
-                `/api/view?filename=${jsonFilename}&subfolder=_power_preview&type=models`
-            ];
-
-            for (const attempt of attempts) {
-                try {
-                    const response = await fetch(attempt);
-                    if (response.ok) {
-                        const jsonData = await response.json();
-                        return jsonData;
-                    }
-                } catch (attemptError) {
-                    // Continue to next attempt
-                    continue;
-                }
-            }
-
-            // If no JSON data is found, return null - Copy+ buttons won't appear
-            // This is graceful degradation - the feature works when JSON is available
-            // but doesn't break when it's not
+            // Use unified system from pull_info.js
+            const { modelDataManager } = await import('./pull_info.js');
+            const jsonData = await modelDataManager.getJsonData(filename, itemType, subfolder);
+            return jsonData;
         } catch (error) {
             console.error('[Preview] Error loading JSON data:', error);
+            return null;
         }
-
-        return null;
     }
 
     showCopyMessage(message, type = "success", copiedPrompt = null) {
@@ -1727,5 +1893,360 @@ export class LoraPickerDialog {
         }
         // Re-render the list
         this.renderList();
+    }
+
+    showRefreshContextMenu(event) {
+        // Remove any existing context menu
+        const existingMenu = document.getElementById('refresh-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+
+        const menu = document.createElement('div');
+        menu.id = 'refresh-context-menu';
+        menu.className = 'litegraph litecontextmenu litemenubar-panel';
+        menu.style.cssText = `
+            position: absolute !important;
+            left: ${event.clientX}px !important;
+            top: ${event.clientY}px !important;
+            background-color: #1a1a1a !important;
+            border: 1px solid #000 !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.8) !important;
+            z-index: 10000 !important;
+            padding: 4px !important;
+            border-radius: 0px !important;
+            min-width: 150px !important;
+            display: block !important;
+            font-family: Arial, sans-serif !important;
+            font-size: 11px !important;
+        `;
+
+        // Helper to create menu item
+        const createMenuItem = (text, onClick, disabled = false) => {
+            const item = document.createElement('div');
+            item.style.cssText = `
+                padding: 4px 8px !important;
+                cursor: ${disabled ? 'default' : 'pointer'} !important;
+                color: ${disabled ? '#555' : '#ddd'} !important;
+                background-color: #1a1a1a !important;
+                user-select: none !important;
+                display: flex !important;
+                align-items: center !important;
+                gap: 6px !important;
+            `;
+
+            if (!disabled) {
+                item.onmouseover = () => {
+                    item.style.backgroundColor = '#2a2a2a';
+                };
+                item.onmouseout = () => {
+                    item.style.backgroundColor = '#1a1a1a';
+                };
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    onClick();
+                    menu.remove();
+                    document.removeEventListener('click', hideMenu);
+                };
+            }
+
+            const textSpan = document.createElement('span');
+            textSpan.textContent = text;
+
+            item.appendChild(textSpan);
+            return item;
+        };
+
+        // Add smart fetch menu items
+        menu.appendChild(createMenuItem('📥 Fetch Missing', () => {
+            this.startBatchFetch('missing');
+        }));
+
+        menu.appendChild(createMenuItem('🔄 Update Existing', () => {
+            this.startBatchFetch('existing');
+        }));
+
+        menu.appendChild(createMenuItem('📥 Fetch All', () => {
+            this.startBatchFetch('all');
+        }));
+
+        // Add separator
+        const separator = document.createElement('div');
+        separator.style.cssText = `
+            height: 1px !important;
+            background-color: #333 !important;
+            margin: 2px 0 !important;
+        `;
+        menu.appendChild(separator);
+
+        // Add "Refresh list" menu item
+        menu.appendChild(createMenuItem('🔄 Refresh list', () => {
+            if (this.refreshCallback) {
+                this.refreshCallback();
+            }
+        }));
+
+        // Add "Show Stats" menu item
+        menu.appendChild(createMenuItem('📊 Show Stats', async () => {
+            // Show comprehensive LoRA statistics
+            try {
+                console.log('📊 Gathering LoRA statistics...');
+
+                // Get all available LoRA names from the system
+                const allLoras = await fetch('/wanvid/api/loras')
+                    .then(response => response.json())
+                    .then(data => {
+                        // Handle both direct array and wrapped response formats
+                        return Array.isArray(data) ? data : (data.loras || data);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching LoRA list:', error);
+                        return [];
+                    });
+
+                // Get the preview callback function from the current dialog
+                const hasPreviewCallback = (loraName) => {
+                    // Try to get the preview status from the dialog
+                    if (this.hasPreviewCallback) {
+                        return this.hasPreviewCallback(loraName);
+                    }
+
+                    // Fallback: check if preview files exist via API
+                    return fetch(`/wanvid/api/loras/preview?file=${encodeURIComponent(loraName.replace(/\.[^/.]+$/, "") + '_01.jpg')}`)
+                        .then(response => response.ok)
+                        .catch(() => false);
+                };
+
+                // Gather comprehensive statistics
+                const stats = await batchFetchService.gatherComprehensiveStats(hasPreviewCallback, allLoras);
+
+                // Display the stats dialog
+                batchFetchService.createStatsDialog(stats);
+
+            } catch (error) {
+                console.error('Error showing LoRA statistics:', error);
+
+                // Show error dialog
+                const errorDialog = document.createElement('div');
+                errorDialog.style.cssText = `
+                    position: fixed !important;
+                    top: 50% !important;
+                    left: 50% !important;
+                    transform: translate(-50%, -50%) !important;
+                    background: #2a2a2a !important;
+                    border: 2px solid #f44336 !important;
+                    border-radius: 8px !important;
+                    padding: 20px !important;
+                    z-index: 10000 !important;
+                    color: #fff !important;
+                    font-family: Arial, sans-serif !important;
+                    text-align: center !important;
+                `;
+                errorDialog.innerHTML = `
+                    <h3 style="color: #f44336; margin-top: 0;">❌ Error</h3>
+                    <p>Failed to gather LoRA statistics:</p>
+                    <p style="color: #ccc; font-size: 12px;">${error.message}</p>
+                    <button onclick="this.parentElement.remove()" style="
+                        background: #f44336 !important;
+                        border: none !important;
+                        color: white !important;
+                        padding: 8px 16px !important;
+                        border-radius: 4px !important;
+                        cursor: pointer !important;
+                        margin-top: 12px !important;
+                    ">Close</button>
+                `;
+                document.body.appendChild(errorDialog);
+            }
+        }));
+
+        document.body.appendChild(menu);
+
+        // Prevent menu close when interacting with menu
+        menu.onclick = (e) => e.stopPropagation();
+
+        // Hide menu when clicking outside
+        const hideMenu = (e) => {
+            if (menu && !menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', hideMenu);
+            }
+        };
+
+        // Add listeners after a short delay to prevent immediate closure
+        setTimeout(() => {
+            document.addEventListener('click', hideMenu);
+        }, 100);
+    }
+
+    /**
+     * Start batch fetch operation with progress UI
+     * @param {string} filterType - 'missing', 'existing', or 'all'
+     */
+    async startBatchFetch(filterType) {
+        if (!this.loras || this.loras.length === 0) {
+            console.warn('No LoRAs available to fetch');
+            return;
+        }
+
+        // Create progress UI
+        const progressUI = this.createProgressUI(filterType);
+        const { loadingOverlay, progressFill, progressText, cancelButton } = progressUI;
+
+        // Progress callback functions
+        const progressCallbacks = {
+            updateProgress: (percentage) => {
+                progressFill.style.width = `${percentage}%`;
+            },
+            updateText: (text) => {
+                progressText.textContent = text;
+            },
+            showError: (error) => {
+                progressText.textContent = error;
+                progressFill.style.backgroundColor = '#ff4444';
+            },
+            showCompletion: (message) => {
+                progressText.textContent = message;
+            },
+            checkCancelled: () => {
+                return batchFetchService.cancelFlag;
+            }
+        };
+
+        // Cancel button handler
+        cancelButton.onclick = () => {
+            batchFetchService.cancel();
+            cancelButton.textContent = 'Cancelling...';
+            cancelButton.disabled = true;
+            cancelButton.style.backgroundColor = '#6c757d';
+            cancelButton.style.cursor = 'default';
+            progressText.textContent = 'Cancelling operation...';
+        };
+
+        try {
+            // Start batch fetch using the service
+            const result = await batchFetchService.fetchAllLoras(
+                this.loras,
+                filterType,
+                this.hasPreview.bind(this),
+                progressCallbacks
+            );
+
+            // Wait to show completion
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+        } catch (error) {
+            console.error('Batch fetch error:', error);
+            progressCallbacks.showError(`Error: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        } finally {
+            // Clean up UI
+            if (loadingOverlay.parentNode) {
+                loadingOverlay.parentNode.removeChild(loadingOverlay);
+            }
+
+            // Update preview availability cache and refresh
+            try {
+                await this.loadPreviewAvailability();
+                console.log('Preview availability cache updated successfully');
+            } catch (error) {
+                console.warn('Failed to update preview availability cache:', error);
+            }
+
+            // Refresh the LoRA list to show new previews
+            if (this.refreshCallback) {
+                this.refreshCallback();
+            }
+        }
+    }
+
+    /**
+     * Create progress UI for batch operations
+     * @param {string} filterType - Type of operation being performed
+     * @returns {Object} Progress UI elements
+     */
+    createProgressUI(filterType) {
+        const loadingOverlay = document.createElement('div');
+        loadingOverlay.style.cssText = `
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            background-color: rgba(0,0,0,0.8) !important;
+            z-index: 10001 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            font-family: Arial, sans-serif !important;
+            color: #ddd !important;
+        `;
+
+        const loadingText = document.createElement('div');
+        loadingText.style.cssText = `
+            font-size: 18px !important;
+            margin-bottom: 10px !important;
+        `;
+        loadingText.textContent = `Fetching ${filterType} Previews...`;
+
+        const progressText = document.createElement('div');
+        progressText.style.cssText = `
+            font-size: 14px !important;
+            color: #aaa !important;
+        `;
+        progressText.textContent = 'Initializing...';
+
+        const progressBar = document.createElement('div');
+        progressBar.style.cssText = `
+            width: 300px !important;
+            height: 20px !important;
+            background-color: #333 !important;
+            border: 1px solid #555 !important;
+            border-radius: 10px !important;
+            margin-top: 10px !important;
+            overflow: hidden !important;
+        `;
+
+        const progressFill = document.createElement('div');
+        progressFill.style.cssText = `
+            height: 100% !important;
+            background-color: #007acc !important;
+            width: 0% !important;
+            transition: width 0.3s ease !important;
+        `;
+
+        // Add cancel button
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.style.cssText = `
+            margin-top: 15px !important;
+            padding: 8px 16px !important;
+            background-color: #dc3545 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 4px !important;
+            cursor: pointer !important;
+            font-family: Arial, sans-serif !important;
+            font-size: 14px !important;
+            transition: background-color 0.2s ease !important;
+        `;
+
+        cancelButton.onmouseover = () => {
+            cancelButton.style.backgroundColor = '#c82333';
+        };
+
+        cancelButton.onmouseout = () => {
+            cancelButton.style.backgroundColor = '#dc3545';
+        };
+
+        progressBar.appendChild(progressFill);
+        loadingOverlay.appendChild(loadingText);
+        loadingOverlay.appendChild(progressText);
+        loadingOverlay.appendChild(progressBar);
+        loadingOverlay.appendChild(cancelButton);
+        document.body.appendChild(loadingOverlay);
+
+        return { loadingOverlay, progressFill, progressText, cancelButton };
     }
 }

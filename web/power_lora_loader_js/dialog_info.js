@@ -477,14 +477,19 @@ class WanInfoDialog extends WanDialog {
 
                         // Import and use the preview generation function
                         const { generatePreviewFromFirstImage } = await import('./image_utils.js');
-                        const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath);
-                        console.log(`[DialogInfo] Preview image generated after refresh for ${loraName}:`, previewResult);
+                        // Determine item type from dialog instance or default to 'loras'
+                        const itemType = this.itemType || 'loras';
+                        console.log(`[DialogInfo Debug] Refresh preview generation - itemType: ${itemType}, loraName: ${loraName}, loraPath: ${loraPath}`);
+                        console.log(`[DialogInfo Debug] this.itemType: ${this.itemType}`);
+                        const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath, itemType);
+                        console.log(`[DialogInfo] Preview image generated after refresh for ${loraName} (${itemType}):`, previewResult);
 
                         // Add to success message
+                        const itemTypeName = itemType === 'checkpoints' ? 'Model' : 'LoRA';
                         rgthree.showMessage({
                             id: "refresh-info-" + generateId(4),
                             type: "success",
-                            message: "LoRA information refreshed successfully (preview image generated)",
+                            message: `${itemTypeName} information refreshed successfully (preview image generated)`,
                             timeout: 3000,
                         });
                     } catch (previewError) {
@@ -532,8 +537,12 @@ class WanInfoDialog extends WanDialog {
 
                     // Import and use the preview generation function
                     const { generatePreviewFromFirstImage } = await import('./image_utils.js');
-                    const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath);
-                    console.log(`[DialogInfo] Preview image generated after Civitai fetch for ${loraName}:`, previewResult);
+                    // Determine item type from dialog instance or default to 'loras'
+                    const itemType = this.itemType || 'loras';
+                    console.log(`[DialogInfo Debug] Civitai preview generation - itemType: ${itemType}, loraName: ${loraName}, loraPath: ${loraPath}`);
+                    console.log(`[DialogInfo Debug] this.itemType: ${this.itemType}`);
+                    const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath, itemType);
+                    console.log(`[DialogInfo] Preview image generated after Civitai fetch for ${loraName} (${itemType}):`, previewResult);
                 } catch (previewError) {
                     console.warn(`[DialogInfo] Failed to generate preview image for ${info.file}:`, previewError);
                 }

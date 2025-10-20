@@ -48,6 +48,14 @@ class RgthreeApi {
         }
         return this.getLorasPromise;
     }
+    getCheckpoints(force = false) {
+        if (!this.getCheckpointsPromise || force) {
+            // Add a timestamp to prevent caching when force is true
+            const url = force ? `/checkpoints?format=details&t=${Date.now()}` : "/checkpoints?format=details";
+            this.getCheckpointsPromise = this.fetchJson(url, { cache: "no-store" });
+        }
+        return this.getCheckpointsPromise;
+    }
     async fetchApiJsonOrNull(route, options) {
         const response = await this.fetchJson(route, options);
         if (response.status === 200 && response.data) {

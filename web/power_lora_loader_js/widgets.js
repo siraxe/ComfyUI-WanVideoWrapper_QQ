@@ -596,7 +596,7 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     constructor(name, showLoraChooser) {
         super(name);
         this.showLoraChooser = showLoraChooser;
-        this.value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false };
+        this.value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false, low_active: true };
         this.haveMouseMovedStrength = false;
         this.hitAreas = {
             toggle: { bounds: [0, 0], onDown: this.onToggleDown },
@@ -610,11 +610,16 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     set value(v) {
         this._value = v;
         if (typeof this._value !== "object") {
-            this._value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false };
+            this._value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false, low_active: true };
         }
         // Ensure low_strength is always initialized
         if (this._value.low_strength === undefined) {
             this._value.low_strength = 1;
+        }
+
+        // Ensure low_active is always initialized (default to true for backward compatibility)
+        if (this._value.low_active === undefined) {
+            this._value.low_active = true;
         }
     }
 
@@ -634,7 +639,11 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         posX += this.hitAreas.toggle.bounds[1] + MARGIN;
 
         let rposX = w - MARGIN;
-        ctx.fillStyle = this.value.is_low ? "lime" : "#555";
+        if (this.value.is_low) {
+        ctx.fillStyle = this.value.low_active ? "lime" : "orange";
+    } else {
+        ctx.fillStyle = "#555";
+    }
         ctx.beginPath();
         ctx.arc(rposX - ICON_WIDTH / 2, y + h / 2, h * 0.2, 0, Math.PI * 2);
         ctx.fill();
@@ -759,6 +768,9 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         // Import and show the LoRA info dialog
         import("./dialog_info.js").then(({ WanLoraInfoDialog }) => {
             const infoDialog = new WanLoraInfoDialog(loraToShow).show();
+            // Store the item type for use in preview generation (this is for LoRA widgets)
+            infoDialog.itemType = 'loras';
+            console.log(`[Widgets Debug] Created LoRA widget dialog with itemType: ${infoDialog.itemType}`);
             infoDialog.addEventListener("close", ((e) => {
                 if (e.detail.dirty) {
                     // Dialog was modified, could trigger refresh if needed
@@ -777,16 +789,19 @@ File: ${loraToShow}`;
 
     serializeValue(node, index) {
         const v = { ...this.value };
-        
+
         // Ensure low_strength is always included
         if (v.low_strength === undefined) {
             v.low_strength = 1;
         }
-        
+
         // Ensure is_low and low_variant_name are preserved
         v.is_low = this.value.is_low || false;
         v.low_variant_name = this.value.low_variant_name || null;
-        
+
+        // Ensure low_active is preserved (default to true for backward compatibility)
+        v.low_active = this.value.low_active !== undefined ? this.value.low_active : true;
+
         return v;
     }
 }

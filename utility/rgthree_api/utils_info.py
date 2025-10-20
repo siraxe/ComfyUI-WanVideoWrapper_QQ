@@ -25,7 +25,7 @@ async def delete_model_info(
   if file_path is None:
     return
   if del_info:
-    remove_path(get_info_file(file_path))
+    remove_path(get_info_file(file_path, model_type))
   if del_civitai or del_metadata:
     file_hash = _get_sha256_hash(file_path)
     if del_civitai:
@@ -46,20 +46,20 @@ def get_file_info(file: str, model_type):
     'path': file_path,
     'modified': os.path.getmtime(file_path) * 1000,  # millis
     'imageLocal': f'/wanvid/api/{model_type}/img?file={file}' if get_img_file(file_path) else None,
-    'hasInfoFile': get_info_file(file_path) is not None,
+    'hasInfoFile': get_info_file(file_path, model_type) is not None,
   }
 
 
-def get_info_file(file_path: str, force=False):
+def get_info_file(file_path: str, model_type: str, force=False):
     """ Returns the path to the info file.
-        Saves JSON files with lora name in _power_preview folder inside loras.
+        Saves JSON files with lora name in _power_preview folder inside the model_type folder.
     """
-    loras_dir = folder_paths.get_folder_paths('loras')[0]
+    base_dir = folder_paths.get_folder_paths(model_type)[0]
 
     # Create a mirrored folder structure in loras/_power_preview
-    power_preview_dir = os.path.join(loras_dir, '_power_preview')
+    power_preview_dir = os.path.join(base_dir, '_power_preview')
 
-    relative_path = os.path.relpath(file_path, loras_dir)
+    relative_path = os.path.relpath(file_path, base_dir)
     # Get the filename without extension and change to .json
     filename_without_ext = os.path.splitext(os.path.basename(relative_path))[0]
     relative_dir = os.path.dirname(relative_path)
@@ -71,7 +71,7 @@ def get_info_file(file_path: str, force=False):
 
     # Create the directory if it doesn't exist
     info_dir = os.path.dirname(info_path)
-    if not os.path.exists(info_dir):
+    if force and not os.path.exists(info_dir):
         os.makedirs(info_dir)
 
     return info_path if file_exists(info_path) or force else None
@@ -89,7 +89,7 @@ def get_model_info_file_data(file: str, model_type, default=None):
   file_path = get_folder_path(file, model_type)
   if file_path is None:
     return default
-  return load_json_file(get_info_file(file_path), default=default)
+  return load_json_file(get_info_file(file_path, model_type), default=default)
 
 
 async def get_model_info(
@@ -469,5 +469,5 @@ def save_model_info(file: str, info_data, model_type):
   file_path = get_folder_path(file, model_type)
   if file_path is None:
     return
-  info_path = get_info_file(file_path, force=True)
+  info_path = get_info_file(file_path, model_type, force=True)
   save_json_file(info_path, info_data)

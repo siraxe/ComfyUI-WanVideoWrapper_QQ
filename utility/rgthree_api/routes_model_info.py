@@ -180,6 +180,7 @@ async def api_get_lora_preview_image(request):
     file_param = get_param(request, 'file')
     subfolder_param = get_param(request, 'subfolder', '')
     suffix_param = get_param(request, 'suffix', '')  # Optional suffix parameter
+    is_model_param = get_param(request, 'is_model', 'false').lower() == 'true'
 
     if not file_param:
       api_response['status'] = '400'
@@ -192,11 +193,16 @@ async def api_get_lora_preview_image(request):
       api_response['error'] = 'Invalid file path'
       return web.json_response(api_response)
 
-    # Get loras directory
-    loras_dir = folder_paths.get_folder_paths('loras')[0]
-
-    # Create _power_preview directory structure (same as save function)
-    power_preview_dir = os.path.join(loras_dir, '_power_preview')
+    # Get appropriate directory based on type
+    if is_model_param:
+      # For models, use checkpoints directory
+      base_dir = folder_paths.get_folder_paths('checkpoints')[0]
+      # Use _power_preview subdirectory for model previews
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
+    else:
+      # For LoRAs, use loras directory
+      base_dir = folder_paths.get_folder_paths('loras')[0]
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
 
     # Construct the full path
     if subfolder_param:
@@ -292,23 +298,32 @@ async def api_get_lora_previews_list(request):
   api_response = {'status': 200, 'previews': []}
 
   try:
-    # Get loras directory
-    loras_dir = folder_paths.get_folder_paths('loras')[0]
-    power_preview_dir = os.path.join(loras_dir, '_power_preview')
+    # Get parameters to determine if we're looking for models or LoRAs
+    is_model_param = get_param(request, 'is_model', 'false').lower() == 'true'
+
+    if is_model_param:
+      # Handle models (use checkpoints directory)
+      base_dir = folder_paths.get_folder_paths('checkpoints')[0]
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
+      files_list = folder_paths.get_filename_list('checkpoints')
+    else:
+      # Handle LoRAs
+      base_dir = folder_paths.get_folder_paths('loras')[0]
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
+      files_list = folder_paths.get_filename_list('loras')
 
     if not path_exists(power_preview_dir):
-      return web.json_response(api_response)
+      # Ensure directory exists if it doesn't
+      os.makedirs(power_preview_dir, exist_ok=True)
+      print(f"[Preview] Created directory: {power_preview_dir}")
 
-    # Get all LoRA files
-    lora_files = folder_paths.get_filename_list('loras')
-
-    # Check each LoRA for preview images
-    for lora_file in lora_files:
-      lora_name = lora_file
+    # Check each file for preview images
+    for file_item in files_list:
+      item_name = file_item
       # Remove extension
-      for ext in ['.safetensors', '.pt', '.ckpt']:
-        if lora_name.endswith(ext):
-          lora_name = lora_name[:-len(ext)]
+      for ext in ['.safetensors', '.pt', '.ckpt', '.bin']:
+        if item_name.endswith(ext):
+          item_name = item_name[:-len(ext)]
           break
 
       # Check for preview in various locations
@@ -322,15 +337,16 @@ async def api_get_lora_previews_list(request):
 
         # Check root _power_preview directory
         for img_ext in ['jpg', 'jpeg', 'png']:
-          preview_path = os.path.join(power_preview_dir, f"{lora_name}{suffix}.{img_ext}")
+          preview_path = os.path.join(power_preview_dir, f"{item_name}{suffix}.{img_ext}")
           if path_exists(preview_path):
             preview_found = True
-            preview_paths.append(f"_power_preview/{lora_name}{suffix}.{img_ext}")
+            relative_path = os.path.relpath(preview_path, base_dir)
+            preview_paths.append(relative_path.replace('\\', '/'))
             found_suffixes.append(suffix)
             break
 
         # Check subfolders
-        path_parts = lora_name.replace('/', os.sep).replace('\\', os.sep).split(os.sep)
+        path_parts = item_name.replace('/', os.sep).replace('\\', os.sep).split(os.sep)
         if len(path_parts) > 1:
           subfolder = os.sep.join(path_parts[:-1])
           filename = path_parts[-1]
@@ -341,7 +357,8 @@ async def api_get_lora_previews_list(request):
               preview_path = os.path.join(subfolder_path, f"{filename}{suffix}.{img_ext}")
               if path_exists(preview_path):
                 preview_found = True
-                preview_paths.append(f"_power_preview/{subfolder}/{filename}{suffix}.{img_ext}")
+                relative_path = os.path.relpath(preview_path, base_dir)
+                preview_paths.append(relative_path.replace('\\', '/'))
                 found_suffixes.append(suffix)
                 break
 
@@ -349,16 +366,17 @@ async def api_get_lora_previews_list(request):
       if not found_suffixes:
         # Check root _power_preview directory
         for img_ext in ['jpg', 'jpeg', 'png']:
-          preview_path = os.path.join(power_preview_dir, f"{lora_name}.{img_ext}")
+          preview_path = os.path.join(power_preview_dir, f"{item_name}.{img_ext}")
           if path_exists(preview_path):
             preview_found = True
-            preview_paths.append(f"_power_preview/{lora_name}.{img_ext}")
+            relative_path = os.path.relpath(preview_path, base_dir)
+            preview_paths.append(relative_path.replace('\\', '/'))
             break
 
         # Check subfolders if not found in root
         if not preview_found:
           # Look for subfolder structure
-          path_parts = lora_name.replace('/', os.sep).replace('\\', os.sep).split(os.sep)
+          path_parts = item_name.replace('/', os.sep).replace('\\', os.sep).split(os.sep)
           if len(path_parts) > 1:
             subfolder = os.sep.join(path_parts[:-1])
             filename = path_parts[-1]
@@ -369,13 +387,15 @@ async def api_get_lora_previews_list(request):
                 preview_path = os.path.join(subfolder_path, f"{filename}.{img_ext}")
                 if path_exists(preview_path):
                   preview_found = True
-                  preview_paths.append(f"_power_preview/{subfolder}/{filename}.{img_ext}")
+                  relative_path = os.path.relpath(preview_path, base_dir)
+                  preview_paths.append(relative_path.replace('\\', '/'))
                   break
 
       if preview_found:
         api_response['previews'].append({
-          'lora': lora_file,
-          'preview_paths': preview_paths
+          'lora': file_item,  # Keep 'lora' key for backward compatibility
+          'preview_paths': preview_paths,
+          'type': 'model' if is_model_param else 'lora'
         })
 
     return web.json_response(api_response)
@@ -401,17 +421,26 @@ async def api_save_lora_preview_image(request):
     lora_name = post.get('lora_name')
     lora_path = post.get('lora_path', '')
     suffix = post.get('suffix', '')
+    is_model = post.get('is_model', 'false').lower() == 'true'
 
     if not image_file or not lora_name:
       api_response['status'] = '400'
       api_response['error'] = 'Missing required parameters: image and lora_name'
       return web.json_response(api_response)
 
-    # Get loras directory
-    loras_dir = folder_paths.get_folder_paths('loras')[0]
+    # Get appropriate directory based on type
+    if is_model:
+      # For models, use checkpoints directory
+      base_dir = folder_paths.get_folder_paths('checkpoints')[0]
+      # Use _power_preview subdirectory for model previews
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
+      print(f"[Preview Image Debug] MODEL: Using directory {power_preview_dir}")
+    else:
+      # For LoRAs, use loras directory
+      base_dir = folder_paths.get_folder_paths('loras')[0]
+      power_preview_dir = os.path.join(base_dir, '_power_preview')
+      print(f"[Preview Image Debug] LORA: Using directory {power_preview_dir}")
 
-    # Create _power_preview directory structure
-    power_preview_dir = os.path.join(loras_dir, '_power_preview')
     if lora_path:
       save_dir = os.path.join(power_preview_dir, lora_path)
     else:
@@ -419,10 +448,13 @@ async def api_save_lora_preview_image(request):
 
     # Ensure directory exists
     os.makedirs(save_dir, exist_ok=True)
+    print(f"[Preview Image Debug] Directory ensured: {save_dir}")
+    print(f"[Preview Image Debug] Directory exists check: {os.path.exists(save_dir)}")
 
     # Construct save path with optional suffix
     filename = f"{lora_name}{suffix}.jpg"
     save_path = os.path.join(save_dir, filename)
+    print(f"[Preview Image Debug] Saving image to: {save_path}")
 
     # Read image data
     image_data = image_file.file.read()
@@ -446,14 +478,137 @@ async def api_save_lora_preview_image(request):
       # Save as JPEG with high quality
       img.save(save_path, 'JPEG', quality=90, optimize=True)
 
-    api_response['save_path'] = os.path.relpath(save_path, loras_dir)
+    api_response['save_path'] = os.path.relpath(save_path, base_dir)
     api_response['file_size'] = os.path.getsize(save_path)
     api_response['filename'] = filename
+    api_response['base_dir'] = base_dir
 
   except Exception as e:
     api_response['status'] = '500'
     api_response['error'] = f'Failed to save preview image: {str(e)}'
     print(f"[Preview Image Error] {str(e)}")
+
+  return web.json_response(api_response)
+
+@routes.post('/wanvid/api/model/preview-json')
+async def api_save_model_preview_json(request):
+  """Save JSON data for a model preview in the _power_preview/_model_preview directory."""
+
+  api_response = {'status': 200, 'message': 'Model preview JSON saved successfully'}
+
+  try:
+    # Get form data
+    post = await request.post()
+    json_data = post.get('json')
+    model_name = post.get('model_name')
+    model_path = post.get('model_path', '')
+
+    if not json_data or not model_name:
+      api_response['status'] = '400'
+      api_response['error'] = 'Missing required parameters: json and model_name'
+      return web.json_response(api_response)
+
+    # Get checkpoints directory as base
+    checkpoints_dir = folder_paths.get_folder_paths('checkpoints')[0]
+    # Use _power_preview subdirectory for model previews
+    power_preview_dir = os.path.join(checkpoints_dir, '_power_preview')
+    print(f"[Model JSON Debug] Using directory: {power_preview_dir}")
+
+    if model_path:
+      save_dir = os.path.join(power_preview_dir, model_path)
+    else:
+      save_dir = power_preview_dir
+
+    # Ensure directory exists
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"[Model JSON Debug] Directory ensured: {save_dir}")
+    print(f"[Model JSON Debug] Directory exists check: {os.path.exists(save_dir)}")
+
+    # Parse and validate JSON data
+    try:
+      json_content = json.loads(json_data)
+    except json.JSONDecodeError as e:
+      api_response['status'] = '400'
+      api_response['error'] = f'Invalid JSON format: {str(e)}'
+      return web.json_response(api_response)
+
+    # Construct save path - the JSON filename should have a trailing underscore
+    # to match the image naming convention (e.g., model_name_.json for model_name_01.jpg)
+    json_filename = f"{model_name}_.json"
+    save_path = os.path.join(save_dir, json_filename)
+
+    # Save JSON file
+    with open(save_path, 'w', encoding='utf-8') as f:
+      json.dump(json_content, f, indent=2, ensure_ascii=False)
+
+    api_response['save_path'] = os.path.relpath(save_path, checkpoints_dir)
+    api_response['filename'] = json_filename
+    api_response['base_dir'] = checkpoints_dir
+
+  except Exception as e:
+    api_response['status'] = '500'
+    api_response['error'] = f'Failed to save model preview JSON: {str(e)}'
+    print(f"[Model Preview JSON Error] {str(e)}")
+
+  return web.json_response(api_response)
+
+
+@routes.post('/wanvid/api/lora/preview-json')
+async def api_save_lora_preview_json(request):
+  """Save JSON data for a LoRA preview in the _power_preview directory."""
+
+  api_response = {'status': 200, 'message': 'LoRA preview JSON saved successfully'}
+
+  try:
+    # Get form data
+    post = await request.post()
+    json_data = post.get('json')
+    lora_name = post.get('lora_name')
+    lora_path = post.get('lora_path', '')
+
+    if not json_data or not lora_name:
+      api_response['status'] = '400'
+      api_response['error'] = 'Missing required parameters: json and lora_name'
+      return web.json_response(api_response)
+
+    # Get loras directory
+    loras_dir = folder_paths.get_folder_paths('loras')[0]
+    # Use _power_preview directory for LoRA previews
+    power_preview_dir = os.path.join(loras_dir, '_power_preview')
+
+    if lora_path:
+      save_dir = os.path.join(power_preview_dir, lora_path)
+    else:
+      save_dir = power_preview_dir
+
+    # Ensure directory exists
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Parse and validate JSON data
+    try:
+      json_content = json.loads(json_data)
+    except json.JSONDecodeError as e:
+      api_response['status'] = '400'
+      api_response['error'] = f'Invalid JSON format: {str(e)}'
+      return web.json_response(api_response)
+
+    # Construct save path - the JSON filename should have a trailing underscore
+    # to match the image naming convention (e.g., lora_name_.json for lora_name_01.jpg)
+    json_filename = f"{lora_name}_.json"
+    save_path = os.path.join(save_dir, json_filename)
+
+    # Save JSON file
+    with open(save_path, 'w', encoding='utf-8') as f:
+      json.dump(json_content, f, indent=2, ensure_ascii=False)
+
+    api_response['save_path'] = os.path.relpath(save_path, loras_dir)
+    api_response['filename'] = json_filename
+    api_response['base_dir'] = loras_dir
+
+  except Exception as e:
+    api_response['status'] = '500'
+    api_response['error'] = f'Failed to save LoRA preview JSON: {str(e)}'
+    print(f"[LoRA Preview JSON Error] {str(e)}")
 
   return web.json_response(api_response)
 

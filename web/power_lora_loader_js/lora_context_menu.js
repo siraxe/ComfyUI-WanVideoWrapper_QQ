@@ -1,5 +1,7 @@
 import { app } from "../../../../scripts/app.js";
 import { moveArrayItem, removeArrayItem } from "./widgets.js";
+import { batchFetchService } from "./batch_fetch_service.js";
+import { renameLoRAFiles } from "./rename_utils.js";
 
 // Function to display custom HTML context menu for LoRA widget actions
 export function showCustomLoraMenu(event, widget, node, position) {
@@ -93,6 +95,29 @@ export function showCustomLoraMenu(event, widget, node, position) {
         return separator;
     };
 
+    // Function to show LoRA in Windows Explorer
+    const showInExplorer = (loraName) => {
+        // Use the ComfyUI API to open Explorer for the LoRA file
+        fetch('/wanvideo_wrapper/open_explorer', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ lora_name: loraName })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Explorer opened successfully for:', loraName);
+            } else {
+                console.error('Failed to open Explorer:', data.error || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            console.error('Error opening Explorer:', error);
+        });
+    };
+
     // Add menu items
     menu.appendChild(createMenuItem('ℹ️', 'Show Info', () => {
         // For the main LoRA widget context menu, always show the high variant info
@@ -130,10 +155,15 @@ export function showCustomLoraMenu(event, widget, node, position) {
         node.setDirtyCanvas(true, true);
     }, !canMoveDown));
 
+    menu.appendChild(createMenuItem('✏️', 'Rename', () => {
+        const loraName = widget.value.lora_name;
+        renameLoRAFiles(loraName, 'high', null, widget.callback, node, widget);
+    }));
+
     menu.appendChild(createMenuItem('🗑️', 'Remove', () => {
         removeArrayItem(node.widgets, widget);
         const computed = node.computeSize();
-        node.size[1] = Math.max(node._tempHeight || 15, computed[1]);    
+        node.size[1] = Math.max(node._tempHeight || 15, computed[1]);
         node.setDirtyCanvas(true, true);
     }));
 
@@ -239,7 +269,7 @@ export function getLoraSlotMenuOptions(slot, event) {
 
         // Use a slight delay to ensure the menu shows after the event completes
         setTimeout(() => {
-            showLowVariantMenu(event, slot.widget, { x, y });
+            showLowVariantMenu(event, slot.widget, this, { x, y });
         }, 10);
 
         // Return false to prevent LiteGraph from showing its default menu
@@ -292,7 +322,7 @@ export function getLoraSlotMenuOptions(slot, event) {
 }
 
 // Function to display a simple context menu for low variant information
-function showLowVariantMenu(event, widget, position) {
+function showLowVariantMenu(event, widget, node, position) {
     console.log("showLowVariantMenu called.");
     // Remove any existing menu to prevent duplicates
     const existingMenu = document.getElementById('low-variant-menu');
@@ -401,6 +431,19 @@ function showLowVariantMenu(event, widget, position) {
 
     nameItem.appendChild(textSpan);
     menu.appendChild(nameItem);
+
+    // Add separator
+    menu.appendChild(createSeparator());
+
+    // Add Toggle On/Off option
+    menu.appendChild(createMenuItem(
+        widget.value.low_active ? '⚫' : '🟢',
+        widget.value.low_active ? 'Toggle Off' : 'Toggle On',
+        () => {
+            widget.value.low_active = !widget.value.low_active;
+            node.setDirtyCanvas(true, true);
+        }
+    ));
 
     // Add separator
     menu.appendChild(createSeparator());
