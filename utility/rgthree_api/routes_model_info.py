@@ -172,7 +172,7 @@ async def api_get_models_info_img(request):
 
 @routes.get('/wanvid/api/loras/preview')
 async def api_get_lora_preview_image(request):
-  """Returns a preview image from the _power_preview directory."""
+  """Returns a preview image or JSON data from the _power_preview directory."""
   api_response = {'status': 200}
 
   try:
@@ -206,6 +206,37 @@ async def api_get_lora_preview_image(request):
     else:
       search_dir = power_preview_dir
 
+    # Check if this is a JSON file request
+    if file_param.endswith('.json'):
+      # Handle JSON file requests
+      json_path = os.path.join(search_dir, file_param)
+
+      if path_exists(json_path):
+        # Security: ensure the file is within the power_preview directory
+        if not os.path.abspath(json_path).startswith(os.path.abspath(power_preview_dir)):
+          api_response['status'] = '403'
+          api_response['error'] = 'Access denied'
+          return web.json_response(api_response)
+
+        # Read and return JSON content
+        try:
+          with open(json_path, 'r', encoding='utf-8') as f:
+            json_data = json.load(f)
+          return web.json_response(json_data)
+        except json.JSONDecodeError as e:
+          api_response['status'] = '500'
+          api_response['error'] = f'Invalid JSON format: {str(e)}'
+          return web.json_response(api_response)
+        except Exception as e:
+          api_response['status'] = '500'
+          api_response['error'] = f'Error reading JSON file: {str(e)}'
+          return web.json_response(api_response)
+      else:
+        api_response['status'] = '404'
+        api_response['error'] = 'JSON file not found'
+        return web.json_response(api_response)
+
+    # Handle image files (existing logic)
     # Try different image extensions
     img_path = None
 

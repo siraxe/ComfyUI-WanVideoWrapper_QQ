@@ -428,6 +428,47 @@ style.textContent = `
     margin-right: 2px !important;
     flex-shrink: 0 !important;
 }
+
+.lora-picker-preview-image-container {
+    position: relative !important;
+    display: inline-block !important;
+    width: 100% !important;
+}
+
+.lora-picker-copy-button {
+    position: absolute !important;
+    top: 4px !important;
+    left: 4px !important;
+    z-index: 10 !important;
+    cursor: pointer !important;
+    border: 1px solid #000 !important;
+    border-radius: 0px !important;
+    background: rgba(26, 26, 26, 0.9) !important;
+    color: #ddd !important;
+    font-family: Arial, sans-serif !important;
+    font-size: 9px !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    text-decoration: none !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    transition: all 0.1s ease-in-out !important;
+    padding: 2px 4px !important;
+    display: inline-flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: center !important;
+    opacity: 0.8 !important;
+}
+
+.lora-picker-copy-button:hover {
+    background: rgba(42, 42, 42, 0.95) !important;
+    opacity: 1 !important;
+}
+
+.lora-picker-copy-button:active {
+    background: rgba(34, 34, 34, 0.95) !important;
+}
 `;
 document.head.appendChild(style);
 
@@ -573,6 +614,7 @@ export class LoraPickerDialog {
         this.previewName = null;
         this.previewStatus = null;
         this.currentPreviewTimeout = null;
+        this.currentPreviewLora = null;
         this.previewAvailabilityCache = new Set();
         this.folders = this.extractFolders();
         this.loadPreviewAvailability();
@@ -747,6 +789,20 @@ export class LoraPickerDialog {
         previewInfo.appendChild(this.previewStatus);
         this.previewArea.appendChild(this.previewImagesContainer);
         this.previewArea.appendChild(previewInfo);
+
+        // Add mouse event listeners to keep preview visible when hovering
+        this.previewArea.addEventListener("mouseenter", () => {
+            // Preview remains visible when hovering over it
+        });
+
+        this.previewArea.addEventListener("mouseleave", (e) => {
+            // Hide preview only if mouse leaves preview area and doesn't enter another lora item
+            // Check if the related target is not another lora item
+            const relatedTarget = e.relatedTarget;
+            if (!relatedTarget || (!relatedTarget.closest('.lora-picker-list li') && !relatedTarget.closest('.lora-picker-preview-area'))) {
+                this.hidePreview();
+            }
+        });
 
         // Add to document body (not dialog element) to avoid overflow constraints
         document.body.appendChild(this.previewArea);
@@ -1193,10 +1249,6 @@ export class LoraPickerDialog {
                 }
             });
 
-            item.addEventListener("mouseleave", () => {
-                this.hidePreview();
-            });
-
             item.addEventListener("click", () => {
                 if (this.options.callback) {
                     // Use the full name (including folder path) for the callback
@@ -1323,10 +1375,18 @@ export class LoraPickerDialog {
     }
 
     showPreview(loraName) {
+        // If we're already showing preview for this LoRA, don't do anything
+        if (this.currentPreviewLora === loraName) {
+            return;
+        }
+
         // Clear any existing timeout
         if (this.currentPreviewTimeout) {
             clearTimeout(this.currentPreviewTimeout);
         }
+
+        // Track the currently being previewed LoRA
+        this.currentPreviewLora = loraName;
 
         // Add a small delay to prevent flickering when quickly moving between items
         this.currentPreviewTimeout = setTimeout(() => {
@@ -1340,6 +1400,9 @@ export class LoraPickerDialog {
             clearTimeout(this.currentPreviewTimeout);
             this.currentPreviewTimeout = null;
         }
+
+        // Reset the currently previewed LoRA
+        this.currentPreviewLora = null;
 
         // Hide preview area
         if (this.previewArea) {
@@ -1396,15 +1459,53 @@ export class LoraPickerDialog {
             // Wait for all images to load (or fail)
             const results = await Promise.allSettled(imagePromises);
 
-            // Filter successful results and create image elements
+            // Load JSON data for positive prompts
+            const jsonData = await this.loadPreviewJsonData(filename, subfolder);
+
+            // Filter successful results and create image elements with containers and copy buttons
             let loadedCount = 0;
             results.forEach((result, index) => {
                 if (result.status === 'fulfilled' && result.value) {
+                    // Create container for image and copy button
+                    const imageContainer = document.createElement("div");
+                    imageContainer.className = "lora-picker-preview-image-container";
+
+                    // Create image element
                     const imgElement = document.createElement("img");
                     imgElement.className = "lora-picker-preview-image";
                     imgElement.src = result.value;
                     imgElement.style.display = "block";
-                    this.previewImagesContainer.appendChild(imgElement);
+                    imgElement.style.width = "100%";
+                    imageContainer.appendChild(imgElement);
+
+                    // Add Copy+ button if JSON data and positive prompt are available
+                    if (jsonData && jsonData.images && jsonData.images[index] && jsonData.images[index].positive) {
+                        const copyButton = document.createElement("button");
+                        copyButton.className = "lora-picker-copy-button";
+                        copyButton.textContent = "Copy+";
+                        copyButton.title = "Copy positive prompt";
+
+                        // Add click event listener for copy functionality
+                        copyButton.addEventListener("click", async (e) => {
+                            e.stopPropagation();
+                            const positivePrompt = jsonData.images[index].positive;
+                            if (positivePrompt) {
+                                try {
+                                    await navigator.clipboard.writeText(positivePrompt);
+                                    this.showCopyMessage("Positive prompt copied to clipboard", "success", positivePrompt);
+                                } catch (error) {
+                                    console.error('Failed to copy to clipboard:', error);
+                                    this.showCopyMessage("Failed to copy to clipboard", "error");
+                                }
+                            } else {
+                                this.showCopyMessage("No positive prompt found", "error");
+                            }
+                        });
+
+                        imageContainer.appendChild(copyButton);
+                    }
+
+                    this.previewImagesContainer.appendChild(imageContainer);
                     loadedCount++;
                 }
             });
@@ -1475,15 +1576,103 @@ export class LoraPickerDialog {
         return this.previewAvailabilityCache.has(loraName);
     }
 
+    async loadPreviewJsonData(filename, subfolder) {
+        try {
+            // The JSON file keeps the trailing underscore from the base filename
+            // So if images are: filename_01.jpg, filename_02.jpg
+            // The JSON is: filename_.json (with trailing underscore)
+            const jsonFilename = filename + '.json';
+
+            // Try different approaches to access JSON files
+            // The modified /wanvid/api/loras/preview endpoint now supports JSON files!
+            const attempts = [
+                // Method 1: Try the modified preview endpoint that now supports JSON (highest priority)
+                `/wanvid/api/loras/preview?file=${jsonFilename}${subfolder ? '&subfolder=' + subfolder : ''}`,
+                // Method 2: Standard ComfyUI API with correct _power_preview path
+                `/api/view?filename=${jsonFilename}&subfolder=${subfolder}/_power_preview&type=models`,
+                // Method 3: Alternative _power_preview path structure
+                `/api/view?filename=${jsonFilename}&subfolder=_power_preview/${subfolder}&type=models`,
+                // Method 4: Try without subfolder in the filename
+                `/api/view?filename=${jsonFilename}&subfolder=_power_preview&type=models`
+            ];
+
+            for (const attempt of attempts) {
+                try {
+                    const response = await fetch(attempt);
+                    if (response.ok) {
+                        const jsonData = await response.json();
+                        return jsonData;
+                    }
+                } catch (attemptError) {
+                    // Continue to next attempt
+                    continue;
+                }
+            }
+
+            // If no JSON data is found, return null - Copy+ buttons won't appear
+            // This is graceful degradation - the feature works when JSON is available
+            // but doesn't break when it's not
+        } catch (error) {
+            console.error('[Preview] Error loading JSON data:', error);
+        }
+
+        return null;
+    }
+
+    showCopyMessage(message, type = "success", copiedPrompt = null) {
+        // Create message element
+        const messageElement = document.createElement("div");
+        messageElement.style.cssText = `
+            position: fixed !important;
+            top: 20px !important;
+            right: 20px !important;
+            background-color: ${type === "success" ? "#2a5a2a" : "#5a2a2a"} !important;
+            color: #ddd !important;
+            padding: 8px 12px !important;
+            border-radius: 4px !important;
+            border: 1px solid ${type === "success" ? "#4a7a4a" : "#7a4a4a"} !important;
+            font-family: Arial, sans-serif !important;
+            font-size: 12px !important;
+            z-index: 10002 !important;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.8) !important;
+            opacity: 0 !important;
+            transition: opacity 0.2s ease-in-out !important;
+            max-width: 400px !important;
+        `;
+
+        // Create message content
+        let messageContent = message;
+        if (copiedPrompt && type === "success") {
+            messageContent += `:<br><div style="margin-top: 4px; font-style: italic; color: #aaa; font-size: 11px; word-break: break-word; max-height: 100px; overflow-y: auto;">${copiedPrompt}</div>`;
+        }
+
+        messageElement.innerHTML = messageContent;
+
+        // Add to document
+        document.body.appendChild(messageElement);
+
+        // Fade in
+        setTimeout(() => {
+            messageElement.style.opacity = "1";
+        }, 10);
+
+        // Remove after 5 seconds (longer for readability)
+        setTimeout(() => {
+            messageElement.style.opacity = "0";
+            setTimeout(() => {
+                if (messageElement.parentNode) {
+                    messageElement.parentNode.removeChild(messageElement);
+                }
+            }, 200);
+        }, 3000);
+    }
+
     
     close() {
         saveAllUIState(this);
 
-        // Clear any pending preview timeout
-        if (this.currentPreviewTimeout) {
-            clearTimeout(this.currentPreviewTimeout);
-            this.currentPreviewTimeout = null;
-        }
+        // Hide preview and clean up state
+        this.hidePreview();
 
         if (this.element) {
             this.element.remove();
