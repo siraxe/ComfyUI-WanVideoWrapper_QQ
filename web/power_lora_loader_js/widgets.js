@@ -706,7 +706,7 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
             if (lora) {
                 this.setLora(lora);
             }
-        });
+        }, node);
     }
 
     onStrengthClick(event, pos, node) {

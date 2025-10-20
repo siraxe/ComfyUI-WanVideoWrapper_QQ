@@ -136,8 +136,8 @@ style.textContent = `
     z-index: 10000 !important;
     padding: 10px !important;
     border-radius: 0px !important;
-    width: calc(25vw + 150px) !important; /* Width + sidebar width */
-    min-width: 550px; /* Increased min-width */
+    width: calc(25vw + 150px + 200px) !important; /* Width + sidebar width + preview width */
+    min-width: 750px; /* Increased min-width for preview */
     max-height: 80vh;
     display: flex !important;
     flex-direction: column !important;
@@ -228,15 +228,49 @@ style.textContent = `
     margin-bottom: 10px !important;
 }
 
+.lora-picker-search-container {
+    position: relative !important;
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
 .lora-picker-header input {
     width: 100% !important;
-    padding: 4px 6px !important;
+    padding: 4px 30px 4px 6px !important;
     background-color: #1a1a1a !important;
     border: 1px solid #333 !important;
     color: #ddd !important;
     font-family: Arial, sans-serif !important;
     font-size: 12px !important;
     outline: none !important;
+}
+
+.lora-picker-clear-button {
+    position: absolute !important;
+    right: 6px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 16px !important;
+    height: 16px !important;
+    background: none !important;
+    color: #888 !important;
+    border: none !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 14px !important;
+    font-weight: normal !important;
+    user-select: none !important;
+}
+
+.lora-picker-clear-button:hover {
+    color: #aaa !important;
+}
+
+.lora-picker-clear-button:active {
+    color: #666 !important;
 }
 
 .lora-picker-header select {
@@ -321,6 +355,79 @@ style.textContent = `
     font-size: 16px !important;
     user-select: none !important;
 }
+
+.lora-picker-preview-area {
+    position: fixed;
+    top: 20%; /* Same as dialog top */
+    right: 0px;
+    width: 200px;
+    min-height: auto; /* Let content determine height */
+    background-color: #1a1a1a !important;
+    border: none !important; /* Remove blue outline */
+    z-index: 10001 !important;
+    padding: 8px !important;
+    display: none !important;
+    flex-direction: column !important;
+    font-family: Arial, sans-serif !important;
+    font-size: 11px !important;
+    color: #ddd !important;
+    transition: transform 0.2s ease !important;
+    transform: translateX(100%);
+}
+
+.lora-picker-preview-area.visible {
+    display: flex !important;
+    transform: translateX(200px);
+}
+
+.lora-picker-preview-images-container {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+    width: 100% !important;
+    max-height: 600px !important; /* 3 images * 200px each + gaps */
+    overflow-y: auto !important;
+}
+
+.lora-picker-preview-image {
+    width: 100% !important;
+    height: auto !important;
+    max-height: 180px !important; /* Slightly smaller for multiple images */
+    object-fit: contain !important;
+    border: 1px solid #333 !important;
+    border-radius: 4px !important;
+    flex-shrink: 0 !important;
+}
+
+.lora-picker-preview-info {
+    flex: 1 !important;
+    overflow-y: auto !important;
+}
+
+.lora-picker-preview-name {
+    font-weight: bold !important;
+    margin-bottom: 4px !important;
+    word-break: break-all !important;
+}
+
+.lora-picker-preview-status {
+    color: #aaa !important;
+    font-size: 11px !important;
+}
+
+.lora-picker-preview-indicator {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 8px !important;
+    height: 8px !important;
+    background-color: #4488bb !important;
+    border-radius: 50% !important;
+    margin-left: auto !important;
+    margin-right: 2px !important;
+    flex-shrink: 0 !important;
+}
 `;
 document.head.appendChild(style);
 
@@ -354,6 +461,93 @@ function loadSelectedFolder() {
     return selectedFolder !== null ? JSON.parse(selectedFolder) : null;
 }
 
+// Persistence functions for eye refresh button state
+function saveEyeRefreshState(eyeRefreshState) {
+    localStorage.setItem("wanVideoPowerLoraLoader.eyeRefreshState", JSON.stringify(eyeRefreshState));
+}
+
+function loadEyeRefreshState() {
+    const eyeRefreshState = localStorage.getItem("wanVideoPowerLoraLoader.eyeRefreshState");
+    return eyeRefreshState !== null ? JSON.parse(eyeRefreshState) : false;
+}
+
+function saveAllUIState(dialog) {
+    const uiState = {
+        foldersVisible: dialog.options.foldersVisible,
+        eyeRefreshState: dialog.eyeRefreshState,
+        selectedFolder: dialog.selectedFolder
+    };
+
+    saveFoldersVisible(dialog.options.foldersVisible);
+    saveEyeRefreshState(dialog.eyeRefreshState);
+    saveSelectedFolder(dialog.selectedFolder);
+
+    if (dialog.parentNode && dialog.parentNode.widgets) {
+        // Try both widget names to support both node types
+        let uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "pll_ui_state");
+        if (!uiStateWidget) {
+            uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "ui_state");
+        }
+        if (uiStateWidget) {
+            const stateString = JSON.stringify(uiState);
+            uiStateWidget.value = stateString;
+            if (typeof app !== 'undefined' && app.graph) {
+                app.graph.setDirtyCanvas(true, true);
+            }
+        }
+    }
+}
+
+function loadAllUIState(dialog) {
+    let uiState = {
+        foldersVisible: undefined,
+        eyeRefreshState: undefined,
+        selectedFolder: undefined
+    };
+
+    if (dialog.parentNode && dialog.parentNode.widgets) {
+        // Try both widget names to support both node types
+        let uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "pll_ui_state");
+        if (!uiStateWidget) {
+            uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "ui_state");
+        }
+        if (uiStateWidget && uiStateWidget.value) {
+            try {
+                uiState = JSON.parse(uiStateWidget.value);
+            } catch (e) {
+                console.warn("Failed to parse UI state from workflow:", e);
+            }
+        }
+    }
+
+    if (uiState.foldersVisible === undefined) {
+        uiState.foldersVisible = loadFoldersVisible();
+    }
+    if (uiState.eyeRefreshState === undefined) {
+        uiState.eyeRefreshState = loadEyeRefreshState();
+    }
+    if (uiState.selectedFolder === undefined) {
+        uiState.selectedFolder = loadSelectedFolder();
+    }
+
+    dialog.options.foldersVisible = uiState.foldersVisible !== false;
+    dialog.eyeRefreshState = uiState.eyeRefreshState || false;
+    dialog.selectedFolder = uiState.selectedFolder || null;
+
+    if (dialog.parentNode && dialog.parentNode.widgets) {
+        // Try both widget names to support both node types
+        let uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "pll_ui_state");
+        if (!uiStateWidget) {
+            uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "ui_state");
+        }
+        if (uiStateWidget && (uiState.foldersVisible !== undefined || uiState.eyeRefreshState !== undefined || uiState.selectedFolder !== undefined)) {
+            saveAllUIState(dialog);
+        }
+    }
+
+    return uiState;
+}
+
 export class LoraPickerDialog {
     constructor(loras, options = {}) {
         // Filter out any "None" entries from the loras list
@@ -364,23 +558,28 @@ export class LoraPickerDialog {
         this.options = options;
         this.element = null;
         this.refreshCallback = options.refreshCallback || null;
-        // Sidebar width configuration - change this value to adjust width
+        this.parentNode = options.parentNode || null;
+
         this.sidebarWidth = 150;
-        // Load favorites only state from persistence if not provided
+
+        loadAllUIState(this);
+
         if (this.options.favoritesOnly === undefined) {
             this.options.favoritesOnly = loadFavoritesOnly();
         }
-        // Load folders visible state from persistence if not provided
-        if (this.options.foldersVisible === undefined) {
-            this.options.foldersVisible = loadFoldersVisible();
-        }
-        // Load selected folder from persistence
-        this.selectedFolder = loadSelectedFolder();
-        // Extract folders from lora list
+
+        this.previewArea = null;
+        this.previewImage = null;
+        this.previewName = null;
+        this.previewStatus = null;
+        this.currentPreviewTimeout = null;
+        this.previewAvailabilityCache = new Set();
         this.folders = this.extractFolders();
+        this.loadPreviewAvailability();
     }
 
     show() {
+
         // Create overlay
         this.overlay = document.createElement("div");
         this.overlay.className = "lora-picker-overlay";
@@ -399,6 +598,9 @@ export class LoraPickerDialog {
         // Create dialog element
         this.element = document.createElement("div");
         this.element.className = "lora-picker-dialog";
+
+        // Create preview area
+        this.createPreviewArea();
 
         // Add header
         const header = this.createHeader();
@@ -441,11 +643,15 @@ export class LoraPickerDialog {
         toggleZone.style.height = "calc(100% - 50px)"; // Leave space at top for header
         toggleZone.style.zIndex = "10";
         toggleZone.style.cursor = "pointer";
-        // Add click handler to toggle sidebar
+        // Add click handler to toggle sidebar - trigger the same functionality as Folders button
         toggleZone.addEventListener("click", (e) => {
             e.stopPropagation(); // Prevent event bubbling
+
+            // Trigger the same logic as the Folders button click
             this.options.foldersVisible = !this.options.foldersVisible;
-            const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(4)");
+
+            // Find and update the folders container (same as Folders button logic)
+            const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(5)");
             if (foldersContainer) {
                 const foldersText = foldersContainer.querySelector("span");
                 const indicatorLine = foldersContainer.querySelector("div[style*='position: absolute']");
@@ -453,8 +659,15 @@ export class LoraPickerDialog {
                 foldersContainer.style.backgroundColor = this.options.foldersVisible ? "#2a2a2a" : "#1a1a1a";
                 indicatorLine.style.display = (this.selectedFolder && this.selectedFolder !== "root" && !this.options.foldersVisible) ? "block" : "none";
             }
-            saveFoldersVisible(this.options.foldersVisible);
+
+            // Save all UI state to both localStorage and workflow
+            saveAllUIState(this);
+
+            // Toggle the sidebar
             this.toggleSidebar();
+
+            // Re-render list to ensure blue dots are visible
+            this.renderList();
         });
 
         // Assemble the dialog
@@ -465,7 +678,29 @@ export class LoraPickerDialog {
 
         // Add to body
         document.body.appendChild(this.element);
-        
+
+        // Position preview area relative to dialog
+        this.updatePreviewPosition();
+
+        // Wait for preview availability to load, then render the list
+        this.loadPreviewAvailability().then(() => {
+            // Now render the list with preview data available
+            this.renderList();
+
+            // Ensure sidebar is in the correct initial state based on saved preference
+            this.toggleSidebar();
+
+            // Restore preview panel visibility if eye refresh state is on
+            if (this.eyeRefreshState) {
+                // Make sure the preview area is in the correct initial state
+                // It will be shown on first hover, but ensure it's properly positioned
+                if (this.previewArea) {
+                    // Start hidden, will show on hover
+                    this.previewArea.classList.remove("visible");
+                }
+            }
+        });
+
         // Focus on the search input automatically
         setTimeout(() => {
             const searchInput = this.element.querySelector("input[type=text]");
@@ -485,16 +720,78 @@ export class LoraPickerDialog {
         document.addEventListener('keydown', this.keydownHandler);
     }
 
+    createPreviewArea() {
+        // Create preview area container
+        this.previewArea = document.createElement("div");
+        this.previewArea.className = "lora-picker-preview-area";
+
+        // Create preview images container (will hold multiple images)
+        this.previewImagesContainer = document.createElement("div");
+        this.previewImagesContainer.className = "lora-picker-preview-images-container";
+        this.previewImagesContainer.style.display = "none";
+
+        // Create preview info container
+        const previewInfo = document.createElement("div");
+        previewInfo.className = "lora-picker-preview-info";
+
+        // Create preview name element
+        this.previewName = document.createElement("div");
+        this.previewName.className = "lora-picker-preview-name";
+
+        // Create preview status element
+        this.previewStatus = document.createElement("div");
+        this.previewStatus.className = "lora-picker-preview-status";
+
+        // Assemble preview area
+        previewInfo.appendChild(this.previewName);
+        previewInfo.appendChild(this.previewStatus);
+        this.previewArea.appendChild(this.previewImagesContainer);
+        this.previewArea.appendChild(previewInfo);
+
+        // Add to document body (not dialog element) to avoid overflow constraints
+        document.body.appendChild(this.previewArea);
+    }
+
     createHeader() {
         const header = document.createElement("div");
         header.className = "lora-picker-header";
+
+        // Search input container
+        const searchContainer = document.createElement("div");
+        searchContainer.className = "lora-picker-search-container";
 
         // Search input
         const searchInput = document.createElement("input");
         searchInput.type = "text";
         searchInput.placeholder = "Search (multiple words supported)...";
         searchInput.addEventListener("input", () => this.renderList());
-        header.appendChild(searchInput);
+
+        // Clear button
+        const clearButton = document.createElement("button");
+        clearButton.className = "lora-picker-clear-button";
+        clearButton.textContent = "✕";
+        clearButton.type = "button";
+        clearButton.title = "Clear search";
+
+        // Add click handler to clear button
+        clearButton.addEventListener("click", () => {
+            searchInput.value = "";
+            searchInput.focus();
+            this.renderList();
+        });
+
+        // Only show clear button when there's text
+        searchInput.addEventListener("input", () => {
+            clearButton.style.display = searchInput.value ? "flex" : "none";
+            this.renderList();
+        });
+
+        // Initially hide clear button
+        clearButton.style.display = "none";
+
+        searchContainer.appendChild(searchInput);
+        searchContainer.appendChild(clearButton);
+        header.appendChild(searchContainer);
 
         // Sort dropdown
         const sortDropdown = document.createElement("select");
@@ -543,6 +840,47 @@ export class LoraPickerDialog {
         
         header.appendChild(refreshContainer);
 
+        // Eye refresh button
+        const eyeRefreshContainer = document.createElement("div");
+        eyeRefreshContainer.style.display = "flex";
+        eyeRefreshContainer.style.alignItems = "center";
+        eyeRefreshContainer.style.gap = "5px";
+        eyeRefreshContainer.style.cursor = "pointer";
+        eyeRefreshContainer.style.margin = "0 10px";
+        eyeRefreshContainer.style.padding = "4px 8px";
+        eyeRefreshContainer.style.borderRadius = "4px";
+        eyeRefreshContainer.style.backgroundColor = this.eyeRefreshState ? "#2a2a2a" : "#1a1a1a";
+        eyeRefreshContainer.style.userSelect = "none";
+        eyeRefreshContainer.title = "Eye Refresh Toggle";
+
+        const eyeRefreshIcon = document.createElement("span");
+        eyeRefreshIcon.textContent = "👀";
+        eyeRefreshIcon.style.fontSize = "14px";
+        eyeRefreshIcon.style.color = this.eyeRefreshState ? "#4488bb" : "#aaa";
+        eyeRefreshIcon.style.userSelect = "none";
+
+        eyeRefreshContainer.appendChild(eyeRefreshIcon);
+
+        eyeRefreshContainer.addEventListener("click", () => {
+            this.eyeRefreshState = !this.eyeRefreshState;
+            eyeRefreshIcon.style.color = this.eyeRefreshState ? "#4488bb" : "#aaa";
+            eyeRefreshContainer.style.backgroundColor = this.eyeRefreshState ? "#2a2a2a" : "#1a1a1a";
+            // Save all UI state to both localStorage and workflow
+            saveAllUIState(this);
+
+            // Hide preview if turning off
+            if (!this.eyeRefreshState) {
+                this.hidePreview();
+            }
+
+            // Call the refresh callback when toggled on
+            if (this.eyeRefreshState && this.refreshCallback) {
+                this.refreshCallback();
+            }
+        });
+
+        header.appendChild(eyeRefreshContainer);
+
         // Folders button
         const foldersContainer = document.createElement("div");
         foldersContainer.style.display = "flex";
@@ -555,7 +893,7 @@ export class LoraPickerDialog {
         foldersContainer.style.backgroundColor = this.options.foldersVisible ? "#2a2a2a" : "#1a1a1a";
         foldersContainer.style.userSelect = "none";
         foldersContainer.style.position = "relative";
-        
+
         const foldersText = document.createElement("span");
         foldersText.textContent = "Folders";
         foldersText.style.color = this.options.foldersVisible ? "#4488bb" : "#aaa";
@@ -572,7 +910,7 @@ export class LoraPickerDialog {
         indicatorLine.style.background = "linear-gradient(to right, transparent 0%, rgba(68, 136, 187, 0.2) 10%, rgba(68, 136, 187, 0.5) 20%, rgba(68, 136, 187, 0.8) 30%, #4488bb 40%, #4488bb 60%, rgba(68, 136, 187, 0.8) 70%, rgba(68, 136, 187, 0.5) 80%, rgba(68, 136, 187, 0.2) 90%, transparent 100%)";
         indicatorLine.style.borderRadius = "0.5px";
         indicatorLine.style.display = (this.selectedFolder && this.selectedFolder !== "root" && !this.options.foldersVisible) ? "block" : "none";
-        
+
         foldersContainer.appendChild(foldersText);
         foldersContainer.appendChild(indicatorLine);
         
@@ -582,9 +920,11 @@ export class LoraPickerDialog {
             foldersContainer.style.backgroundColor = this.options.foldersVisible ? "#2a2a2a" : "#1a1a1a";
             // Update indicator line visibility
             indicatorLine.style.display = (this.selectedFolder && this.selectedFolder !== "root" && !this.options.foldersVisible) ? "block" : "none";
-            // Save to persistence
-            saveFoldersVisible(this.options.foldersVisible);
+            // Save all UI state to both localStorage and workflow
+            saveAllUIState(this);
             this.toggleSidebar();
+            // Re-render list to ensure blue dots are visible
+            this.renderList();
         });
         
         header.appendChild(foldersContainer);
@@ -686,7 +1026,7 @@ export class LoraPickerDialog {
     
     renderFoldersInSidebar(container) {
         container.innerHTML = "";
-        
+
         for (const folder of this.folders) {
             const folderItem = document.createElement("div");
             folderItem.className = "lora-picker-folder-item";
@@ -751,8 +1091,8 @@ export class LoraPickerDialog {
                 prevSelected.classList.remove("selected");
             }
             this.selectedFolder = null;
-            // Save to persistence
-            saveSelectedFolder(null);
+            // Save all UI state to both localStorage and workflow
+            saveAllUIState(this);
             // Update indicator line visibility
             this.updateFolderIndicator();
             this.renderList(); // Refresh the list
@@ -776,8 +1116,8 @@ export class LoraPickerDialog {
         }
         
         this.selectedFolder = folderName;
-        // Save to persistence
-        saveSelectedFolder(folderName);
+        // Save all UI state to both localStorage and workflow
+        saveAllUIState(this);
         // Update indicator line visibility
         this.updateFolderIndicator();
         this.renderList(); // Refresh the list
@@ -831,9 +1171,31 @@ export class LoraPickerDialog {
             const nameSpan = document.createElement("span");
             nameSpan.textContent = displayName;
             nameSpan.style.userSelect = "none";
-            
-            item.appendChild(starContainer);
-            item.appendChild(nameSpan);
+
+            // Add blue dot indicator if preview is available
+            if (this.hasPreview(name)) {
+                const previewIndicator = document.createElement("div");
+                previewIndicator.className = "lora-picker-preview-indicator";
+                previewIndicator.title = "Preview image available";
+
+                item.appendChild(starContainer);
+                item.appendChild(nameSpan);
+                item.appendChild(previewIndicator);
+            } else {
+                item.appendChild(starContainer);
+                item.appendChild(nameSpan);
+            }
+
+            // Add hover event handlers for preview
+            item.addEventListener("mouseenter", () => {
+                if (this.eyeRefreshState) {
+                    this.showPreview(name);
+                }
+            });
+
+            item.addEventListener("mouseleave", () => {
+                this.hidePreview();
+            });
 
             item.addEventListener("click", () => {
                 if (this.options.callback) {
@@ -843,14 +1205,14 @@ export class LoraPickerDialog {
                 }
                 this.close();
             });
-            
+
             // Add context menu event listener
             item.addEventListener("contextmenu", (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 showLoraListContextMenu(e, name); // Use the full name for context menu
             });
-            
+
             this.list.appendChild(item);
         }
     }
@@ -949,7 +1311,7 @@ export class LoraPickerDialog {
 
     updateFolderIndicator() {
         // Find and update the indicator line in the folders button
-        const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(4)");
+        const foldersContainer = this.element.querySelector(".lora-picker-header > div:nth-child(5)");
         if (foldersContainer) {
             // Find the indicator line (it's now positioned absolutely at the bottom)
             const indicatorLine = foldersContainer.querySelector("div[style*='position: absolute']");
@@ -960,18 +1322,205 @@ export class LoraPickerDialog {
         }
     }
 
+    showPreview(loraName) {
+        // Clear any existing timeout
+        if (this.currentPreviewTimeout) {
+            clearTimeout(this.currentPreviewTimeout);
+        }
+
+        // Add a small delay to prevent flickering when quickly moving between items
+        this.currentPreviewTimeout = setTimeout(() => {
+            this.loadPreviewImage(loraName);
+        }, 200);
+    }
+
+    hidePreview() {
+        // Clear any pending preview timeout
+        if (this.currentPreviewTimeout) {
+            clearTimeout(this.currentPreviewTimeout);
+            this.currentPreviewTimeout = null;
+        }
+
+        // Hide preview area
+        if (this.previewArea) {
+            this.previewArea.classList.remove("visible");
+        }
+    }
+
+    loadPreviewImage(loraName) {
+        if (!this.previewArea || !this.previewImagesContainer || !this.previewName || !this.previewStatus) {
+            return;
+        }
+
+        // Set the LoRA name
+        this.previewName.textContent = loraName;
+        this.previewStatus.textContent = "Loading preview...";
+
+        // Show the preview area
+        this.previewArea.classList.add("visible");
+
+        // Clear any existing images
+        this.previewImagesContainer.innerHTML = "";
+        this.previewImagesContainer.style.display = "none";
+
+        // Remove extension
+        let loraPath = loraName.replace(/\.(safetensors|pt|ckpt)$/i, '');
+
+        // Parse subfolder and filename
+        let filename = loraPath;
+        let subfolder = '';
+
+        // Check if there's a subfolder path
+        const pathSeparator = loraPath.includes('/') ? '/' : '\\';
+        if (loraPath.includes(pathSeparator)) {
+            const pathParts = loraPath.split(pathSeparator);
+            filename = pathParts.pop(); // Get the last part as filename
+            subfolder = pathParts.join('/'); // Join the rest with forward slashes
+        }
+
+        // Try to load multiple preview images (_01.jpg, _02.jpg, _03.jpg)
+        this.loadMultiplePreviewImages(filename, subfolder);
+    }
+
+    async loadMultiplePreviewImages(filename, subfolder) {
+        const imagePromises = [];
+
+        // Create promises for each potential preview image
+        for (let i = 1; i <= 3; i++) {
+            const suffix = `_${String(i).padStart(2, '0')}`;
+            const promise = this.loadSinglePreviewImage(filename, subfolder, suffix);
+            imagePromises.push(promise);
+        }
+
+        try {
+            // Wait for all images to load (or fail)
+            const results = await Promise.allSettled(imagePromises);
+
+            // Filter successful results and create image elements
+            let loadedCount = 0;
+            results.forEach((result, index) => {
+                if (result.status === 'fulfilled' && result.value) {
+                    const imgElement = document.createElement("img");
+                    imgElement.className = "lora-picker-preview-image";
+                    imgElement.src = result.value;
+                    imgElement.style.display = "block";
+                    this.previewImagesContainer.appendChild(imgElement);
+                    loadedCount++;
+                }
+            });
+
+            if (loadedCount > 0) {
+                this.previewImagesContainer.style.display = "flex";
+                this.previewStatus.textContent = `Loaded ${loadedCount} preview${loadedCount > 1 ? 's' : ''}`;
+
+                // Update preview area height after images are loaded
+                setTimeout(() => this.updatePreviewPosition(), 100);
+            } else {
+                this.hidePreview();
+            }
+        } catch (error) {
+            console.error('Error loading preview images:', error);
+            this.hidePreview();
+        }
+    }
+
+    loadSinglePreviewImage(filename, subfolder, suffix) {
+        return new Promise((resolve, reject) => {
+            // Build the API URL
+            const apiUrl = new URL('/wanvid/api/loras/preview', window.location.origin);
+            apiUrl.searchParams.set('file', filename);
+            if (subfolder) {
+                apiUrl.searchParams.set('subfolder', subfolder);
+            }
+            if (suffix) {
+                apiUrl.searchParams.set('suffix', suffix);
+            }
+
+            const imagePath = apiUrl.pathname + apiUrl.search;
+
+            // Create a new image object to test loading
+            const testImage = new Image();
+
+            testImage.onload = () => {
+                resolve(imagePath);
+            };
+
+            testImage.onerror = () => {
+                reject(new Error(`Failed to load image: ${imagePath}`));
+            };
+
+            // Start loading the image
+            testImage.src = imagePath;
+        });
+    }
+
+    async loadPreviewAvailability() {
+        try {
+            const response = await fetch('/wanvid/api/loras/previews');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 200 && data.previews) {
+                    this.previewAvailabilityCache.clear();
+                    data.previews.forEach(preview => {
+                        this.previewAvailabilityCache.add(preview.lora);
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('[Preview] Error loading preview availability:', error);
+        }
+    }
+
+    hasPreview(loraName) {
+        return this.previewAvailabilityCache.has(loraName);
+    }
+
+    
     close() {
+        saveAllUIState(this);
+
+        // Clear any pending preview timeout
+        if (this.currentPreviewTimeout) {
+            clearTimeout(this.currentPreviewTimeout);
+            this.currentPreviewTimeout = null;
+        }
+
         if (this.element) {
             this.element.remove();
         }
         if (this.overlay) {
             this.overlay.remove();
         }
+        // Remove preview area when dialog closes
+        if (this.previewArea) {
+            this.previewArea.remove();
+        }
         if (this.keydownHandler) {
             document.removeEventListener('keydown', this.keydownHandler);
         }
     }
-    
+
+    updatePreviewPosition() {
+        if (this.previewArea && this.element) {
+            const dialogRect = this.element.getBoundingClientRect();
+            // Position preview area to align with dialog's right edge
+            this.previewArea.style.top = `${dialogRect.top + 10}px`; // +10 for dialog padding
+            // Let height be determined by content
+            this.previewArea.style.minHeight = 'auto';
+            this.previewArea.style.right = `${window.innerWidth - dialogRect.right}px`;
+
+            // Set height based on actual content, not scrollHeight to avoid cumulative growth
+            if (this.previewArea.classList.contains('visible')) {
+                // Reset height to auto first to get natural content height
+                this.previewArea.style.height = 'auto';
+
+                // Get the natural content height and add 50px
+                const contentHeight = this.previewArea.offsetHeight;
+                this.previewArea.style.height = `${contentHeight + 50}px`;
+            }
+        }
+    }
+
     updateLoras(newLoras) {
         // Filter out any "None" entries from the new loras list
         this.loras = (newLoras || []).filter(l => {

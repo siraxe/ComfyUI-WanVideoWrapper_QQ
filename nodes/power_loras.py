@@ -140,7 +140,9 @@ class WanVideoPowerLoraLoader:
                 "prev_lora": ("WANVIDLORA", {"default": None, "tooltip": "For loading multiple LoRAs"}),
                 "blocks": ("SELECTEDBLOCKS", {"tooltip": "Block selection for lora application"}),
             }),
-            "hidden": {},
+            "hidden": {
+                "ui_state": ("STRING", {"default": "{}"}),
+            },
         }
 
     RETURN_TYPES = ("WANVIDLORA", "WANVIDLORA")
@@ -308,7 +310,9 @@ class PowerLoraLoaderV2:
                 "model_low": ("MODEL",),
                 "clip": ("CLIP",),
             }),
-            "hidden": {},
+            "hidden": {
+                "ui_state": ("STRING", {"default": "{}"}),
+            },
         }
 
     RETURN_TYPES = ("MODEL", "MODEL", "CLIP")

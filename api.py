@@ -63,9 +63,10 @@ async def save_ref_image(request):
         rgb_img.save(ref_image_path, format='JPEG', quality=95)
         
         return web.json_response({"success": True, "path": ref_image_path, "message": "Reference image saved successfully"})
-        
+
     except Exception as e:
         print(f"Error saving ref image: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
+

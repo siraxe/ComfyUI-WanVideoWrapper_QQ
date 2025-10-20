@@ -4,6 +4,7 @@ import { app } from '../../../scripts/app.js';
 const DRIVEN_DEFAULTS = { driver: "", rotate: 0, d_scale: 1.0 };
 const EASING_DEFAULTS = { path: "each", strength: 1.0, acceleration: 0.00 };
 const SCALE_DEFAULT = 1.00;
+const SELECTED_FOLDER_DEFAULT = null;
 
 
 // == DRIVEN CONFIG PERSISTENCE ---
@@ -183,12 +184,41 @@ export function updateScaleValue(widget, value) {
     if (typeof value !== 'number' || isNaN(value)) {
         value = SCALE_DEFAULT;
     }
-    
+
     // Clamp to valid range
     value = Math.max(0.01, Math.min(8.00, value));
-    
+
     // Update the widget value
     widget.value.scale = value;
+
+    if (app.graph) {
+        app.graph.setDirtyCanvas(true, true);
+    }
+}
+
+
+// == SELECTED FOLDER PERSISTENCE ==
+
+/**
+ * Initializes the SELECTED FOLDER configuration on a widget's value object.
+ * @param {object} widgetValue The widget.value object to initialize.
+ * @param {object} loadedValue The raw `v` object from the widget's `set value(v)` setter.
+ */
+export function initializeSelectedFolderConfig(widgetValue, loadedValue = null) {
+    // Ensure selectedFolder exists, using loaded data or default
+    if (widgetValue.selectedFolder === undefined) {
+        widgetValue.selectedFolder = loadedValue?.selectedFolder !== undefined ? loadedValue.selectedFolder : SELECTED_FOLDER_DEFAULT;
+    }
+}
+
+/**
+ * Updates the selected folder value for a widget.
+ * @param {object} widget The widget instance.
+ * @param {string|null} value The new selected folder value.
+ */
+export function updateSelectedFolderValue(widget, value) {
+    // Update the widget value
+    widget.value.selectedFolder = value;
 
     if (app.graph) {
         app.graph.setDirtyCanvas(true, true);

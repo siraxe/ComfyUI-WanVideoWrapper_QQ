@@ -13,15 +13,15 @@ class RgthreeApi {
         if (baseUrlArg) {
             baseUrl = baseUrlArg;
         }
-        else if (window.location.pathname.includes("/rgthree/")) {
-            const parts = (_a = window.location.pathname.split("/rgthree/")[1]) === null || _a === void 0 ? void 0 : _a.split("/");
+        else if (window.location.pathname.includes("/wanvid/")) {
+            const parts = (_a = window.location.pathname.split("/wanvid/")[1]) === null || _a === void 0 ? void 0 : _a.split("/");
             if (parts && parts.length) {
-                baseUrl = parts.map(() => "../").join("") + "rgthree/api";
+                baseUrl = parts.map(() => "../").join("") + "wanvid/api";
             }
         }
-        this.baseUrl = baseUrl || "./rgthree/api";
-        const comfyBasePathname = location.pathname.includes("/rgthree/")
-            ? location.pathname.split("rgthree/")[0]
+        this.baseUrl = baseUrl || "./wanvid/api";
+        const comfyBasePathname = location.pathname.includes("/wanvid/")
+            ? location.pathname.split("wanvid/")[0]
             : location.pathname;
         this.comfyBaseUrl = comfyBasePathname.split("/").slice(0, -1).join("/");
     }
@@ -77,42 +77,69 @@ class RgthreeApi {
         return this.getModelsInfo({ type: "checkpoints", ...options });
     }
     async refreshModelsInfo(options) {
-        var _a;
-        const params = new URLSearchParams();
-        if ((_a = options.files) === null || _a === void 0 ? void 0 : _a.length) {
-            params.set("files", options.files.join(","));
+        // Always require files parameter - no bulk refresh allowed
+        if (!options.files || !options.files.length) {
+            throw new Error('refreshModelsInfo requires files parameter - bulk refresh is not supported');
         }
+
+        const params = new URLSearchParams();
+        params.set("files", options.files.join(","));
+
         const path = `/${options.type}/info/refresh?` + params.toString();
         const infos = await this.fetchApiJsonOrNull(path);
         return infos;
     }
-    async refreshLorasInfo(options = {}) {
-        // First clear the promise cache
-        this.getLorasPromise = null;
-        // Then refresh the models info
-        const result = await this.refreshModelsInfo({ type: "loras", ...options });
-        // Finally, force a refresh of the loras list with cache busting
-        await this.getLoras(true);
+
+    // Single file refresh functions - no bulk operations
+    async refreshSingleLoraInfo(file) {
+        if (!file) {
+            throw new Error('refreshSingleLoraInfo requires file parameter');
+        }
+
+        const result = await this.refreshModelsInfo({ type: "loras", files: [file] });
+
+        // Clear the specific file from cache
+        this.getLorasPromise = null; // Force refresh of list
+
         return result;
     }
-    async refreshCheckpointsInfo(options = {}) {
-        return this.refreshModelsInfo({ type: "checkpoints", ...options });
+
+    async refreshSingleCheckpointInfo(file) {
+        if (!file) {
+            throw new Error('refreshSingleCheckpointInfo requires file parameter');
+        }
+
+        return this.refreshModelsInfo({ type: "checkpoints", files: [file] });
     }
     async clearModelsInfo(options) {
-        var _a;
-        const params = new URLSearchParams();
-        if ((_a = options.files) === null || _a === void 0 ? void 0 : _a.length) {
-            params.set("files", options.files.join(","));
+        // Always require files parameter - no bulk clearing allowed
+        if (!options.files || !options.files.length) {
+            throw new Error('clearModelsInfo requires files parameter - bulk clearing is not supported');
         }
+
+        const params = new URLSearchParams();
+        params.set("files", options.files.join(","));
+
         const path = `/${options.type}/info/clear?` + params.toString();
         await this.fetchApiJsonOrNull(path);
         return;
     }
-    async clearLorasInfo(options = {}) {
-        return this.clearModelsInfo({ type: "loras", ...options });
+
+    // Single file clear functions - no bulk operations
+    async clearSingleLoraInfo(file) {
+        if (!file) {
+            throw new Error('clearSingleLoraInfo requires file parameter');
+        }
+
+        return this.clearModelsInfo({ type: "loras", files: [file] });
     }
-    async clearCheckpointsInfo(options = {}) {
-        return this.clearModelsInfo({ type: "checkpoints", ...options });
+
+    async clearSingleCheckpointInfo(file) {
+        if (!file) {
+            throw new Error('clearSingleCheckpointInfo requires file parameter');
+        }
+
+        return this.clearModelsInfo({ type: "checkpoints", files: [file] });
     }
     async saveModelInfo(type, file, data) {
         const body = new FormData();

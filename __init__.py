@@ -23,6 +23,7 @@ from .nodes.cache_samples import *
 
 # Import API endpoints to register routes
 from . import api
+from .utility.rgthree_api import routes_model_info
 
 NODE_CONFIG = {}
 

@@ -1,6 +1,7 @@
 
 import { app } from "../../../scripts/app.js";
-import { rgthreeApi } from "./rgthree_api.js";
+import { rgthree } from "../rgthree/common/rgthree.js";
+import { rgthreeApi as wanvidApi } from "./rgthree_api.js";
 import { RgthreeBetterButtonWidget, RgthreeDividerWidget, CombinedOptionsWidget, PowerLoraLoaderHeaderWidget, PowerLoraLoaderWidget } from "./widgets.js";
 import { LoraPickerDialog } from "./lora_picker_dialog.js";
 import { getLoraSlotInPosition, getLoraSlotMenuOptions } from "./lora_context_menu.js";
@@ -26,7 +27,7 @@ async function getLoras(forceRefresh = false) {
     
     try {
         // Use rgthreeApi with forceRefresh parameter
-        const lorasData = await rgthreeApi.getLoras(forceRefresh);
+        const lorasData = await wanvidApi.getLoras(forceRefresh);
         // Convert rgthreeApi format to our expected format
         lorasCache = lorasData.map(lora => {
             if (typeof lora === 'string') {
@@ -59,10 +60,11 @@ function loadFavorites() {
     return favorites !== null ? JSON.parse(favorites) : [];
 }
 
-function showLoraPicker(event, callback) {
+function showLoraPicker(event, callback, node = null) {
     getLoras().then(loras => {
         const savedFavorites = loadFavorites();
         const dialog = new LoraPickerDialog(loras, {
+            parentNode: node,
             callback: callback,
             sort: "Latest",
             favorites: savedFavorites,
@@ -83,13 +85,9 @@ function showLoraPicker(event, callback) {
                 // Re-render the list to update star colors
                 dialog.renderList();
             },
-            foldersVisible: false,
             refreshCallback: () => {
-                rgthreeApi.refreshLorasInfo().then(() => {
-                    getLoras(true).then(newLoras => {
-                        dialog.updateLoras(newLoras);
-                    });
-                });
+                // Bulk refresh removed - refresh individual LoRAs through their dialogs instead
+                console.log('[WanVideoPowerLoraLoader] Individual LoRA refresh available in LoRA info dialog');
             }
         });
         dialog.show();
@@ -159,7 +157,15 @@ app.registerExtension({
                         }
                     }
                 });
-            };
+
+                if (this.properties.uiState) {
+                    const uiStateWidget = this.widgets.find(w => w.name === "pll_ui_state");
+                    if (uiStateWidget) {
+                        uiStateWidget.value = this.properties.uiState;
+                    }
+                }
+
+              };
 
             nodeType.prototype.addNewLoraWidget = function () {
                 this.loraWidgetsCounter++;
@@ -182,8 +188,13 @@ app.registerExtension({
                         if (lora) {
                             this.addNewLoraWidget().setLora(lora);
                         }
-                    });
+                    }, node);
                 }));
+
+                // Add hidden widget for UI state persistence
+                const uiStateWidget = this.addWidget("string", "pll_ui_state", "{}", () => {},
+                    { serialize: true });
+                uiStateWidget.type = "hidden";
             };
 
             nodeType.prototype.allLorasState = function() {
@@ -272,6 +283,41 @@ app.registerExtension({
             nodeType.prototype.getSlotInPosition = getLoraSlotInPosition;
             nodeType.prototype.getSlotMenuOptions = getLoraSlotMenuOptions;
 
+            const onSerialize = nodeType.prototype.onSerialize;
+            nodeType.prototype.onSerialize = function(o) {
+                onSerialize?.apply(this, arguments);
+
+                let uiState = null;
+                const uiStateWidget = this.widgets.find(w => w.name === "pll_ui_state");
+
+                if (uiStateWidget && uiStateWidget.value) {
+                    try {
+                        uiState = JSON.parse(uiStateWidget.value);
+                    } catch (e) {
+                        console.warn("[WanVideoPowerLoraLoader] Failed to parse existing widget value:", e);
+                    }
+                }
+
+                if (!uiState) {
+                    const foldersVisible = localStorage.getItem("wanVideoPowerLoraLoader.foldersVisible");
+                    const eyeRefreshState = localStorage.getItem("wanVideoPowerLoraLoader.eyeRefreshState");
+                    const selectedFolder = localStorage.getItem("wanVideoPowerLoraLoader.selectedFolder");
+
+                    uiState = {
+                        foldersVisible: foldersVisible ? JSON.parse(foldersVisible) : false,
+                        eyeRefreshState: eyeRefreshState ? JSON.parse(eyeRefreshState) : false,
+                        selectedFolder: selectedFolder ? JSON.parse(selectedFolder) : null,
+                    };
+                }
+
+                this.properties.uiState = JSON.stringify(uiState);
+
+                if (uiStateWidget) {
+                    uiStateWidget.value = JSON.stringify(uiState);
+                }
+            };
+
+
             // Pre-load loras
             getLoras().then(loras => {
                 nodeType.prototype.lorasCache = loras;
@@ -279,52 +325,53 @@ app.registerExtension({
             
             // Add refreshComboInNode method to handle R key press for reloading definitions
             nodeType.prototype.refreshComboInNode = function(defs) {
-                // Use rgthreeApi to refresh the LoRA list
-                rgthreeApi.refreshLorasInfo().then(() => {
-                    // Clear the cache and force refresh
-                    lorasCache = null;
-                    localStorage.removeItem("wanVideoPowerLoraLoader.lorasCache");
+                // Use wanvidApi to refresh the LoRA list
+                // Bulk refresh removed - just clear cache and refresh list
+                lorasCache = null;
+                localStorage.removeItem("wanVideoPowerLoraLoader.lorasCache");
 
                     // Fetch fresh loras and update cache
-                    getLoras(true).then((lorasDetails) => {
+                getLoras(true).then((lorasDetails) => {
                         nodeType.prototype.lorasCache = lorasDetails;
 
                         // Update all nodes of this type
-                        app.graph._nodes.forEach(node => {
-                            if (node.type === "WanVideoPowerLoraLoader") {
-                                // Update any existing widgets that might need the fresh data
-                                for (const widget of node.widgets || []) {
-                                    if (widget.name?.startsWith("lora_")) {
-                                        // Update the widget's parent reference to this node
-                                        widget.parent = node;
+                    app.graph._nodes.forEach(node => {
+                        if (node.type === "WanVideoPowerLoraLoader") {
+                            // Update any existing widgets that might need the fresh data
+                            for (const widget of node.widgets || []) {
+                                if (widget.name?.startsWith("lora_")) {
+                                    // Update the widget's parent reference to this node
+                                    widget.parent = node;
 
-                                        // Refresh low variant detection for existing LoRAs with new cache
-                                        if (widget.value?.lora && widget.value.lora !== "None") {
-                                            const oldIsLow = widget.value.is_low;
-                                            const oldVariantName = widget.value.low_variant_name;
+                                    // Refresh low variant detection for existing LoRAs with new cache
+                                    if (widget.value?.lora && widget.value.lora !== "None") {
+                                        const oldIsLow = widget.value.is_low;
+                                        const oldVariantName = widget.value.low_variant_name;
 
-                                            // Re-run the low variant check with updated cache
-                                            widget.checkLowLoraVariant(widget.value.lora);
+                                        // Re-run the low variant check with updated cache
+                                        widget.checkLowLoraVariant(widget.value.lora);
 
-                                            // Log changes in low variant detection
-                                            if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
-                                                console.log(`[WanVideoPowerLoraLoader] Low variant status changed for '${widget.value.lora}': ` +
-                                                          `${oldIsLow} -> ${widget.value.is_low}, ` +
-                                                          `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
-                                            }
+                                        // Log changes in low variant detection
+                                        if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
+                                            console.log(`[WanVideoPowerLoraLoader] Low variant status changed for '${widget.value.lora}': ` +
+                                                      `${oldIsLow} -> ${widget.value.is_low}, ` +
+                                                      `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
                                         }
                                     }
-                                }
 
-                                // Trigger a redraw to update the green low icons
-                                node.setDirtyCanvas(true, true);
+                                    // Trigger a value change to update the UI
+                                    widget.callback(widget.value);
+                                }
                             }
-                        });
-                    }).catch(error => {
-                        console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA cache:', error);
+
+                            // Trigger a redraw to update the green low icons
+                            node.setDirtyCanvas(true, true);
+                        }
                     });
+
+                    console.log('[WanVideoPowerLoraLoader] LoRA definitions refreshed - individual LoRA info available in dialogs');
                 }).catch(error => {
-                    console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA info:', error);
+                    console.error('[WanVideoPowerLoraLoader] Error refreshing LoRA list:', error);
                 });
             };
         }

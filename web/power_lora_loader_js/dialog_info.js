@@ -3,32 +3,7 @@ import { createElement as $el, empty, appendChildren, getClosestOrSelf, query, q
 import { logoCivitai, link, pencilColored, diskColored, dotdotdot } from "./svgs.js";
 import { LORA_INFO_SERVICE } from "./model_info_service.js";
 import { generateId, injectCss } from "./shared_utils.js";
-
-// Simplified rgthree object for WanVideo
-const rgthree = {
-    showMessage: function(options) {
-        // Simple toast message
-        const toast = document.createElement('div');
-        toast.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: #333;
-            color: white;
-            padding: 12px 20px;
-            border-radius: 4px;
-            z-index: 10000;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        `;
-        toast.textContent = options.message;
-        document.body.appendChild(toast);
-
-        setTimeout(() => {
-            document.body.removeChild(toast);
-        }, options.timeout || 3000);
-    },
-    isDevMode: () => false
-};
+import { rgthree } from "../rgthree/common/rgthree.js";
 
 class WanInfoDialog extends WanDialog {
     constructor(file) {
@@ -492,14 +467,45 @@ class WanInfoDialog extends WanDialog {
                 this.modelInfo = await this.refreshModelInfo(info.file);
                 this.setContent(this.getInfoContent());
                 this.setTitle(((_a = this.modelInfo) === null || _a === void 0 ? void 0 : _a["name"]) || ((_b = this.modelInfo) === null || _b === void 0 ? void 0 : _b["file"]) || "Unknown");
-                
-                // Show success message
-                rgthree.showMessage({
-                    id: "refresh-info-" + generateId(4),
-                    type: "success",
-                    message: "LoRA information refreshed successfully",
-                    timeout: 3000,
-                });
+
+                // Generate preview image after successful refresh if we have image data
+                if (this.modelInfo && this.modelInfo.images && this.modelInfo.images.length > 0) {
+                    try {
+                        // Extract LoRA name from file path
+                        const loraName = info.file.replace(/\.[^/.]+$/, ""); // Remove extension
+                        const loraPath = info.file.includes('/') ? info.file.substring(0, info.file.lastIndexOf('/')) : '';
+
+                        // Import and use the preview generation function
+                        const { generatePreviewFromFirstImage } = await import('./image_utils.js');
+                        const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath);
+                        console.log(`[DialogInfo] Preview image generated after refresh for ${loraName}:`, previewResult);
+
+                        // Add to success message
+                        rgthree.showMessage({
+                            id: "refresh-info-" + generateId(4),
+                            type: "success",
+                            message: "LoRA information refreshed successfully (preview image generated)",
+                            timeout: 3000,
+                        });
+                    } catch (previewError) {
+                        console.warn(`[DialogInfo] Failed to generate preview image for ${info.file}:`, previewError);
+                        // Still show success message for the refresh itself
+                        rgthree.showMessage({
+                            id: "refresh-info-" + generateId(4),
+                            type: "success",
+                            message: "LoRA information refreshed successfully",
+                            timeout: 3000,
+                        });
+                    }
+                } else {
+                    // Show success message
+                    rgthree.showMessage({
+                        id: "refresh-info-" + generateId(4),
+                        type: "success",
+                        message: "LoRA information refreshed successfully",
+                        timeout: 3000,
+                    });
+                }
             } catch (error) {
                 console.error("Error refreshing LoRA info:", error);
                 
@@ -516,6 +522,22 @@ class WanInfoDialog extends WanDialog {
             this.modelInfo = await this.refreshModelInfo(info.file);
             this.setContent(this.getInfoContent());
             this.setTitle(((_a = this.modelInfo) === null || _a === void 0 ? void 0 : _a["name"]) || ((_b = this.modelInfo) === null || _b === void 0 ? void 0 : _b["file"]) || "Unknown");
+
+            // Generate preview image after successful Civitai fetch if we have image data
+            if (this.modelInfo && this.modelInfo.images && this.modelInfo.images.length > 0) {
+                try {
+                    // Extract LoRA name from file path
+                    const loraName = info.file.replace(/\.[^/.]+$/, ""); // Remove extension
+                    const loraPath = info.file.includes('/') ? info.file.substring(0, info.file.lastIndexOf('/')) : '';
+
+                    // Import and use the preview generation function
+                    const { generatePreviewFromFirstImage } = await import('./image_utils.js');
+                    const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath);
+                    console.log(`[DialogInfo] Preview image generated after Civitai fetch for ${loraName}:`, previewResult);
+                } catch (previewError) {
+                    console.warn(`[DialogInfo] Failed to generate preview image for ${info.file}:`, previewError);
+                }
+            }
         }
         else if (action === "copy-positive") {
             // Get the positive prompt from the data attribute
@@ -730,7 +752,7 @@ function saveEditableRow(info, tr, saving = true) {
             }
             newValue = (Math.round(Number(newValue) * 100) / 100).toFixed(2);
         }
-        LORA_INFO_SERVICE.savePartialInfo(info.file, { [fieldName]: newValue });
+        LORA_INFO_SERVICE.savePartialInfo(info.file, { [fieldName]: newValue }, { generatePreview: true });
         modified = true;
     }
     tr.classList.remove("-rgthree-editing");

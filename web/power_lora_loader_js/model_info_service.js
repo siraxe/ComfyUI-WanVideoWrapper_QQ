@@ -1,5 +1,6 @@
 import { rgthreeApi } from "./rgthree_api.js";
 import { api } from "../../../scripts/api.js";
+import { generatePreviewFromFirstImage } from "./image_utils.js";
 
 class BaseModelInfoService extends EventTarget {
     constructor() {
@@ -20,13 +21,36 @@ class BaseModelInfoService extends EventTarget {
         return this.fetchInfo(file, true);
     }
     async clearFetchedInfo(file) {
-        await rgthreeApi.clearModelsInfo({ type: this.modelInfoType, files: [file] });
+        if (this.modelInfoType === 'loras') {
+            await rgthreeApi.clearSingleLoraInfo(file);
+        } else if (this.modelInfoType === 'checkpoints') {
+            await rgthreeApi.clearSingleCheckpointInfo(file);
+        }
         this.fileToInfo.delete(file);
         return null;
     }
-    async savePartialInfo(file, data) {
+    async savePartialInfo(file, data, options = {}) {
         let info = await rgthreeApi.saveModelInfo(this.modelInfoType, file, data);
         this.fileToInfo.set(file, info);
+
+        // Generate preview image for LoRAs ONLY if explicitly requested and we have image data
+        const { generatePreview = false } = options;
+
+        if (generatePreview && this.modelInfoType === 'loras' && info && info.images && info.images.length > 0) {
+            try {
+                // Extract LoRA name from file path
+                const loraName = file.replace(/\.[^/.]+$/, ""); // Remove extension
+                const loraPath = file.includes('/') ? file.substring(0, file.lastIndexOf('/')) : '';
+
+                // Generate and save preview image
+                const previewResult = await generatePreviewFromFirstImage(info, loraName, loraPath);
+                console.log(`[LoraInfoService] Preview image generated for ${loraName}:`, previewResult);
+            } catch (error) {
+                console.warn(`[LoraInfoService] Failed to generate preview image for ${file}:`, error);
+                // Don't let preview generation failure stop the save operation
+            }
+        }
+
         return info;
     }
     handleAsyncUpdate(event) {
@@ -59,7 +83,7 @@ class BaseModelInfoService extends EventTarget {
 class LoraInfoService extends BaseModelInfoService {
     constructor() {
         super(...arguments);
-        this.apiRefreshEventString = "rgthree-refreshed-loras-info";
+        this.apiRefreshEventString = "wanvid-refreshed-loras-info";
         this.modelInfoType = 'loras';
     }
 }
@@ -67,7 +91,7 @@ class LoraInfoService extends BaseModelInfoService {
 class CheckpointInfoService extends BaseModelInfoService {
     constructor() {
         super(...arguments);
-        this.apiRefreshEventString = "rgthree-refreshed-checkpoints-info";
+        this.apiRefreshEventString = "wanvid-refreshed-checkpoints-info";
         this.modelInfoType = 'checkpoints';
     }
 }

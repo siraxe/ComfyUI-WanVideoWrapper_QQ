@@ -1,5 +1,6 @@
 import { app } from "../../../scripts/app.js";
-import { rgthreeApi } from "./rgthree_api.js";
+import { rgthree } from "../rgthree/common/rgthree.js";
+import { rgthreeApi as wanvidApi } from "./rgthree_api.js";
 import { RgthreeBetterButtonWidget, RgthreeDividerWidget, StrengthCopyWidget, PowerLoraLoaderHeaderWidget, PowerLoraLoaderWidget } from "./widgets.js";
 import { LoraPickerDialog } from "./lora_picker_dialog.js";
 import { getLoraSlotInPosition, getLoraSlotMenuOptions } from "./lora_context_menu.js";
@@ -25,7 +26,7 @@ async function getLoras(forceRefresh = false) {
     
     try {
         // Use rgthreeApi with forceRefresh parameter
-        const lorasData = await rgthreeApi.getLoras(forceRefresh);
+        const lorasData = await wanvidApi.getLoras(forceRefresh);
         // Convert rgthreeApi format to our expected format
         lorasCache = lorasData.map(lora => {
             if (typeof lora === 'string') {
@@ -58,10 +59,59 @@ function loadFavorites() {
     return favorites !== null ? JSON.parse(favorites) : [];
 }
 
-function showLoraPicker(event, callback) {
+// Functions to persist UI state
+function saveFoldersVisible(foldersVisible) {
+    localStorage.setItem("powerLoraLoaderV2.foldersVisible", JSON.stringify(foldersVisible));
+}
+
+function loadFoldersVisible() {
+    const foldersVisible = localStorage.getItem("powerLoraLoaderV2.foldersVisible");
+    return foldersVisible !== null ? JSON.parse(foldersVisible) : false;
+}
+
+function saveSelectedFolder(selectedFolder) {
+    localStorage.setItem("powerLoraLoaderV2.selectedFolder", JSON.stringify(selectedFolder));
+}
+
+function loadSelectedFolder() {
+    const selectedFolder = localStorage.getItem("powerLoraLoaderV2.selectedFolder");
+    return selectedFolder !== null ? JSON.parse(selectedFolder) : null;
+}
+
+function saveEyeRefreshState(eyeRefreshState) {
+    localStorage.setItem("powerLoraLoaderV2.eyeRefreshState", JSON.stringify(eyeRefreshState));
+}
+
+function loadEyeRefreshState() {
+    const eyeRefreshState = localStorage.getItem("powerLoraLoaderV2.eyeRefreshState");
+    return eyeRefreshState !== null ? JSON.parse(eyeRefreshState) : false;
+}
+
+function showLoraPicker(event, callback, node = null) {
     getLoras().then(loras => {
         const savedFavorites = loadFavorites();
+
+        // Load UI state from localStorage or node properties
+        let foldersVisible = loadFoldersVisible();
+        let eyeRefreshState = loadEyeRefreshState();
+        let selectedFolder = loadSelectedFolder();
+
+        if (node && node.widgets) {
+            const uiStateWidget = node.widgets.find(w => w.name === "ui_state");
+            if (uiStateWidget && uiStateWidget.value) {
+                try {
+                    const uiState = JSON.parse(uiStateWidget.value);
+                    if (uiState.foldersVisible !== undefined) foldersVisible = uiState.foldersVisible;
+                    if (uiState.eyeRefreshState !== undefined) eyeRefreshState = uiState.eyeRefreshState;
+                    if (uiState.selectedFolder !== undefined) selectedFolder = uiState.selectedFolder;
+                } catch (e) {
+                    console.warn("[PowerLoraLoaderV2] Failed to parse UI state from widget:", e);
+                }
+            }
+        }
+
         const dialog = new LoraPickerDialog(loras, {
+            parentNode: node,
             callback: callback,
             sort: "Latest",
             favorites: savedFavorites,
@@ -82,15 +132,17 @@ function showLoraPicker(event, callback) {
                 // Re-render the list to update star colors
                 dialog.renderList();
             },
-            foldersVisible: false,
+            foldersVisible: foldersVisible,
             refreshCallback: () => {
-                rgthreeApi.refreshLorasInfo().then(() => {
-                    getLoras(true).then(newLoras => {
-                        dialog.updateLoras(newLoras);
-                    });
-                });
+                // Bulk refresh removed - refresh individual LoRAs through their dialogs instead
+                console.log('[PowerLoraLoaderV2] Individual LoRA refresh available in LoRA info dialog');
             }
         });
+
+        // Initialize dialog's UI state
+        dialog.eyeRefreshState = eyeRefreshState;
+        dialog.selectedFolder = selectedFolder;
+
         dialog.show();
     });
 }
@@ -163,6 +215,36 @@ app.registerExtension({
                         }
                     }
                 });
+
+                // Restore UI state from widget if it exists
+                if (this.properties.uiState) {
+                    const uiStateWidget = this.widgets.find(w => w.name === "ui_state");
+                    if (uiStateWidget) {
+                        uiStateWidget.value = this.properties.uiState;
+                    }
+                }
+                // Also check if there's a ui_state value directly in the widget_values
+                if (info.widgets_values) {
+                    // Look for the ui_state value in the widgets_values
+                    for (let i = 0; i < info.widgets_values.length; i++) {
+                        const widgetValue = info.widgets_values[i];
+                        if (widgetValue && typeof widgetValue === 'string') {
+                            try {
+                                const parsed = JSON.parse(widgetValue);
+                                if (parsed && typeof parsed === 'object' && !parsed.lora) {
+                                    // This looks like UI state data, update the widget
+                                    const uiStateWidget = this.widgets.find(w => w.name === "ui_state");
+                                    if (uiStateWidget) {
+                                        uiStateWidget.value = widgetValue;
+                                    }
+                                    break;
+                                }
+                            } catch (e) {
+                                // Not valid JSON, skip
+                            }
+                        }
+                    }
+                }
             };
 
             nodeType.prototype.addNewLoraWidget = function () {
@@ -187,8 +269,14 @@ app.registerExtension({
                         if (lora) {
                             this.addNewLoraWidget().setLora(lora);
                         }
-                    });
+                    }, node);
                 }));
+
+                // Add hidden widget for UI state persistence
+                const uiStateWidget = this.addWidget("string", "ui_state", "{}", () => {},
+                    { serialize: true });
+                uiStateWidget.type = "hidden";
+                // Keep serialize: true to ensure UI state is saved in workflow JSON
             };
 
             nodeType.prototype.allLorasState = function() {
@@ -297,6 +385,42 @@ app.registerExtension({
                 return data;
             };
 
+            // Add onSerialize method to persist UI state
+            const onSerialize = nodeType.prototype.onSerialize;
+            nodeType.prototype.onSerialize = function(o) {
+                onSerialize?.apply(this, arguments);
+
+                let uiState = null;
+                const uiStateWidget = this.widgets.find(w => w.name === "ui_state");
+
+                if (uiStateWidget && uiStateWidget.value) {
+                    try {
+                        uiState = JSON.parse(uiStateWidget.value);
+                    } catch (e) {
+                        console.warn("[PowerLoraLoaderV2] Failed to parse existing widget value:", e);
+                    }
+                }
+
+                if (!uiState) {
+                    // Try to get from localStorage with correct keys for V2
+                    const foldersVisible = localStorage.getItem("powerLoraLoaderV2.foldersVisible");
+                    const eyeRefreshState = localStorage.getItem("powerLoraLoaderV2.eyeRefreshState");
+                    const selectedFolder = localStorage.getItem("powerLoraLoaderV2.selectedFolder");
+
+                    uiState = {
+                        foldersVisible: foldersVisible ? JSON.parse(foldersVisible) : false,
+                        eyeRefreshState: eyeRefreshState ? JSON.parse(eyeRefreshState) : false,
+                        selectedFolder: selectedFolder ? JSON.parse(selectedFolder) : null,
+                    };
+                }
+
+                this.properties.uiState = JSON.stringify(uiState);
+
+                if (uiStateWidget) {
+                    uiStateWidget.value = JSON.stringify(uiState);
+                }
+            };
+
             // Pre-load loras
             getLoras().then(loras => {
                 nodeType.prototype.lorasCache = loras;
@@ -304,52 +428,53 @@ app.registerExtension({
             
             // Add refreshComboInNode method to handle R key press for reloading definitions
             nodeType.prototype.refreshComboInNode = function(defs) {
-                // Use rgthreeApi to refresh the LoRA list
-                rgthreeApi.refreshLorasInfo().then(() => {
-                    // Clear the cache and force refresh
-                    lorasCache = null;
-                    localStorage.removeItem("powerLoraLoaderV2.lorasCache");
+                // Use wanvidApi to refresh the LoRA list
+                // Bulk refresh removed - just clear cache and refresh list
+                lorasCache = null;
+                localStorage.removeItem("powerLoraLoaderV2.lorasCache");
 
-                    // Fetch fresh loras and update cache
-                    getLoras(true).then((lorasDetails) => {
-                        nodeType.prototype.lorasCache = lorasDetails;
+                                  // Fetch fresh loras and update cache
+                getLoras(true).then((lorasDetails) => {
+                    nodeType.prototype.lorasCache = lorasDetails;
 
-                        // Update all nodes of this type
-                        app.graph._nodes.forEach(node => {
-                            if (node.type === "PowerLoraLoaderV2") {
-                                // Update any existing widgets that might need the fresh data
-                                for (const widget of node.widgets || []) {
-                                    if (widget.name?.startsWith("lora_")) {
-                                        // Update the widget's parent reference to this node
-                                        widget.parent = node;
+                    // Update all nodes of this type
+                    app.graph._nodes.forEach(node => {
+                        if (node.type === "PowerLoraLoaderV2") {
+                            // Update any existing widgets that might need the fresh data
+                            for (const widget of node.widgets || []) {
+                                if (widget.name?.startsWith("lora_")) {
+                                    // Update the widget's parent reference to this node
+                                    widget.parent = node;
 
-                                        // Refresh low variant detection for existing LoRAs with new cache
-                                        if (widget.value?.lora && widget.value.lora !== "None") {
-                                            const oldIsLow = widget.value.is_low;
-                                            const oldVariantName = widget.value.low_variant_name;
+                                    // Refresh low variant detection for existing LoRAs with new cache
+                                    if (widget.value?.lora && widget.value.lora !== "None") {
+                                        const oldIsLow = widget.value.is_low;
+                                        const oldVariantName = widget.value.low_variant_name;
 
-                                            // Re-run the low variant check with updated cache
-                                            widget.checkLowLoraVariant(widget.value.lora);
+                                        // Re-run the low variant check with updated cache
+                                        widget.checkLowLoraVariant(widget.value.lora);
 
-                                            // Log changes in low variant detection
-                                            if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
-                                                console.log(`[PowerLoraLoaderV2] Low variant status changed for '${widget.value.lora}': ` +
-                                                          `${oldIsLow} -> ${widget.value.is_low}, ` +
-                                                          `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
-                                            }
+                                        // Log changes in low variant detection
+                                        if (oldIsLow !== widget.value.is_low || oldVariantName !== widget.value.low_variant_name) {
+                                            console.log(`[PowerLoraLoaderV2] Low variant status changed for '${widget.value.lora}': ` +
+                                                      `${oldIsLow} -> ${widget.value.is_low}, ` +
+                                                      `variant: '${oldVariantName}' -> '${widget.value.low_variant_name}'`);
                                         }
                                     }
-                                }
 
-                                // Trigger a redraw to update the green low icons
-                                node.setDirtyCanvas(true, true);
+                                    // Trigger a value change to update the UI
+                                    widget.callback(widget.value);
+                                }
                             }
-                        });
-                    }).catch(error => {
-                        console.error('[PowerLoraLoaderV2] Error refreshing LoRA cache:', error);
+
+                            // Trigger a redraw to update the green low icons
+                            node.setDirtyCanvas(true, true);
+                        }
                     });
+
+                    console.log('[PowerLoraLoaderV2] LoRA definitions refreshed - individual LoRA info available in dialogs');
                 }).catch(error => {
-                    console.error('[PowerLoraLoaderV2] Error refreshing LoRA info:', error);
+                    console.error('[PowerLoraLoaderV2] Error refreshing LoRA list:', error);
                 });
             };
         }
