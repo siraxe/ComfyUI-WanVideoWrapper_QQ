@@ -8,6 +8,7 @@ from .nodes.power_loras import *
 
 from .nodes.power_spline_editor import *
 
+from .nodes.lora_extract_v2 import *
 from .nodes.draw_shapes import *
 from .nodes.draw_joints import *
 from .nodes.draw_image import *
