@@ -28,7 +28,7 @@ Documentation = "https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ/wiki"
 "Bug Tracker" = "https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "siraxe"
 DisplayName = "ComfyUI-WanVideoWrapper_QQ"
 Icon = ""
 includes = [] 
