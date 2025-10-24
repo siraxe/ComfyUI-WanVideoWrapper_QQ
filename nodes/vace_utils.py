@@ -11,6 +11,7 @@ class WanVideoVACEFrameReplace:
 Enhanced frame processing with multiple input formats:
 - Single numbers (e.g., "5"): Replace frame with gray_level color
 - Single numbers with + (e.g., "5+"): Replace frame with next replacement_image
+- Single numbers with * (e.g., "41*"): Replace frame with next replacement_image
 - Ranges (e.g., "22-26"): Replace range of frames with gray_level color (applies -1 logic)
 - Ranges with * (e.g., "*1-5" or "1-5*"): Replace start or end frame with next replacement_image and remove the rest of the frames in the range
 - a-b-c patterns: Use replacement_images if provided for middle frames
@@ -20,6 +21,13 @@ Enhanced frame processing with multiple input formats:
 - Multiple +: Use multiple + signs for gradual blending (e.g., "++a-b-c" creates 2 left duplicates)
 - Custom opacity: Add space and float value (0.0-1.0) after patterns (e.g., "a-b-c+ 0.6", "++a-b-c+ 0.8")
   to specify mask opacity for duplicated frames with gradual blending (closest=strongest, farthest=weakest)
+
+Base masks (optional):
+- Provide starting masks that will be used as the base for all frame operations
+- Automatically scaled to match image dimensions
+- Applied to corresponding frames - these masks are preserved unless overridden by replacement operations
+- Frames not explicitly replaced will keep their original masks from this input
+- If no masks provided, defaults to black masks (all frames kept)
 
 Replacement masks (optional):
 - Provide custom mask patterns instead of generated opacity values
@@ -43,8 +51,10 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
                 "mask_opacity": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
             "optional": {
+                "masks": ("MASK",),
                 "replacement_images": ("IMAGE",),
                 "replacement_masks": ("MASK",),
+
             }
         }
 
@@ -70,7 +80,7 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
         # Remove added dimensions and return
         return scaled_mask.squeeze(0).squeeze(0) if len(mask.shape) == 2 else scaled_mask.squeeze(0)
 
-    def keep_images_in_batch(self, images, indexes, gray_level, max_frames, mask_opacity, replacement_images=None, replacement_masks=None):
+    def keep_images_in_batch(self, images, indexes, gray_level, max_frames, mask_opacity, replacement_images=None, replacement_masks=None, masks=None):
         # Parse the indexes string with enhanced format support
         index_list = []
         middle_frames = []
@@ -78,6 +88,9 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
         range_to_remove = []   # New: ranges to be removed (gray masked)
         frames_to_replace_with_images = []  # New: frames to replace with images (+ suffix)
         middle_frame_duplicates = {}  # New: {frame_index: middle_frame_index} for duplicates
+
+        # Create a unified counter for replacement images
+        replacement_counter = 0
 
         if indexes.strip() != "":
             try:
@@ -182,7 +195,7 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
                                 except ValueError:
                                     continue
                         else:
-                            # Handle single number lines - check for + suffix
+                            # Handle single number lines - check for + or * suffix
                             import re
                             if '+' in line:
                                 # Single number with + suffix - for image replacement
@@ -193,8 +206,17 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
                                         frames_to_replace_with_images.append(single_frame)
                                     except ValueError:
                                         continue
+                            elif '*' in line:
+                                # Single number with * suffix - for image replacement
+                                numbers = re.findall(r'\d+', line)
+                                if numbers:
+                                    try:
+                                        single_frame = int(numbers[0]) - 1  # Convert UI frame to array index
+                                        frames_to_replace_with_images.append(single_frame)
+                                    except ValueError:
+                                        continue
                             else:
-                                # Single number without + - for removal/gray masking
+                                # Single number without + or * - for removal/gray masking
                                 numbers = re.findall(r'\d+', line)
                                 if numbers:
                                     try:
@@ -293,8 +315,19 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
         # Create gray image for replacement (using gray_level)
         replacement_image = torch.full((height, width, channels), gray_level, dtype=images.dtype)
 
-        # Create mask (black for kept frames, white for replaced frames)
-        mask = torch.ones((batch_size, height, width), dtype=torch.float32)
+        # Create mask tensor - use provided masks as starting point, otherwise default to black (kept frames)
+        if masks is not None:
+            # Use provided masks as starting point
+            mask = torch.zeros((batch_size, height, width), dtype=torch.float32)
+            # Apply provided masks to corresponding frames
+            for i in range(min(masks.shape[0], batch_size)):
+                base_mask = masks[i]
+                # Scale mask to match image dimensions
+                scaled_base_mask = self._scale_mask_to_image_dimensions(base_mask, height, width)
+                mask[i] = scaled_base_mask
+        else:
+            # Default: black masks (all frames kept) when no masks provided
+            mask = torch.zeros((batch_size, height, width), dtype=torch.float32)
 
         # Prepare replacement images if provided
         replacement_image_list = []
@@ -322,45 +355,69 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
             duplicate_frame_opacities[duplicate_frame] = opacity
 
         # Process each frame (original logic)
-        replacement_index = 0  # Shared counter for both + suffix and a-b-c middle frames
         middle_frame_images = {}  # Store middle frame images for duplicates
         middle_frame_masks = {}  # Store middle frame masks for duplicates
+
+        # No need for separate counters - we'll use position-based indexing directly
 
         for i in range(batch_size):
             if i in frames_to_remove:
                 # Replace frame with gray_level color and set mask to white (1.0)
                 output_images[i] = replacement_image
                 mask[i] = torch.ones((height, width), dtype=torch.float32)
-            elif i in frames_to_replace_with_images and replacement_image_list and replacement_index < len(replacement_image_list):
-                # Replace frame with image from + suffix
-                output_images[i] = replacement_image_list[replacement_index]
+            elif i in frames_to_replace_with_images and replacement_image_list:
+                # Calculate position in the frames_to_replace_with_images order
+                # Find position by sorting frames_to_replace_with_images and getting index
+                sorted_frames_to_replace = sorted(frames_to_replace_with_images)
+                position_in_plus_replacements = sorted_frames_to_replace.index(i)
+
+                # Use the unified replacement counter to ensure sequential assignment
+                current_replacement_index = min(replacement_counter, len(replacement_image_list) - 1)
+                output_images[i] = replacement_image_list[current_replacement_index]
+
                 # Use replacement mask if available, otherwise default to a black mask (fully visible)
-                if replacement_mask_list and replacement_index < len(replacement_mask_list):
-                    mask[i] = replacement_mask_list[replacement_index]
+                # Important: Use the same index for mask as we used for the image
+                if replacement_mask_list:
+                    current_mask_index = min(current_replacement_index, len(replacement_mask_list) - 1)
+                    mask[i] = replacement_mask_list[current_mask_index]
                 else:
                     mask[i] = torch.zeros((height, width), dtype=torch.float32)  # Default black mask
-                replacement_index += 1
-            elif i in middle_frames and replacement_image_list and replacement_index < len(replacement_image_list):
-                # Replace middle frame with replacement image if available
-                output_images[i] = replacement_image_list[replacement_index]
+
+                # Increment unified counter after using the replacement image
+                replacement_counter += 1
+
+            elif i in middle_frames and replacement_image_list:
+                # Use the unified replacement counter to ensure sequential assignment
+                current_replacement_index = min(replacement_counter, len(replacement_image_list) - 1)
+                output_images[i] = replacement_image_list[current_replacement_index]
+
                 # Use replacement mask if available, otherwise black mask (0.0)
-                if replacement_mask_list and replacement_index < len(replacement_mask_list):
-                    mask[i] = replacement_mask_list[replacement_index]
+                # Important: Use the same index for mask as we used for the image
+                if replacement_mask_list:
+                    current_mask_index = min(current_replacement_index, len(replacement_mask_list) - 1)
+                    mask[i] = replacement_mask_list[current_mask_index]
                     # Store the mask for potential duplicates
-                    middle_frame_masks[i] = replacement_mask_list[replacement_index]
+                    middle_frame_masks[i] = replacement_mask_list[current_mask_index]
                 else:
                     # Middle frames use black mask (0.0) when no replacement mask
                     mask[i] = torch.zeros((height, width), dtype=torch.float32)
                 # Store the image for potential duplicates
-                middle_frame_images[i] = replacement_image_list[replacement_index]
-                replacement_index += 1
+                middle_frame_images[i] = replacement_image_list[current_replacement_index]
+                
+                # Increment unified counter after using the replacement image
+                replacement_counter += 1
             elif i < original_batch_size and (not index_list or i in index_list):
-                # Keep the original frame and set mask to black (0.0)
-                mask[i] = torch.zeros((height, width), dtype=torch.float32)
+                # Keep the original frame - preserve the provided mask if available, otherwise set to black (0.0)
+                if masks is None or i >= masks.shape[0]:
+                    mask[i] = torch.zeros((height, width), dtype=torch.float32)
             elif i < original_batch_size:
-                # Replace original frame with gray and keep mask white (1.0)
+                # Replace original frame with gray and set mask to white (1.0)
                 output_images[i] = gray_image
-            # Extra frames (i >= original_batch_size) keep white mask (1.0) and gray content
+                mask[i] = torch.ones((height, width), dtype=torch.float32)
+            else:
+                # Extra frames (i >= original_batch_size) - handle mask properly
+                output_images[i] = gray_image
+                mask[i] = torch.ones((height, width), dtype=torch.float32)
 
         # Second pass: Apply duplicate image insertions (after all original processing is complete)
         for duplicate_frame, source_info in middle_frame_duplicates.items():
@@ -384,11 +441,15 @@ Creates a mask showing which frames were kept (black) and which were replaced (v
                     mask[duplicate_frame] = torch.full((height, width), inverted_opacity, dtype=torch.float32)
 
         # Apply mask opacity (fill masks with white) on all frames except the first and last frames
+        # and frames that are specifically for image replacement
         if mask_opacity > 0.0:
             for i in range(1, batch_size - 1):  # Skip first frame (index 0) and last frame (batch_size - 1)
-                # Fill mask with white color at specified opacity percentage
-                # Blend current mask with white (1.0) using mask_opacity as alpha
-                mask[i] = mask[i] * (1.0 - mask_opacity) + 1.0 * mask_opacity
+                # Don't apply global opacity to frames that were specifically marked for image replacement
+                # as these should keep their specific masks (or default black masks)
+                if i not in frames_to_replace_with_images and i not in middle_frames:
+                    # Fill mask with white color at specified opacity percentage
+                    # Blend current mask with white (1.0) using mask_opacity as alpha
+                    mask[i] = mask[i] * (1.0 - mask_opacity) + 1.0 * mask_opacity
 
         # Convert middle_frames list to string for output
         middle_frames_str = ','.join(map(str, middle_frames)) if middle_frames else ""
