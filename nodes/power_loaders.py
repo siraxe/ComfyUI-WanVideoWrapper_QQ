@@ -405,18 +405,10 @@ class PowerLoraLoaderV2:
                         # Only apply to model, use 0 for clip strength
                         if model is not None and strength_model is not None:
                             model, _ = LoraLoader().load_lora(model, None, lora_path, strength_model, 0)
-                        
-                        # Apply to model_low if it exists
-                        if model_low is not None and strength_model is not None:
-                            model_low, _ = LoraLoader().load_lora(model_low, None, lora_path, strength_model, 0)
                     else:
                         # Normal operation with clip provided
                         if model is not None and strength_model is not None and strength_clip is not None:
                             model, clip = LoraLoader().load_lora(model, clip, lora_path, strength_model, strength_clip)
-                        
-                        # Apply to model_low if it exists
-                        if model_low is not None and strength_model is not None and strength_clip is not None:
-                            model_low, _ = LoraLoader().load_lora(model_low, clip, lora_path, strength_model, strength_clip)
                 
                 except Exception as e:
                     print(f"[PowerLoraLoaderV2] Error loading lora '{lora_name}': {e}")
@@ -462,7 +454,25 @@ class PowerLoraLoaderV2:
                     if low_variant_filename is None:
                         print(f"[PowerLoraLoaderV2] Low variant LoRA '{low_variant_name}' not found, skipping low variant.")
                         continue
-                    
+
+                    # Apply the low variant LoRA to model_low if it exists
+                    if model_low is not None:
+                        try:
+                            # Use the low variant file path for LoRA loading
+                            low_lora_path = low_variant_filename
+
+                            # Apply the low variant LoRA to model_low
+                            if not has_clip:
+                                # No clip provided, apply only to model_low
+                                model_low, _ = LoraLoader().load_lora(model_low, None, low_lora_path, low_strength, 0)
+                            else:
+                                # Clip provided, apply to model_low with clip
+                                model_low, _ = LoraLoader().load_lora(model_low, clip, low_lora_path, low_strength, strength_clip if strength_clip is not None else 0)
+
+                            print(f"[PowerLoraLoaderV2] Applied low variant LoRA '{low_variant_name}' (strength: {low_strength}) to model_low")
+                        except Exception as e:
+                            print(f"[PowerLoraLoaderV2] Error applying low variant LoRA '{low_variant_name}' to model_low: {e}")
+
                     # Create entry for the low variant LoRA
                     low_lora_entry = {
                         "path": folder_paths.get_full_path("loras", low_variant_filename),
@@ -498,10 +508,10 @@ class PowerLoraLoaderV2:
 
         # Return different tuples based on whether clip was connected
         if not has_clip:
-            # No clip connected, only return model and model_low (like LoraLoaderModelOnly)
+            # No clip connected, return model, model_low (like LoraLoaderModelOnly)
             return (model, model_low)
         else:
-            # Clip connected, return all three outputs
+            # Clip connected, return model, model_low, and clip
             return (model, model_low, clip)
 
 class CheckpointLoader_v2:
