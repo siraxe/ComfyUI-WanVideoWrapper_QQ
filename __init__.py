@@ -10,6 +10,9 @@ from .nodes.decode_overlap import *
 from .nodes.power_spline_editor import *
 
 from .nodes.lora_extract_v2 import *
+from .nodes.lora_change import *
+from .nodes.lora_combine import *
+
 from .nodes.draw_shapes import *
 from .nodes.draw_joints import *
 from .nodes.draw_image import *
