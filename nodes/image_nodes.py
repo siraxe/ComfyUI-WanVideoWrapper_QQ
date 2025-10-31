@@ -565,9 +565,10 @@ class WanScaleAB:
     def _calculate_s1_s2(self, image_A, A2size):
         """
         Calculate s1 and s2 based on the special scaling rules.
-        
-        s1: Find the closest number to A2size that can divide the largest side of image_A fully once,
-            then adjust to be divisible by 16 (rounding up if needed)
+
+        s1: Target the largest side to be approximately A2size (rounded up to a multiple of 16),
+            regardless of how many times A2size fits into the original largest side. This ensures
+            A2size is respected as the intended output size for the larger dimension.
         s2: Proportionally scale the smallest side to match s1, then adjust to be divisible by 16 (rounding up)
         """
         # Get original dimensions
@@ -581,18 +582,10 @@ class WanScaleAB:
             largest_side = w
             smallest_side = h
         
-        # Step 1: Find s1
-        # Find how many times A2size fits into the largest side
-        times_fit = largest_side // A2size
-        if times_fit == 0:
-            times_fit = 1  # Ensure at least once
-        
-        # Calculate the closest number that could divide the largest side by A2size fully once
-        base_s1 = A2size * times_fit
-        
-        # Find the closest number to base_s1 that is divisible by 16
-        s1 = self._round_up_to_multiple(base_s1, 16)
-        
+        # Step 1: Compute s1 so that the output's largest side is ~A2size
+        # Round A2size up to the nearest multiple of 16 to satisfy model constraints
+        s1 = self._round_up_to_multiple(A2size, 16)
+
         # Step 2: Find s2
         # Calculate the proportional scaling factor
         scale_factor = s1 / largest_side
