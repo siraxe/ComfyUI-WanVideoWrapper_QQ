@@ -193,6 +193,15 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             current_width *= scale
             current_height *= scale
 
+        total_static_layers = len(static_point_layers) if static_point_layers else 0
+        aligned_static_drivers = bool(static_points_interpolated_drivers) and len(static_points_interpolated_drivers) == total_static_layers
+        first_static_driver = None
+        if static_points_interpolated_drivers:
+            for entry in static_points_interpolated_drivers:
+                if isinstance(entry, dict):
+                    first_static_driver = entry
+                    break
+
         # Draw static points (p_coordinates), optionally driven by static_points_driver_path
         # Static points are individual points that stay in one location but can be moved by driver paths
         # They differ from animated paths which contain multiple coordinate points over time
@@ -212,8 +221,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
                 # Get the driver for this layer if available
                 layer_driver_info = None
-                if static_points_use_driver and layer_idx < len(static_points_interpolated_drivers):
-                    layer_driver_info = static_points_interpolated_drivers[layer_idx]
+                if static_points_use_driver and static_points_interpolated_drivers:
+                    if layer_idx < len(static_points_interpolated_drivers):
+                        layer_driver_info = static_points_interpolated_drivers[layer_idx]
+                    if layer_driver_info is None and not aligned_static_drivers:
+                        layer_driver_info = first_static_driver
 
                 # Draw each point in this layer with the layer's driver offset applied
                 for point_idx, point in enumerate(static_points):
@@ -229,16 +241,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 frame_index, interpolated_driver, static_points_pause_frames,
                                 total_frames, driver_d_scale, frame_width, frame_height
                             )
-                    elif static_points_use_driver and static_points_interpolated_drivers and len(static_points_interpolated_drivers) > 0:
-                        # Use the first interpolated driver for all layers (legacy fallback)
-                        driver_info = static_points_interpolated_drivers[0]
-                        if driver_info and isinstance(driver_info, dict):
-                            interpolated_driver = driver_info.get('path')
-                            if interpolated_driver and len(interpolated_driver) > 0:
-                                driver_offset_x, driver_offset_y = self._calculate_driver_offset(
-                                    frame_index, interpolated_driver, static_points_pause_frames,
-                                    total_frames, DRIVER_SCALE_FACTOR, frame_width, frame_height
-                                )
 
                     try:
                         location_x = point['x'] + driver_offset_x
@@ -958,21 +960,25 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         static_points_driver_smooth = float(meta.get("static_points_driver_smooth", 0.0))
 
         # Store driver info for each static point path (for points layers)
-        static_points_driver_info_list = []
+        num_static_point_layers = len(static_point_layers)
+        static_points_driver_info_list: List[Optional[Dict[str, Any]]] = [None] * num_static_point_layers
 
         # Attempt to find a driver path inside drivers metadata if present
         if isinstance(meta.get("drivers"), dict):
             p_drivers = meta["drivers"].get("p")
             # Check if we have drivers for static points
             if isinstance(p_drivers, list) and p_drivers:
-                # Process each driver for static points
-                for driver_info in p_drivers:
-                    if isinstance(driver_info, dict) and 'path' in driver_info and isinstance(driver_info['path'], list) and driver_info['path']:
-                        # Store driver info for each static point path
-                        static_points_driver_info_list.append(driver_info)
-                        if not static_points_driver_path_raw:  # Keep the first one for backward compatibility
+                # Process each driver for static points, preserving layer order
+                for idx in range(min(num_static_point_layers, len(p_drivers))):
+                    driver_info = p_drivers[idx]
+                    if isinstance(driver_info, dict) and isinstance(driver_info.get('path'), list) and driver_info['path']:
+                        static_points_driver_info_list[idx] = driver_info
+                        if not static_points_driver_path_raw:
+                            # Keep the first one for backward compatibility
                             static_points_driver_path_raw = driver_info['path']
-                            static_points_use_driver = True
+                        static_points_use_driver = True
+                    else:
+                        static_points_driver_info_list[idx] = None
 
         # ----- Frame dimensions and scaling -----
         frame_width, frame_height = self._compute_frame_dimensions(bg_image)
@@ -989,9 +995,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         easing_strength = meta.get("easing_strengths", 1.0)
 
         # Store interpolated driver paths for each static point layer
-        static_points_interpolated_drivers = []
+        static_points_interpolated_drivers: List[Optional[Dict[str, Any]]] = []
         if static_points_use_driver and static_points_driver_info_list:
-            for driver_info in static_points_driver_info_list:
+            static_points_interpolated_drivers = [None] * len(static_points_driver_info_list)
+            for idx, driver_info in enumerate(static_points_driver_info_list):
                 if driver_info and isinstance(driver_info, dict):
                     driver_path = driver_info.get('path')
                     driver_d_scale = driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
@@ -1007,22 +1014,26 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             driver_path, total_frames, static_points_driver_smooth,
                             driver_easing_function, driver_easing_path, driver_easing_strength
                         )
-                        static_points_interpolated_drivers.append({
+                        static_points_interpolated_drivers[idx] = {
                             'path': interpolated,
                             'd_scale': driver_d_scale,
                             'easing_function': driver_easing_function,
                             'easing_path': driver_easing_path,
                             'easing_strength': driver_easing_strength
-                        })
+                        }
         elif static_points_use_driver and static_points_driver_path_processed:
             # Use the single driver for all layers (legacy mode)
-            static_points_interpolated_drivers = [{
+            legacy_driver = {
                 'path': static_points_driver_path_processed,
                 'd_scale': DRIVER_SCALE_FACTOR,  # No scaling for legacy single driver
                 'easing_function': easing_function,
                 'easing_path': easing_path,
                 'easing_strength': easing_strength
-            }]
+            }
+            if num_static_point_layers > 0:
+                static_points_interpolated_drivers = [legacy_driver.copy() for _ in range(num_static_point_layers)]
+            else:
+                static_points_interpolated_drivers = [legacy_driver]
         else:
             static_points_interpolated_drivers = []
 
@@ -1335,6 +1346,13 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         
         # Process static points (p_coordinates) - affected by static_fade_start
         if static_point_layers:
+            aligned_preview_static_drivers = bool(static_points_interpolated_drivers) and len(static_points_interpolated_drivers) == len(static_point_layers)
+            first_preview_static_driver = None
+            if static_points_interpolated_drivers:
+                for entry in static_points_interpolated_drivers:
+                    if isinstance(entry, dict):
+                        first_preview_static_driver = entry
+                        break
             try:
                 # Calculate the fade start frame by multiplying percentage by total frames
                 fade_start_frame = int(static_fade_start * total_frames) if static_fade_start > 0 else 0
@@ -1346,8 +1364,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
                     # Get the driver for this layer if available
                     layer_driver_info = None
-                    if static_points_use_driver and layer_idx < len(static_points_interpolated_drivers):
-                        layer_driver_info = static_points_interpolated_drivers[layer_idx]
+                    if static_points_use_driver and static_points_interpolated_drivers:
+                        if layer_idx < len(static_points_interpolated_drivers):
+                            layer_driver_info = static_points_interpolated_drivers[layer_idx]
+                        if layer_driver_info is None and not aligned_preview_static_drivers:
+                            layer_driver_info = first_preview_static_driver
 
                     # Process each point in this layer
                     for point_idx, point in enumerate(static_points):
@@ -1389,38 +1410,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                         # This ensures the point follows the driver path correctly
                                         driver_offset_x = (current_x - ref_x) * driver_d_scale * frame_width  # Scale by frame dimensions
                                         driver_offset_y = (current_y - ref_y) * driver_d_scale * frame_height
-                            elif static_points_use_driver and static_points_interpolated_drivers and len(static_points_interpolated_drivers) > 0:
-                                # Use the first interpolated driver for all layers (legacy mode)
-                                driver_info = static_points_interpolated_drivers[0]
-                                if driver_info and isinstance(driver_info, dict):
-                                    interpolated_driver = driver_info.get('path')
-                                    if interpolated_driver and len(interpolated_driver) > 0:
-                                        p_start_p, p_end_p = meta.get("start_p_frames", 0), meta.get("end_p_frames", 0)
-                                        # Handle dictionary case (from metadata parsing)
-                                        if isinstance(p_start_p, dict):
-                                            p_start_p = p_start_p.get("p", 0)
-                                            p_end_p = p_end_p.get("p", 0)
-                                        # Handle list case (from metadata parsing)
-                                        if isinstance(p_start_p, list):
-                                            p_start_p = p_start_p[0] if p_start_p else 0
-                                            p_end_p = p_end_p[0] if p_end_p else 0
-
-                                        if i < p_start_p:
-                                            driver_index = 0
-                                        elif i >= total_frames - p_end_p:
-                                            driver_index = len(interpolated_driver) - 1
-                                        else:
-                                            driver_index = i - p_start_p
-
-                                        if 0 <= driver_index < len(interpolated_driver):
-                                            ref_x = float(interpolated_driver[0]['x'])
-                                            ref_y = float(interpolated_driver[0]['y'])
-                                            current_x = float(interpolated_driver[driver_index]['x'])
-                                            current_y = float(interpolated_driver[driver_index]['y'])
-                                            # For p_coordinates, we need to compute the driver offset relative to the driver's first keyframe
-                                            # This ensures the point follows the driver path correctly
-                                            driver_offset_x = (current_x - ref_x) * frame_width  # Scale by frame dimensions
-                                            driver_offset_y = (current_y - ref_y) * frame_height
 
                             location_x = float(point["x"]) + driver_offset_x
                             location_y = float(point["y"]) + driver_offset_y
