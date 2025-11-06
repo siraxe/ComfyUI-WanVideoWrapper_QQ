@@ -152,7 +152,8 @@ export class TopRowWidget extends RgthreeBaseWidget {
         // Calculate component widths based on percentages (now totaling 100% of available width)
         const refreshButtonWidth = availableWidth * 0.15;
         const bgImgDropdownWidth = availableWidth * 0.15;
-        const dimensionsAreaWidth = availableWidth * 0.70;
+        const drawButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
+        const dimensionsAreaWidth = availableWidth - (refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + drawButtonWidth + spacing);
         
         // Calculate total width and starting position to center everything
         const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + dimensionsAreaWidth;
@@ -196,6 +197,40 @@ export class TopRowWidget extends RgthreeBaseWidget {
         // Combined bounds for the entire control
         this.hitAreas.bgImgAny.bounds = [posX, bgImgDropdownWidth];
         posX += bgImgDropdownWidth + spacing;
+
+        // Small Draw icon button between overlay picker and dimensions
+        const isArmed = !!(node?.editor?._handdrawActive);
+        drawWidgetButton(
+            ctx,
+            { size: [drawButtonWidth, height], pos: [posX, posY] },
+            "✏️",
+            isArmed // render as pressed/armed
+        );
+        // Add blue outline when armed to match active layer style
+        if (isArmed) {
+            // Slightly inset outline to overlay nicely
+            const pad = 0.5;
+            drawRoundedRectangle(ctx, {
+                pos: [posX + pad, posY + pad],
+                size: [drawButtonWidth - pad * 2, height - pad * 2],
+                colorBackground: 'transparent',
+                colorStroke: '#2cc6ff',
+                borderRadius: 4
+            });
+        }
+        this.hitAreas.drawButton = { bounds: [posX, drawButtonWidth], onClick: (e, p, n) => {
+            // Toggle draw mode on the editor; canvas will handle capture on mousedown
+            if (n?.editor) {
+                if (n.editor._handdrawActive) {
+                    n.editor.exitHanddrawMode?.(false);
+                } else {
+                    n.editor.enterHanddrawMode?.();
+                }
+                n.setDirtyCanvas(true, true);
+            }
+            return true;
+        }};
+        posX += drawButtonWidth + spacing;
         
         // Draw rounded area for width/height controls
         const roundedAreaX = posX;

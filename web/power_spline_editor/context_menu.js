@@ -299,6 +299,8 @@ function createTextInput(widget, configObj, field, placeholder = '') {
 // Function to display a custom HTML context menu with interactive inputs
 export function showCustomDrivenToggleMenu(event, widget, position) {
     console.log("showCustomDrivenToggleMenu called.");
+    // Stop native context menu if invoked from a right-click
+    try { event?.preventDefault?.(); event?.stopPropagation?.(); } catch {}
     // Remove any existing custom menu to prevent duplicates
     const existingMenu = document.getElementById('custom-driven-toggle-menu');
     if (existingMenu) {
@@ -385,9 +387,10 @@ export function showCustomDrivenToggleMenu(event, widget, position) {
     document.body.appendChild(menu);
     console.log("Menu appended to body, position:", position);
 
-    // Prevent menu close when interacting with inputs
+    // Prevent menu close and native context menu when interacting with menu
     menu.onclick = (e) => e.stopPropagation();
     menu.onmousedown = (e) => e.stopPropagation();
+    menu.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); };
 
     // Hide menu when clicking outside
     const hideMenu = (e) => {
@@ -400,12 +403,25 @@ export function showCustomDrivenToggleMenu(event, widget, position) {
         }
     };
 
+    // While menu is open, suppress browser context menu globally (capture)
+    const preventBrowserMenu = (e) => { e.preventDefault(); };
+
     // Add listeners after a short delay to prevent immediate closure
     setTimeout(() => {
-        document.addEventListener('click', hideMenu);
-        document.addEventListener('contextmenu', hideMenu);
-        document.addEventListener('mousedown', hideMenu);
+        document.addEventListener('click', hideMenu, true);
+        document.addEventListener('contextmenu', hideMenu, true);
+        document.addEventListener('mousedown', hideMenu, true);
+        document.addEventListener('contextmenu', preventBrowserMenu, true);
     }, 100);
+
+    // Ensure cleanup of global preventer when menu is removed
+    const observer = new MutationObserver(() => {
+        if (!document.getElementById('custom-driven-toggle-menu')) {
+            document.removeEventListener('contextmenu', preventBrowserMenu, true);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: false });
 }
 
 // Helper to create a dropdown select element
@@ -450,6 +466,92 @@ function createDropdown(options, selectedValue, widget, field, updateCallback) {
     });
 
     return select;
+}
+
+// Simple interpolation dropdown menu shown near click position
+export function showInterpolationMenu(event, widget, position) {
+    try { event?.preventDefault?.(); event?.stopPropagation?.(); } catch {}
+
+    // Remove any existing menu
+    const existing = document.getElementById('custom-interp-menu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'custom-interp-menu';
+    menu.className = 'litegraph litecontextmenu litemenubar-panel';
+    menu.style.cssText = `
+        position: absolute !important;
+        left: ${position.x}px !important;
+        top: ${position.y + 10}px !important;
+        background-color: #1a1a1a !important;
+        border: 1px solid #000 !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.8) !important;
+        z-index: 10000 !important;
+        padding: 4px !important;
+        border-radius: 0px !important;
+        min-width: 120px !important;
+        display: block !important;
+        font-family: Arial, sans-serif !important;
+        font-size: 11px !important;
+        transform: translateX(-40%) !important;
+    `;
+
+    const options = ['linear', 'cardinal', 'basis', 'points'];
+    const current = widget.value.interpolation || 'linear';
+
+    const list = document.createElement('div');
+    list.style.cssText = `
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 2px !important;
+        padding: 2px !important;
+    `;
+
+    options.forEach(opt => {
+        const item = document.createElement('div');
+        item.textContent = opt;
+        item.style.cssText = `
+            padding: 4px 6px !important;
+            cursor: pointer !important;
+            color: ${opt === current ? '#fff' : '#ddd'} !important;
+            background-color: ${opt === current ? '#333' : 'transparent'} !important;
+        `;
+        item.onmouseover = () => { item.style.backgroundColor = '#2a2a2a'; item.style.color = '#fff'; };
+        item.onmouseout = () => { item.style.backgroundColor = (opt === current ? '#333' : 'transparent'); item.style.color = (opt === current ? '#fff' : '#ddd'); };
+        item.onclick = (e) => {
+            e.stopPropagation();
+            const w = widget;
+            w.value.interpolation = opt;
+            const node = w.parent;
+            if (node?.layerManager?.getActiveWidget() === w && node.editor?.layerRenderer) {
+                node.editor.layerRenderer.render();
+            }
+            node?.setDirtyCanvas?.(true, true);
+            menu.remove();
+        };
+        list.appendChild(item);
+    });
+    menu.appendChild(list);
+    document.body.appendChild(menu);
+
+    // Prevent native context interactions inside
+    menu.onclick = (e) => e.stopPropagation();
+    menu.onmousedown = (e) => e.stopPropagation();
+    menu.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); };
+
+    const hide = (e) => {
+        if (menu && !menu.contains(e.target)) {
+            menu.remove();
+            document.removeEventListener('click', hide, true);
+            document.removeEventListener('contextmenu', hide, true);
+            document.removeEventListener('mousedown', hide, true);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('click', hide, true);
+        document.addEventListener('contextmenu', hide, true);
+        document.addEventListener('mousedown', hide, true);
+    }, 50);
 }
 
 // Helper to create static number display (non-interactive for UI-only)
@@ -627,6 +729,8 @@ export function getSlotInPosition(canvasX, canvasY) {
 // Function to display custom HTML context menu for layer actions
 export function showCustomLayerMenu(event, widget, node, position) {
     console.log("showCustomLayerMenu called.");
+    // Stop native context menu if invoked from a right-click
+    try { event?.preventDefault?.(); event?.stopPropagation?.(); } catch {}
     // Remove any existing custom menu to prevent duplicates
     const existingMenu = document.getElementById('custom-layer-menu');
     if (existingMenu) {
@@ -719,10 +823,13 @@ export function showCustomLayerMenu(event, widget, node, position) {
     // Add menu items
     menu.appendChild(createMenuItem('✏️', 'Rename', () => {
         const canvas = app.canvas;
-        canvas.prompt("Spline Name", widget.value.name || "Spline", (v) => {
+        // Ensure value container exists to avoid null access after refresh
+        if (!widget.value) widget.value = {};
+        const currentName = widget.value?.name || "Spline";
+        canvas.prompt("Spline Name", currentName, (v) => {
             const newName = v || "Spline";
             const otherSplineWidgets = node.widgets.filter(w => w !== widget && w.name?.startsWith("spline_"));
-            const existingNames = otherSplineWidgets.map(w => w.value.name);
+            const existingNames = otherSplineWidgets.map(w => w?.value?.name).filter(n => !!n);
             widget.value.name = node.generateUniqueName(newName, existingNames);
             node.setDirtyCanvas(true, true);
         });
@@ -730,10 +837,14 @@ export function showCustomLayerMenu(event, widget, node, position) {
 
     menu.appendChild(createSeparator());
 
+    // Safely read/initialize toggle state
+    const isOn = !!(widget.value && widget.value.on);
     menu.appendChild(createMenuItem(
-        widget.value.on ? '⚫' : '🟢',
-        widget.value.on ? 'Toggle Off' : 'Toggle On',
+        isOn ? '⚫' : '🟢',
+        isOn ? 'Toggle Off' : 'Toggle On',
         () => {
+            if (!widget.value) widget.value = {};
+            if (typeof widget.value.on !== 'boolean') widget.value.on = false;
             widget.value.on = !widget.value.on;
             node.setDirtyCanvas(true, true);
         }
@@ -768,30 +879,52 @@ export function showCustomLayerMenu(event, widget, node, position) {
     document.body.appendChild(menu);
     console.log("Layer menu appended to body, position:", position);
 
-    // Prevent menu close when interacting with menu
+    // Prevent menu close and native context menu when interacting with menu
     menu.onclick = (e) => e.stopPropagation();
     menu.onmousedown = (e) => e.stopPropagation();
+    menu.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); };
 
-    // Hide menu when clicking outside
+    // Hide menu when clicking outside (but ignore clicks inside LiteGraph prompt/dialogs)
     const hideMenu = (e) => {
-        if (menu && !menu.contains(e.target)) {
+        const target = e && e.target;
+        const withinDialog = target && (target.closest?.('.litegraph .dialog') || target.closest?.('.litegraph.liteprompt') || target.closest?.('.litedialog'));
+        if (withinDialog) {
+            return; // keep menu open while interacting with prompt
+        }
+        if (menu && !menu.contains(target)) {
             console.log("Hiding layer menu");
             menu.remove();
-            document.removeEventListener('click', hideMenu);
-            document.removeEventListener('contextmenu', hideMenu);
-            document.removeEventListener('mousedown', hideMenu);
+            document.removeEventListener('click', hideMenu, true);
+            document.removeEventListener('contextmenu', hideMenu, true);
+            document.removeEventListener('mousedown', hideMenu, true);
         }
     };
 
+    // While menu is open, suppress browser context menu globally (capture)
+    const preventBrowserMenu = (e) => { e.preventDefault(); };
+
     // Add listeners after a short delay to prevent immediate closure
     setTimeout(() => {
-        document.addEventListener('click', hideMenu);
-        document.addEventListener('contextmenu', hideMenu);
-        document.addEventListener('mousedown', hideMenu);
+        // Use capture so we can filter early and not propagate into generic closers
+        document.addEventListener('click', hideMenu, true);
+        document.addEventListener('contextmenu', hideMenu, true);
+        document.addEventListener('mousedown', hideMenu, true);
+        document.addEventListener('contextmenu', preventBrowserMenu, true);
     }, 100);
+
+    // Ensure cleanup of global preventer when menu is removed
+    const observer = new MutationObserver(() => {
+        if (!document.getElementById('custom-layer-menu')) {
+            document.removeEventListener('contextmenu', preventBrowserMenu, true);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: false });
 }
 
 export function getSlotMenuOptions(slot, event) {
+    // Prevent native context menu when we will show custom ones
+    try { event?.preventDefault?.(); event?.stopPropagation?.(); } catch {}
     // Check if the slot is specifically for the DRIVEN_TOGGLE
     if (slot?.output?.type === "DRIVEN_TOGGLE") {
         // Get position from canvas - LiteGraph stores the last pointer position

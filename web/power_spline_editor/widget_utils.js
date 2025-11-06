@@ -1,7 +1,7 @@
 import { app } from '../../../scripts/app.js';
 import { isLowQuality, drawTogglePart, drawNumberWidgetPart, drawRoundedRectangle, fitString, RgthreeBaseWidget } from './drawing_utils.js';
 import { initializeDrivenConfig, initializeEasingConfig, initializeScaleConfig, toggleDrivenState, prepareDrivenMenu } from './persistence.js';
-import { showCustomEasingMenu, showCustomDrivenToggleMenu } from './context_menu.js';
+import { showCustomEasingMenu, showCustomDrivenToggleMenu, showInterpolationMenu } from './context_menu.js';
 
 // === SPLINE MULTI WIDGET ===
 export class PowerSplineHeaderWidget extends RgthreeBaseWidget {
@@ -44,7 +44,7 @@ export class PowerSplineHeaderWidget extends RgthreeBaseWidget {
 
             // 2. Interpolation selector - just text, no arrows (width = 70)
             const interpTextWidth = 70;
-            ctx.fillText("Interpolation", rposX - interpTextWidth / 2, midY);
+            ctx.fillText("Type", rposX - interpTextWidth / 2, midY);
             rposX -= interpTextWidth + 10;
 
             const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
@@ -155,7 +155,12 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
 
         // Highlight if active
         if (node.layerManager && node.layerManager.getActiveWidget() === this) {
-            drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height], colorStroke: "#1f77b4", colorBackground: "#222222CC" });
+            drawRoundedRectangle(ctx, {
+                pos: [posX, posY],
+                size: [node.size[0] - margin * 2, height],
+                colorStroke: "#2cc6ff",
+                colorBackground: "#080808E6"
+            });
         } else {
             drawRoundedRectangle(ctx, { pos: [posX, posY], size: [node.size[0] - margin * 2, height], colorBackground: "#222222CC" });
         }
@@ -322,9 +327,11 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         return true;
     }
 
-    onInterpClick() {
-        // Cycle through modes
-        this.onInterpInc();
+    onInterpClick(event, pos, node) {
+        // Open dropdown menu near cursor for interpolation selection
+        const x = event?.clientX ?? 100;
+        const y = event?.clientY ?? 100;
+        showInterpolationMenu(event, this, { x, y });
         return true;
     }
 

@@ -1,5 +1,6 @@
 __pycache__/
 nodes/__pycache__/
+
 .claude
 .claude-code-router
 .env

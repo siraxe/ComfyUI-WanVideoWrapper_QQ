@@ -1,5 +1,6 @@
 import { app } from '../../../scripts/app.js';
 import { makeUUID, loadScript, create_documentation_stylesheet, RgthreeBaseWidget, DimensionsWidget, TopRowWidget, PowerSplineWidget, PowerSplineHeaderWidget, NodeSizeManager, drawWidgetButton } from './spline_utils.js';
+import { HandDrawLayerWidget, commitHanddrawPath } from './handdraw_layer.js';
 import { chainCallback, hideWidgetForGood } from './widget_utils.js';
 import SplineEditor2 from './spline_canvas.js';
 import { getSlotInPosition, getSlotMenuOptions, showCustomDrivenToggleMenu } from './context_menu.js';
@@ -24,6 +25,14 @@ async function loadImageAsBase64(url) {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
+
+            // Ensure initial overlay selection is applied on page load (handles None/A/B/C)
+            try {
+                const initBgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
+                const initBg = initBgWidget ? initBgWidget.value : "None";
+                // Defer slightly to allow editor and size to settle
+                setTimeout(() => this.updateBackgroundImage(initBg), 50);
+            } catch {}
             const blob = await response.blob();
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -227,9 +236,14 @@ class SplineLayerManager {
     }
 
     setActiveWidget(widget) {
-        if (this.activeWidget === widget) return;
+        if (this.activeWidget === widget) {
+            console.log("[SplineLayerManager] setActiveWidget: already active:", widget?.value?.name);
+            return;
+        }
+        console.log("[SplineLayerManager] setActiveWidget: switching from", this.activeWidget?.value?.name, "to", widget?.value?.name);
         this.activeWidget = widget;
         if (this.node.editor) {
+            console.log("[SplineLayerManager] setActiveWidget: notifying editor");
             this.node.editor.onActiveLayerChanged(); // Notify canvas
         }
         this.node.setDirtyCanvas(true, true);
@@ -257,7 +271,7 @@ class SplineLayerManager {
     }
 
     getSplineWidgets() {
-        return this.node.widgets.filter(w => w instanceof PowerSplineWidget);
+        return this.node.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
     }
 
     addNewSpline(name) {
@@ -267,6 +281,7 @@ class SplineLayerManager {
         const baseName = name || `Spline ${this.node.splineWidgetsCounter}`;
         const existingNames = this.getSplineWidgets().map(w => w.value.name);
         widget.value.name = this.node.generateUniqueName(baseName, existingNames);
+        widget.value.type = 'spline';
         widget.value.offset = 0;
         widget.value.a_pause = 0;
         widget.value.z_pause = 0;
@@ -316,14 +331,51 @@ class SplineLayerManager {
         return widget;
     }
 
+    addNewHanddraw(name) {
+        this.node.splineWidgetsCounter++;
+        const widget = new HandDrawLayerWidget("spline_" + this.node.splineWidgetsCounter);
+
+        const baseName = name || `Handdraw ${this.node.splineWidgetsCounter}`;
+        const existingNames = this.getSplineWidgets().map(w => w.value.name);
+        widget.value.name = this.node.generateUniqueName(baseName, existingNames);
+
+        const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
+        if (headerIndex !== -1) {
+            let insertIndex = headerIndex + 1;
+            for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
+                const wi = this.node.widgets[i];
+                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
+                    insertIndex = i + 1;
+                } else {
+                    break;
+                }
+            }
+            this.node.widgets.splice(insertIndex, 0, widget);
+            widget.parent = this.node;
+        } else {
+            this.node.addCustomWidget(widget);
+        }
+
+        this.node.updateNodeHeight();
+        this.setActiveWidget(widget);
+        if (this.node.editor && this.node.editor.vis) {
+            this.node.editor.vis.render();
+        }
+        this.node.setDirtyCanvas(true, true);
+        return widget;
+    }
+
     removeSpline(widget) {
         const index = this.node.widgets.indexOf(widget);
         if (index > -1) {
             // Get all spline widgets before removal
             const allSplines = this.getSplineWidgets();
+            console.log("[SplineLayerManager] removeSpline: removing", widget?.value?.name, "total splines:", allSplines.length);
 
             // Check if the widget being removed is the active widget
-            if (this.activeWidget === widget) {
+            const removingActiveWidget = (this.activeWidget === widget);
+            if (removingActiveWidget) {
+                console.log("[SplineLayerManager] removeSpline: target is active widget");
                 // Select a new active widget BEFORE removing the current one
                 let newActiveWidget = null;
 
@@ -360,14 +412,14 @@ class SplineLayerManager {
                     }
                 }
 
-                // Set the new active widget
-                this.activeWidget = newActiveWidget;
+                // Set the new active widget (triggers editor sync)
+                this.setActiveWidget(newActiveWidget);
+                console.log("[SplineLayerManager] removeSpline: new active widget", newActiveWidget?.value?.name);
 
-                // Notify the editor to sync its state (points, interpolation, etc.)
-                if (this.node.editor && this.activeWidget) {
-                    this.node.editor.onActiveLayerChanged();
-                } else if (this.node.editor && !this.activeWidget) {
+                // If no active widget remains, clear the editor state
+                if (this.node.editor && !this.activeWidget) {
                     // No splines left - clear the editor's points
+                    console.log("[SplineLayerManager] removeSpline: no active widget, clearing editor points");
                     this.node.editor.points = [];
                     if (this.node.editor.layerRenderer) {
                         this.node.editor.layerRenderer.render();
@@ -379,13 +431,34 @@ class SplineLayerManager {
             this.node.widgets.splice(index, 1);
             this.node.updateNodeHeight();
 
-            // Trigger re-render of all layers
-            if (this.node.editor && this.node.editor.layerRenderer) {
-                this.node.editor.layerRenderer.render();
-            }
-            // Force canvas to update after node height change
-            if (this.node.editor && this.node.editor.vis) {
-                this.node.editor.vis.render();
+            const editor = this.node.editor;
+            if (editor) {
+                console.log("[SplineLayerManager] removeSpline: refresh editor state. Active widget:", this.activeWidget?.value?.name);
+                if (this.activeWidget) {
+                    // Refresh editor state based on newly active widget
+                    if (typeof editor.onActiveLayerChanged === "function") {
+                        console.log("[SplineLayerManager] removeSpline: calling editor.onActiveLayerChanged()");
+                        editor.onActiveLayerChanged();
+                    }
+                    editor.points = editor.getActivePoints();
+                    if (editor.layerRenderer) {
+                        console.log("[SplineLayerManager] removeSpline: re-rendering layers");
+                        editor.layerRenderer.render();
+                    }
+                    console.log("[SplineLayerManager] removeSpline: updating path");
+                    editor.updatePath();
+                } else {
+                    // No active spline remains
+                    editor.points = [];
+                    if (editor.layerRenderer) {
+                        console.log("[SplineLayerManager] removeSpline: no layers left, rendering empty");
+                        editor.layerRenderer.render();
+                    }
+                }
+                if (editor.vis) {
+                    console.log("[SplineLayerManager] removeSpline: rendering editor vis");
+                    editor.vis.render();
+                }
             }
 
             this.node.setDirtyCanvas(true, true);
@@ -486,13 +559,15 @@ class SplineLayerManager {
         // Recreate widgets using name-based lookup with explicit field assignment
         for (const [name, widgetValue] of widgetDataByName.entries()) {
             this.node.splineWidgetsCounter++;
-            const widget = new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
+            const isHand = widgetValue.type === 'handdraw';
+            const widget = isHand ? new HandDrawLayerWidget("spline_" + this.node.splineWidgetsCounter) : new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
 
             // Explicitly assign each field to ensure complete isolation
             // No spread operators that might share references
             widget.value = {
                 on: widgetValue.on !== undefined ? widgetValue.on : true,
                 name: widgetValue.name,
+                type: isHand ? 'handdraw' : 'spline',
                 interpolation: widgetValue.interpolation,
                 repeat: widgetValue.repeat || 1,
                 offset: widgetValue.offset || 0,
@@ -608,6 +683,11 @@ app.registerExtension({
                 this.properties.userAdjustedDims = true;
                 this.properties.bgImageDims = this.properties.bgImageDims || {};
                 this.properties.bgImageDims.width = value;
+                try {
+                  const hWidget = this.widgets.find(w => w.name === "mask_height");
+                  const userDims = { width: Number(value), height: Number(hWidget ? hWidget.value : this.properties.bgImageDims.height || 0) };
+                  if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(userDims));
+                } catch {}
               };
               hideWidgetForGood(this, widthWidget);
             }
@@ -621,6 +701,11 @@ app.registerExtension({
                 this.properties.userAdjustedDims = true;
                 this.properties.bgImageDims = this.properties.bgImageDims || {};
                 this.properties.bgImageDims.height = value;
+                try {
+                  const wWidget = this.widgets.find(w => w.name === "mask_width");
+                  const userDims = { width: Number(wWidget ? wWidget.value : this.properties.bgImageDims.width || 0), height: Number(value) };
+                  if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(userDims));
+                } catch {}
               };
               hideWidgetForGood(this, heightWidget);
             }
@@ -762,13 +847,41 @@ app.registerExtension({
               this.sizeManager.updateSize(true);
             };
 
-            // Try to update reference image from connected node when node is first created
-            // This ensures we get the latest connected image instead of falling back to cached/default
-            setTimeout(() => {
-                if (this.widgets && this.widgets.find(w => w.name === "ref_image")) {
-                    this.updateReferenceImageFromConnectedNode();
-                }
-            }, 100); // Small delay to ensure everything is initialized
+            // Silent auto-refresh overlay on init (mimics 👀 Refresh without alerts)
+            this.initOverlayRefresh = async function() {
+                try {
+                    const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
+                    const bg_img = bgImgWidget ? bgImgWidget.value : "None";
+
+                    // Try to pull a fresh ref image from connected node silently
+                    const base64Image = await getReferenceImageFromConnectedNode(this);
+                    if (base64Image) {
+                        this.originalRefImageData = {
+                            name: 'ref_image_from_connection.jpg',
+                            base64: base64Image.split(',')[1],
+                            type: 'image/jpeg'
+                        };
+                        try { await saveRefImageToCache(this.originalRefImageData.base64); } catch {}
+                        if (this.uuid) {
+                            sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                        }
+                        this.updateBackgroundImage(bg_img);
+                        this.editor?.refreshBackgroundImage?.();
+                        return;
+                    }
+                } catch {}
+                // Fallback: just apply current selection to force overlay/cached handling
+                try {
+                    const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
+                    const bg_img = bgImgWidget ? bgImgWidget.value : "None";
+                    this.updateBackgroundImage(bg_img);
+                    this.editor?.refreshBackgroundImage?.();
+                } catch {}
+            }.bind(this);
+
+            // Trigger the auto-refresh a couple of times during init to catch late readiness
+            setTimeout(() => { this.initOverlayRefresh(); }, 150);
+            setTimeout(() => { this.initOverlayRefresh(); }, 700);
 
             // Helper method to load background image from URL with optional scaling
             this.loadBackgroundImageFromUrl = function(imageUrl, imageName, targetWidth, targetHeight) {
@@ -797,20 +910,25 @@ app.registerExtension({
                                 };
                                 this.editor.refreshBackgroundImage();
                                 
-                                // Update the widget values to match the new dimensions
+                                // Update the widget values to match the new dimensions unless user has their own dims
                                 const widthWidget = this.widgets.find(w => w.name === "mask_width");
                                 const heightWidget = this.widgets.find(w => w.name === "mask_height");
-                                
-                                if (widthWidget) widthWidget.value = targetWidth;
-                                if (heightWidget) heightWidget.value = targetHeight;
-                                
-                                // Update editor dimensions
+                                const userDimsJson = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
+                                const hasUserDims = this.properties.userAdjustedDims || !!userDimsJson;
+                                if (!hasUserDims) {
+                                    if (widthWidget) widthWidget.value = targetWidth;
+                                    if (heightWidget) heightWidget.value = targetHeight;
+                                }
+
+                                // Update editor dimensions (respect user dims if set)
                                 if (this.editor) {
-                                    this.editor.width = targetWidth;
-                                    this.editor.height = targetHeight;
+                                    const newW = hasUserDims && widthWidget ? Number(widthWidget.value) : targetWidth;
+                                    const newH = hasUserDims && heightWidget ? Number(heightWidget.value) : targetHeight;
+                                    this.editor.width = newW;
+                                    this.editor.height = newH;
                                     if (this.editor.vis) {
-                                        this.editor.vis.width(targetWidth);
-                                        this.editor.vis.height(targetHeight);
+                                        this.editor.vis.width(newW);
+                                        this.editor.vis.height(newH);
                                         this.editor.vis.render();
                                     }
                                     
@@ -941,10 +1059,26 @@ app.registerExtension({
                                     };
                                     fallbackImg.src = cachedImageUrl;
                                 } else {
-                                    // Final fallback to A.jpg
+                                    // Final fallback to A.jpg with dark overlay
                                     const timestamp = Date.now();
                                     const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                    this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
+                                    const img2 = new Image();
+                                    img2.onload = () => {
+                                        const canvas2 = document.createElement('canvas');
+                                        canvas2.width = img2.width;
+                                        canvas2.height = img2.height;
+                                        const ctx2 = canvas2.getContext('2d');
+                                        ctx2.drawImage(img2, 0, 0);
+                                        ctx2.fillStyle = 'rgba(0,0,0,0.6)';
+                                        ctx2.fillRect(0, 0, canvas2.width, canvas2.height);
+                                        const darkUrl = canvas2.toDataURL('image/jpeg');
+                                        this.imgData = { name: 'A.jpg', base64: darkUrl.split(',')[1], type: 'image/jpeg' };
+                                        this.editor.refreshBackgroundImage();
+                                    };
+                                    img2.onerror = () => {
+                                        this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
+                                    };
+                                    img2.src = defaultImageUrl;
                                 }
                             });
                         };
@@ -982,10 +1116,26 @@ app.registerExtension({
                                 };
                                 img.src = cachedImageUrl;
                             } else {
-                                // Fallback to default A.jpg
+                                // Fallback to default A.jpg with dark overlay
                                 const timestamp = Date.now();
                                 const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
+                                const img2 = new Image();
+                                img2.onload = () => {
+                                    const canvas2 = document.createElement('canvas');
+                                    canvas2.width = img2.width;
+                                    canvas2.height = img2.height;
+                                    const ctx2 = canvas2.getContext('2d');
+                                    ctx2.drawImage(img2, 0, 0);
+                                    ctx2.fillStyle = 'rgba(0,0,0,0.6)';
+                                    ctx2.fillRect(0, 0, canvas2.width, canvas2.height);
+                                    const darkUrl = canvas2.toDataURL('image/jpeg');
+                                    this.imgData = { name: 'A.jpg', base64: darkUrl.split(',')[1], type: 'image/jpeg' };
+                                    this.editor.refreshBackgroundImage();
+                                };
+                                img2.onerror = () => {
+                                    this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
+                                };
+                                img2.src = defaultImageUrl;
                             }
                         });
                     }
@@ -1255,6 +1405,10 @@ app.registerExtension({
             element.appendChild(this.splineEditor2.parentEl);
 
             this.editor = new SplineEditor2(this);
+            // Expose commit handler for handdraw to the editor/node
+            this.commitHanddraw = (points) => {
+                try { commitHanddrawPath(this, points); } catch (e) { console.error('commitHanddraw failed', e); }
+            };
 
             // Try to load image from session storage for persistence across reloads
             if (this.uuid) {
@@ -1391,10 +1545,7 @@ app.registerExtension({
             // Add header widget AFTER button bar
             this.addCustomWidget(new PowerSplineHeaderWidget("spline_header"));
 
-            // Initialize double-click tracking for layer rename
-            this.lastClickTime = 0;
-            this.lastClickPos = null;
-            this.doubleClickDelay = 300; // ms
+            // Removed double-click rename behavior (no longer used)
 
           // Override onNodeContextMenu to handle driven toggle right-click
           const originalOnNodeContextMenu = nodeType.prototype.onNodeContextMenu;
@@ -1427,67 +1578,7 @@ app.registerExtension({
               return originalOnNodeContextMenu?.apply(this, arguments);
           };
 
-          // Override onMouseDown to detect double-clicks on layer names
-          const originalOnMouseDown = nodeType.prototype.onMouseDown;
-          nodeType.prototype.onMouseDown = function (e, localPos, graphcanvas) {
-              const currentTime = Date.now();
-              const timeSinceLastClick = currentTime - this.lastClickTime;
-
-              // Check if this is a double-click (within delay and similar position)
-              let isDoubleClick = false;
-              if (timeSinceLastClick < this.doubleClickDelay && this.lastClickPos) {
-                  const dx = Math.abs(localPos[0] - this.lastClickPos[0]);
-                  const dy = Math.abs(localPos[1] - this.lastClickPos[1]);
-                  isDoubleClick = (dx < 5 && dy < 5); // Within 5 pixel tolerance
-              }
-
-              if (isDoubleClick) {
-                  // Check if double-click was on a name area
-                  const relativeX = localPos[0];
-                  const relativeY = localPos[1];
-
-                  for (const widget of this.layerManager.getSplineWidgets()) {
-                      if (widget.hitAreas && widget.hitAreas.name) {
-                          const nameBounds = widget.hitAreas.name.bounds;
-
-                          // widget.last_y is the Y position of the widget relative to the node
-                          const widgetYStart = widget.last_y;
-                          const widgetYEnd = widgetYStart + LiteGraph.NODE_WIDGET_HEIGHT;
-
-                          // nameBounds format: [x, width] or [x, y, width, height]
-                          const nameXStart = nameBounds[0];
-                          const nameXEnd = nameXStart + (nameBounds.length > 2 ? nameBounds[2] : nameBounds[1]);
-
-                          // Check if the click is within the name area bounds
-                          if (relativeX >= nameXStart && relativeX <= nameXEnd &&
-                              relativeY >= widgetYStart && relativeY <= widgetYEnd) {
-                              // Double-click detected on name area - show rename prompt
-                              const canvas = app.canvas;
-                              canvas.prompt("Spline Name", widget.value.name || "Spline", (v) => {
-                                  widget.value.name = v || "Spline";
-                                  this.setDirtyCanvas(true, true);
-                              });
-
-                              // Reset click tracking to prevent triple-click
-                              this.lastClickTime = 0;
-                              this.lastClickPos = null;
-                              return true; // Handled, prevent default
-                          }
-                      }
-                  }
-
-                  // Reset for next potential double-click
-                  this.lastClickTime = 0;
-                  this.lastClickPos = null;
-              } else {
-                  // Store this click for potential double-click detection
-                  this.lastClickTime = currentTime;
-                  this.lastClickPos = [localPos[0], localPos[1]];
-              }
-
-              // Call original handler
-              return originalOnMouseDown?.apply(this, arguments);
-          };
+          // Removed onMouseDown override for double-click rename
 
           chainCallback(this, "onDrawForeground", function(ctx) {
             if (!this.flags.collapsed) {
@@ -1526,11 +1617,35 @@ app.registerExtension({
                 const widthWidget = this.widgets.find(w => w.name === "mask_width");
                 const heightWidget = this.widgets.find(w => w.name === "mask_height");
 
-                if (widthWidget && widthWidget.value !== dims.width) {
-                  widthWidget.value = dims.width;
+                const userDimsJson = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
+                const hasUserDims = this.properties.userAdjustedDims || !!userDimsJson;
+                if (!hasUserDims) {
+                  const widgetDiffers = (
+                    (widthWidget && dims && typeof widthWidget.value === 'number' && widthWidget.value !== dims.width) ||
+                    (heightWidget && dims && typeof heightWidget.value === 'number' && heightWidget.value !== dims.height)
+                  );
+                  if (widgetDiffers) {
+                    // Treat saved widget values as user preference; persist flag for this session
+                    this.properties.userAdjustedDims = true;
+                    try {
+                      const stored = { width: Number(widthWidget ? widthWidget.value : dims.width), height: Number(heightWidget ? heightWidget.value : dims.height) };
+                      if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(stored));
+                    } catch {}
+                  } else {
+                    if (widthWidget && widthWidget.value !== dims.width) {
+                      widthWidget.value = dims.width;
+                    }
+                    if (heightWidget && heightWidget.value !== dims.height) {
+                      heightWidget.value = dims.height;
+                    }
+                  }
                 }
-                if (heightWidget && heightWidget.value !== dims.height) {
-                  heightWidget.value = dims.height;
+                else if (userDimsJson) {
+                  try {
+                    const userDims = JSON.parse(userDimsJson);
+                    if (widthWidget && typeof userDims.width === 'number') widthWidget.value = userDims.width;
+                    if (heightWidget && typeof userDims.height === 'number') heightWidget.value = userDims.height;
+                  } catch {}
                 }
                 
                 // Store the dimensions back to properties to ensure consistency
@@ -1544,8 +1659,10 @@ app.registerExtension({
 
               // Update canvas dimensions if editor exists
               if (this.editor && this.editor.vis) {
-                const canvasWidth = (dims && !this.properties.userAdjustedDims) ? dims.width : (this.properties.bgImageDims?.width || this.editor.widthWidget.value);
-                const canvasHeight = (dims && !this.properties.userAdjustedDims) ? dims.height : (this.properties.bgImageDims?.height || this.editor.heightWidget.value);
+                const userDimsJson2 = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
+                const hasUserDims2 = this.properties.userAdjustedDims || !!userDimsJson2;
+                const canvasWidth = (dims && !hasUserDims2) ? dims.width : (this.properties.bgImageDims?.width || this.editor.widthWidget.value);
+                const canvasHeight = (dims && !hasUserDims2) ? dims.height : (this.properties.bgImageDims?.height || this.editor.heightWidget.value);
                 
                 this.editor.width = canvasWidth;
                 this.editor.height = canvasHeight;
@@ -1814,7 +1931,7 @@ app.registerExtension({
           nodeType.prototype.onSerialize = function(o) {
             const coordinatesWidget = this.widgets.find(w => w.name === "coordinates");
             if (coordinatesWidget) {
-                const splineWidgets = this.widgets.filter(w => w instanceof PowerSplineWidget);
+                const splineWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
                 const values = splineWidgets.map(w => w.value);
                 coordinatesWidget.value = JSON.stringify(values);
             }

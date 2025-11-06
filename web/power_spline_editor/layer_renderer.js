@@ -84,6 +84,8 @@ export class LayerRenderer {
         if (!points || points.length === 0) return;
 
         const interpolation = widget.value.interpolation || 'linear';
+        // Treat preview drawing as handdraw for styling when armed
+        const isHanddraw = (widget?.value?.type === 'handdraw') || !!this.splineEditor._handdrawActive;
 
         // ALWAYS draw line - thin for points mode, normal otherwise
         // Points mode uses linear interpolation with a thin line
@@ -140,7 +142,12 @@ export class LayerRenderer {
             .left(d => d.x)
             .top(d => d.y)
             .interpolate(() => interpolation === 'points' ? 'linear' : interpolation)
-            .strokeStyle(() => interpolation === 'points' ? "#1f77b4" : "#1f77b4")
+            .strokeStyle(() => {
+                if (isHanddraw) {
+                    return '#d7c400'; // muted yellow for active handdraw
+                }
+                return '#1f77b4';
+            })
             .lineWidth(() => interpolation === 'points' ? 1 : 3);
 
         // ALWAYS draw dots - bigger for points mode, all circles
@@ -149,7 +156,10 @@ export class LayerRenderer {
             .data(() => points)
             .left(d => d.x)
             .top(d => d.y)
-            .radius(() => interpolation === 'points' ? 9 : 6)
+            .radius(() => {
+                if (isHanddraw) return 4; // smaller points for handdraw
+                return interpolation === 'points' ? 9 : 6;
+            })
         .shape((dot) => {
             if (interpolation === 'points') return "circle";
             // If interpolation is 'basis' AND the point is highlighted, draw a square
@@ -172,16 +182,18 @@ export class LayerRenderer {
             .cursor("move")
             .strokeStyle((dot) => {
                 const index = this.splineEditor.points.indexOf(dot);
-                if (index === 0 && interpolation !== 'points') {
+                if (!isHanddraw && index === 0 && interpolation !== 'points') {
                     return "green";
                 }
+                if (isHanddraw) return '#d7c400';
                 return interpolation === 'points' ? "#139613" : "#1f77b4";
             })
             .fillStyle((dot) => {
                 const index = this.splineEditor.points.indexOf(dot);
-                if (index === 0 && interpolation !== 'points') {
+                if (!isHanddraw && index === 0 && interpolation !== 'points') {
                     return "rgba(0, 255, 0, 0.5)";
                 }
+                if (isHanddraw) return "rgba(215, 196, 0, 0.45)";
                 return interpolation === 'points' ? "rgba(19, 150, 19, 0.5)" : "rgba(100, 100, 100, 0.5)";
             })
             .event("mousedown", pv.Behavior.drag())
@@ -200,8 +212,13 @@ export class LayerRenderer {
      */
     drawInactiveLayer(widget) {
         const isOff = !widget.value.on;
-        const strokeColor = isOff ? "rgba(255, 255, 255, 0.1)" : "rgba(255, 127, 14, 0.5)";
-        const fillColor = isOff ? "rgba(255, 255, 255, 0.1)" : "rgba(255, 127, 14, 0.4)";
+        const isHanddraw = widget?.value?.type === 'handdraw';
+        const strokeColor = isOff
+            ? "rgba(255, 255, 255, 0.1)"
+            : (isHanddraw ? "rgba(70, 40, 110, 0.7)" : "rgba(255, 127, 14, 0.5)");
+        const fillColor = isOff
+            ? "rgba(255, 255, 255, 0.1)"
+            : (isHanddraw ? "rgba(70, 40, 110, 0.5)" : "rgba(255, 127, 14, 0.4)");
 
         let points;
         try {
@@ -214,8 +231,8 @@ export class LayerRenderer {
 
         if (!points || points.length === 0) return;
 
-        // Create a new isolated panel for this layer
-        const layerPanel = this.vis.add(pv.Panel);
+        // Create a new isolated panel for this layer. Disable events so it never steals interaction.
+        const layerPanel = this.vis.add(pv.Panel).events("none");
         this.inactiveLayerPanels.push(layerPanel);
 
         // Store metadata for hit detection (widget reference and points)
@@ -267,35 +284,57 @@ export class LayerRenderer {
         }
 
         // ALWAYS draw line
-        layerPanel.add(pv.Line)
+        const lineWidthMain = (interpolation === 'points') ? (isHanddraw ? 3 : 1) : 3;
+        layerPanel.add(pv.Line).events("none")
             .data(renderPoints)
             .left(d => d.x)
             .top(d => d.y)
             .interpolate(interpolation === 'points' ? 'linear' : interpolation)
             .strokeStyle(strokeColor)
-            .lineWidth(interpolation === 'points' ? 1 : 3);
+            .lineWidth(lineWidthMain);
+
+        // If this is a handdraw layer in inactive (purple) state, render line-only and skip markers/dots
+        if (isHanddraw) {
+            return;
+        }
 
         // Handle different interpolation modes for inactive layers
         if (interpolation === 'points') {
-            layerPanel.add(pv.Line)
+            const lineWidthPts = isHanddraw ? 3 : 1;
+            layerPanel.add(pv.Line).events("none")
                 .data(pointsSnapshot)
                 .left(d => d.x)
                 .top(d => d.y)
                 .interpolate('linear')
                 .strokeStyle(strokeColor)
-                .lineWidth(1);
-            
-            layerPanel.add(pv.Dot)
-                .data(pointsSnapshot)
-                .left(d => d.x)
-                .top(d => d.y)
-                .radius(6)
-                .shape("circle")
-                .strokeStyle(strokeColor)
-                .fillStyle(fillColor);
+                .lineWidth(lineWidthPts);
+            // Do not draw circles for inactive layers. Optionally keep first-point triangle for non-handdraw.
+            if (!isHanddraw && pointsSnapshot.length > 0) {
+                layerPanel.add(pv.Dot).events("none")
+                    .data([pointsSnapshot[0]])
+                    .left(d => d.x)
+                    .top(d => d.y)
+                    .radius(6)
+                    .shape("triangle")
+                    .strokeStyle(strokeColor)
+                    .fillStyle(fillColor)
+                    .angle((dot) => {
+                        const points = pointsSnapshot;
+                        if (points.length <= 1) return 0;
+                        const firstPoint = points[0];
+                        const secondPoint = points[1];
+                        const dx = secondPoint.x - firstPoint.x;
+                        const dy = secondPoint.y - firstPoint.y;
+                        if (dx !== 0 || dy !== 0) {
+                            const angle = Math.atan2(dy, dx) - Math.PI / 2;
+                            return (angle + 2 * Math.PI) % (2 * Math.PI);
+                        }
+                        return 0;
+                    });
+            }
         } else {
             // ONLY draw triangle at first point for all other modes
-            if (pointsSnapshot.length > 0) {
+            if (!isHanddraw && pointsSnapshot.length > 0) {
                 layerPanel.add(pv.Dot)
                     .data([pointsSnapshot[0]])
                     .left(d => d.x)
@@ -330,6 +369,8 @@ export class LayerRenderer {
      * @returns {object|null} The widget reference or null
      */
     findInactiveLayerAtPosition(mouseX, mouseY, threshold = 15) {
+        // Be a bit more permissive around the first point (triangle marker)
+        const firstPointThreshold = Math.max(threshold, 22);
         let closestWidget = null;
         let closestDistance = threshold;
 
@@ -337,13 +378,15 @@ export class LayerRenderer {
         for (const layerData of this.inactiveLayerMetadata) {
             const points = layerData.points;
 
-            // Check distance to each point
-            for (const point of points) {
+            // Check distance to each point (use larger threshold for the first point/triangle)
+            for (let idx = 0; idx < points.length; idx++) {
+                const point = points[idx];
                 const dx = mouseX - point.x;
                 const dy = mouseY - point.y;
                 const distance = Math.sqrt(dx * dx + dy * dy);
 
-                if (distance < closestDistance) {
+                const localThreshold = idx === 0 ? firstPointThreshold : threshold;
+                if (distance < Math.min(closestDistance, localThreshold)) {
                     closestDistance = distance;
                     closestWidget = layerData.widget;
                 }

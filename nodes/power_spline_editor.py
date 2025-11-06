@@ -269,9 +269,6 @@ class PowerSplineEditor:
         if frames is None:
             frames = 41  # Default value that was previously hardcoded
 
-        # PowerSplineEditor: This node now handles multiple splines through widget data
-        # The coordinates and points_store contain serialized widget data from multiple splines
-        # For now, we'll do basic passthrough and handle in the UI
 
         # Parse coordinates which now contains array of spline widget data
         all_splines = []
@@ -279,6 +276,7 @@ class PowerSplineEditor:
             parsed_coords = json.loads(coordinates) if isinstance(coordinates, str) else coordinates
             if isinstance(parsed_coords, list):
                 all_splines = parsed_coords
+
         except (json.JSONDecodeError, TypeError) as e:
             print(f"Warning: Could not parse coordinates: {e}")
 
@@ -386,10 +384,14 @@ class PowerSplineEditor:
         # For PowerSplineEditor, process each spline widget's data
         # Each widget contains: {on, name, interpolation, repeat, points_store, coordinates}
         all_p_paths = list(incoming_p_paths)  # Copy incoming static paths
+        all_p_names: list = []
+        all_p_types: list = []
         all_p_start_frames = list(incoming_p_start_frames)
         all_p_end_frames = list(incoming_p_end_frames)
 
         all_coord_paths = list(incoming_coord_paths)  # Copy incoming animated paths
+        all_coord_names: list = []
+        all_coord_types: list = []
         all_coord_start_frames = list(incoming_coord_start_frames)
         all_coord_end_frames = list(incoming_coord_end_frames)
 
@@ -422,6 +424,9 @@ class PowerSplineEditor:
 
             try:
                 layer_coords = json.loads(control_points_str) if isinstance(control_points_str, str) else control_points_str
+                if (not isinstance(layer_coords, list) or len(layer_coords) == 0):
+                    alt_coords = spline_data.get('coordinates', [])
+                    layer_coords = alt_coords if isinstance(alt_coords, list) else []
                 if isinstance(layer_coords, list) and len(layer_coords) > 0:
                     # Apply repeat logic to driver coords too (same as driven)
                     repeat_count = int(spline_data.get('repeat', 1))
@@ -453,7 +458,11 @@ class PowerSplineEditor:
 
             # Get spline parameters
             control_points_str = spline_data.get('points_store', '[]') # Use 'points_store' for raw control points
-            spline_interpolation = spline_data.get('interpolation', 'linear') # Get interpolation type
+            # Get interpolation type; handdraw is always treated as linear coordinates
+            spline_type = spline_data.get('type', 'spline')
+            spline_interpolation = spline_data.get('interpolation', 'linear')
+            if spline_type == 'handdraw':
+                spline_interpolation = 'linear'
             start_frames = spline_data.get('a_pause', 0)
             end_frames = spline_data.get('z_pause', 0)
             repeat_count = int(spline_data.get('repeat', 1))
@@ -467,24 +476,20 @@ class PowerSplineEditor:
             
             # Get scale parameter
             scale = spline_data.get('scale', 1.00) # Get scale value
-
-            # Offset: Timing shift that creates pause frames
-            # Positive offset (e.g., 5): Waits at START position for 5 frames, then animates to 5 frames before end
-            #   - Removes LAST 5 frames from animation path
-            #   - Adds 5 frames to start_pause (holding at START position, frame 0)
-            #   - Result: pause → animate → stop early
-            # Negative offset (e.g., -5): Animates normally, then holds at END position for 5 frames
-            #   - Removes LAST 5 frames from animation path
-            #   - Adds 5 frames to end_pause (holding at END position)
-            #   - Result: animate → stop early → hold
-            # Applied AFTER repeat and driver, but BEFORE interpolation resampling
             offset = int(spline_data.get('offset', 0)) # Get offset value
 
             # Parse control points
             try:
-                spline_coords = json.loads(control_points_str) if isinstance(control_points_str, str) else control_coords_str
+                # control_points_str contains the raw control points (normalized) from the UI
+                # If it's already a list, use as-is; otherwise parse JSON string
+                spline_coords = json.loads(control_points_str) if isinstance(control_points_str, str) else control_points_str
+                if (not isinstance(spline_coords, list) or len(spline_coords) == 0):
+                    # Fallback: use coordinates field if present in the incoming object
+                    alt_coords = spline_data.get('coordinates', [])
+                    spline_coords = alt_coords if isinstance(alt_coords, list) else []
                 
                 if not isinstance(spline_coords, list) or len(spline_coords) == 0:
+                    print(f"[PowerSplineEditor] Skipping layer '{spline_data.get('name','')}' — no control points parsed")
                     continue
 
                 # --- REPEAT LOGIC (Looping Effect) ---
@@ -568,9 +573,25 @@ class PowerSplineEditor:
 
                 # NO OFFSET LOGIC HERE - it's moved to DrawShapeOnPath
 
-                # Add to appropriate output based on interpolation mode
-                if spline_interpolation == 'points':
+                # Add to appropriate output; force handdraw into coordinates bucket like normal layers
+                if spline_type == 'handdraw':
+                    all_coord_paths.append(spline_coords)
+                    all_coord_names.append(spline_data.get('name', ''))
+                    all_coord_types.append(spline_type)
+                    all_coord_start_frames.append(start_frames)
+                    all_coord_end_frames.append(end_frames)
+                    all_coord_offsets.append(offset)
+                    all_coord_interpolations.append('linear')
+                    all_coord_easing_functions.append(easing_function)
+                    all_coord_easing_paths.append(easing_path)
+                    all_coord_easing_strengths.append(easing_strength)
+                    all_coord_accelerations.append(acceleration)
+                    all_coord_scales.append(scale)
+                    all_coord_drivers.append(driver_info_for_layer)
+                elif spline_interpolation == 'points':
                     all_p_paths.append(spline_coords)
+                    all_p_names.append(spline_data.get('name', ''))
+                    all_p_types.append(spline_type)
                     all_p_start_frames.append(start_frames)
                     all_p_end_frames.append(end_frames)
                     all_p_offsets.append(offset) # Collect offset for p_coordinates
@@ -583,6 +604,8 @@ class PowerSplineEditor:
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
                 else:
                     all_coord_paths.append(spline_coords)
+                    all_coord_names.append(spline_data.get('name', ''))
+                    all_coord_types.append(spline_type)
                     all_coord_start_frames.append(start_frames)
                     all_coord_end_frames.append(end_frames)
                     all_coord_offsets.append(offset) # Collect offset for coordinates
@@ -652,6 +675,8 @@ class PowerSplineEditor:
             coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": all_coord_accelerations}
             coord_out_data["scales"] = {"p": all_p_scales, "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": all_coord_drivers}
+            coord_out_data["names"] = {"p": all_p_names, "c": all_coord_names}
+            coord_out_data["types"] = {"p": all_p_types, "c": all_coord_types}
         elif all_p_paths:
             # Only p_coordinates - use new format for consistency
             coord_out_data["start_p_frames"] = {"p": p_start_out, "c": []}
@@ -664,6 +689,8 @@ class PowerSplineEditor:
             coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": []}
             coord_out_data["scales"] = {"p": all_p_scales, "c": []}
             coord_out_data["drivers"] = {"p": all_p_drivers, "c": []}
+            coord_out_data["names"] = {"p": all_p_names, "c": []}
+            coord_out_data["types"] = {"p": all_p_types, "c": []}
         elif all_coord_paths:
             # Only coordinates - use new format for consistency
             coord_out_data["start_p_frames"] = {"p": [], "c": c_start_out}
@@ -676,6 +703,8 @@ class PowerSplineEditor:
             coord_out_data["accelerations"] = {"p": [], "c": all_coord_accelerations}
             coord_out_data["scales"] = {"p": [], "c": all_coord_scales}
             coord_out_data["drivers"] = {"p": [], "c": all_coord_drivers}
+            coord_out_data["names"] = {"p": [], "c": all_coord_names}
+            coord_out_data["types"] = {"p": [], "c": all_coord_types}
         else:
             # No paths at all
             coord_out_data["start_p_frames"] = 0

@@ -59,6 +59,21 @@ export default class SplineEditor2 {
 
     // Get interpolation from active widget
     this.interpolation = 'linear';
+    // Handdraw mode (UI/UX first pass)
+    this._handdrawActive = false;
+    this._handdrawPath = [];
+    this.enterHanddrawMode = () => {
+      this._handdrawActive = true;
+      this._handdrawPath = [];
+    };
+    this.exitHanddrawMode = (commit = false) => {
+      // Only cancel UI state; no commit normalization here (handled in mousedown mouseup flow)
+      this._handdrawActive = false;
+      this._handdrawPath = [];
+      // Re-render to update any UI state
+      try { this.layerRenderer?.render(); } catch {}
+    };
+    this._teardownHanddrawListeners = null;
 
     // Use widget values instead of hardcoded dimensions
     this.width = this.widthWidget.value;
@@ -67,23 +82,31 @@ export default class SplineEditor2 {
 
     // Helper methods for multi-layer support
     this.getActiveWidget = () => {
-      return this.node.layerManager.getActiveWidget();
+      const widget = this.node.layerManager.getActiveWidget();
+      return widget;
     };
 
     this.getActivePoints = () => {
       const activeWidget = this.getActiveWidget();
-      if (!activeWidget) return [];
+      if (!activeWidget) {
+        return [];
+      }
       try {
         const points = JSON.parse(activeWidget.value.points_store || '[]');
-        return this.denormalizePoints(points);
+        const denorm = this.denormalizePoints(points);
+        return denorm;
       } catch (e) {
+        console.error("[SplineEditor] getActivePoints: failed to parse points_store", e);
         return [];
       }
     };
 
     this.setActivePoints = (points) => {
       const activeWidget = this.getActiveWidget();
-      if (!activeWidget) return;
+      if (!activeWidget) {
+        console.warn("[SplineEditor] setActivePoints: no active widget");
+        return;
+      }
       activeWidget.value.points_store = JSON.stringify(this.normalizePoints(points));
       // Only call updatePath if vis is already created
       if (this.vis) {
@@ -96,6 +119,8 @@ export default class SplineEditor2 {
       if (activeWidget) {
         this.interpolation = activeWidget.value.interpolation || 'linear';
         this.points = this.getActivePoints();
+      } else {
+        this.points = [];
       }
       if (this.vis) {
         this.layerRenderer.render();
@@ -118,13 +143,17 @@ export default class SplineEditor2 {
               widgetCoordinates = [];
           }
 
+          const isHanddraw = widget?.value?.type === 'handdraw';
+          const outInterpolation = isHanddraw ? 'linear' : (widget.value.interpolation || 'linear');
+
           allSplineData.push({
               on: widget.value.on,
               name: widget.value.name,
-              interpolation: widget.value.interpolation || 'linear',
+              interpolation: outInterpolation,
               repeat: widget.value.repeat || 1,
               points_store: widget.value.points_store,
-              coordinates: JSON.stringify(widgetCoordinates)
+              // Embed array directly; do not stringify so downstream sees points
+              coordinates: widgetCoordinates
           });
       }
 
@@ -257,6 +286,63 @@ export default class SplineEditor2 {
         // Get mouse position (scaled for canvas)
         const mouseX = this.vis.mouse().x / app.canvas.ds.scale;
         const mouseY = this.vis.mouse().y / app.canvas.ds.scale;
+        if (this._handdrawActive) {
+          // Start capturing freehand path until mouseup on document
+          this._handdrawPath = [{ x: mouseX, y: mouseY }];
+          // Preview on active layer while drawing
+          this.points = this._handdrawPath;
+          this.layerRenderer.render();
+          const canvasEl = this.vis.canvas();
+          let lastAddX = mouseX, lastAddY = mouseY;
+          const move = (ev) => {
+            const rect = canvasEl.getBoundingClientRect();
+            const mx = (ev.clientX - rect.left) / app.canvas.ds.scale;
+            const my = (ev.clientY - rect.top) / app.canvas.ds.scale;
+            // Only add if moved enough to reduce point density
+            const dx = mx - lastAddX;
+            const dy = my - lastAddY;
+            if ((dx*dx + dy*dy) >= 36) { // 6px threshold
+              this._handdrawPath.push({ x: mx, y: my });
+              lastAddX = mx; lastAddY = my;
+            }
+            // Live preview
+            this.points = this._handdrawPath;
+            this.layerRenderer.render();
+          };
+          const up = (ev) => {
+            ev.preventDefault?.();
+            document.removeEventListener('mousemove', move, true);
+            document.removeEventListener('mouseup', up, true);
+            // Post-simplify to further reduce density (keep points ~6px apart)
+            const minDist2 = 36; // 6px squared
+            const simplified = [];
+            for (let i = 0; i < this._handdrawPath.length; i++) {
+              const p = this._handdrawPath[i];
+              if (simplified.length === 0) { simplified.push(p); continue; }
+              const lp = simplified[simplified.length - 1];
+              const dx = p.x - lp.x; const dy = p.y - lp.y;
+              if ((dx*dx + dy*dy) >= minDist2) simplified.push(p);
+            }
+            if (simplified.length > 1) {
+              // ensure last point included
+              const last = this._handdrawPath[this._handdrawPath.length - 1];
+              const lp = simplified[simplified.length - 1];
+              const dx = last.x - lp.x; const dy = last.y - lp.y;
+              if ((dx*dx + dy*dy) >= 1) simplified.push(last);
+            }
+            // Normalize and commit
+            const norm = this.normalizePoints(simplified);
+            try { this.node?.commitHanddraw?.(norm); } catch {}
+            this._handdrawActive = false;
+            this._handdrawPath = [];
+            // Reload active points from widget and re-render
+            this.points = this.getActivePoints();
+            this.layerRenderer.render();
+          };
+          document.addEventListener('mousemove', move, true);
+          document.addEventListener('mouseup', up, true);
+          return this;
+        }
 
         // Check for double-click on canvas
         const currentTime = Date.now();
@@ -322,9 +408,42 @@ export default class SplineEditor2 {
           this.updatePath();
         }
         else if (pv.event.button === 2) {
-          this.node.contextMenu.style.display = 'block';
-          this.node.contextMenu.style.left = `${pv.event.clientX}px`;
-          this.node.contextMenu.style.top = `${pv.event.clientY}px`;
+          // Open custom canvas context menu and suppress native one
+          try { pv.event.preventDefault?.(); pv.event.stopPropagation?.(); } catch {}
+
+          const menuEl = this.node.contextMenu;
+          menuEl.style.display = 'block';
+          menuEl.style.left = `${pv.event.clientX}px`;
+          menuEl.style.top = `${pv.event.clientY}px`;
+          menuEl.oncontextmenu = (evt) => { evt.preventDefault(); evt.stopPropagation(); };
+
+          // Handlers to close menu and suppress browser menu while open
+          const hideOnOutside = (ev) => {
+            const target = ev && ev.target;
+            // Ignore clicks inside LiteGraph dialogs/prompts
+            const withinDialog = target && (target.closest?.('.litegraph .dialog') || target.closest?.('.litegraph.liteprompt') || target.closest?.('.litedialog'));
+            if (withinDialog) return;
+            if (!menuEl.contains(target)) {
+              menuEl.style.display = 'none';
+              cleanup();
+            }
+          };
+          const preventBrowserMenu = (ev) => { ev.preventDefault(); };
+          const onEsc = (ev) => { if (ev.key === 'Escape') { menuEl.style.display = 'none'; cleanup(); } };
+          const cleanup = () => {
+            document.removeEventListener('mousedown', hideOnOutside, true);
+            document.removeEventListener('contextmenu', hideOnOutside, true);
+            document.removeEventListener('contextmenu', preventBrowserMenu, true);
+            document.removeEventListener('keydown', onEsc, true);
+          };
+
+          // Delay to avoid catching the opening event
+          setTimeout(() => {
+            document.addEventListener('mousedown', hideOnOutside, true);
+            document.addEventListener('contextmenu', hideOnOutside, true);
+            document.addEventListener('contextmenu', preventBrowserMenu, true);
+            document.addEventListener('keydown', onEsc, true);
+          }, 0);
         }
       })
       
@@ -415,7 +534,7 @@ export default class SplineEditor2 {
         let adjustedY = this.vis.mouse().y / app.canvas.ds.scale;
 
         if (this.isRotatingAll && this.anchorPoint && this.originalPoints) {
-          const currentAngle = Math.atan2(adjustedY - this.anchorPoint.y, adjustedX - this.anchorPoint.x);
+            const currentAngle = Math.atan2(adjustedY - this.anchorPoint.y, adjustedX - this.anchorPoint.x);
           const rotationAngle = currentAngle - this.initialRotationAngle;
           const cos = Math.cos(rotationAngle);
           const sin = Math.sin(rotationAngle);
@@ -641,12 +760,12 @@ export default class SplineEditor2 {
 
   updatePath = () => {
     if (!this.points || this.points.length === 0) {
-      console.log("no points");
       return;
     }
 
     // Return early if vis isn't created yet
     if (!this.vis) {
+      console.warn("[SplineEditor] updatePath: vis not ready");
       return;
     }
 
@@ -659,7 +778,7 @@ export default class SplineEditor2 {
     // Re-render previous splines to ensure they persist
     this.renderPreviousSplines();
 
-    // Render active and inactive layers
+    // Render active and inactive layers; ensure active panel is on top for hit testing
     this.layerRenderer.render();
 
     // Let the size manager handle container height
@@ -674,13 +793,25 @@ export default class SplineEditor2 {
     const allWidgets = this.node.layerManager.getSplineWidgets();
     const onWidgets = allWidgets.filter(w => w.value.on);
     const allSplineData = [];
+    
 
     // Assumption: layer_renderer renders paths in the same order as onWidgets.
     // We filter out known non-spline paths.
     const pathElements = this.vis.canvas().getElementsByTagName('path');
+    const normalizeStroke = (stroke) => (stroke || '').replace(/\s+/g, '').toLowerCase();
+    const EXCLUDED_STROKES = new Set([
+        'rgba(255,255,255,0.5)', // previous splines overlay
+        'rgb(255,255,255)',
+        '#ffffff',
+        'rgba(255,127,14,0.5)', // inactive layers
+        'rgb(255,127,14)',
+        '#ff7f0e',
+        'rgb(0,128,0)' // first-point marker
+    ]);
+
     const splinePaths = Array.from(pathElements).filter(p => {
-        const stroke = p.getAttribute('stroke');
-        return stroke !== 'rgba(255, 255, 255, 0.5)' && stroke !== '#ff7f0e';
+        const stroke = normalizeStroke(p.getAttribute('stroke'));
+        return !EXCLUDED_STROKES.has(stroke);
     });
 
     const usePathSampling = splinePaths.length === onWidgets.length;
@@ -726,14 +857,38 @@ export default class SplineEditor2 {
         }
 
         const normalizedCoords = this.normalizePoints(sampledCoords);
+        
+
+        // Compute driver-offset inheritance for driven POINTS layers
+        const isHanddraw = widget?.value?.type === 'handdraw';
+        const interp = widget.value.interpolation || 'linear';
+        const outInterpolation = isHanddraw ? 'linear' : interp;
+        const isDrivenOn = !!widget.value.driven;
+        const driverName = widget.value._drivenConfig?.driver;
+        let driver_offset_inherit = 0;
+        if (interp === 'points' && isDrivenOn && driverName && driverName !== 'None') {
+          const off = Number(widget.value.offset || 0) || 0;
+          const aPause = Number(widget.value.a_pause || 0) || 0;
+          const zPause = Number(widget.value.z_pause || 0) || 0;
+          // Positive offset delays start; negative offset is an early-start (no added delay)
+          // Inherit only delaying components so driver’s motion starts later for this driven layer
+          driver_offset_inherit = Math.max(0, off) + aPause + zPause;
+        }
 
         allSplineData.push({
             on: widget.value.on,
             name: widget.value.name,
-            interpolation: widget.value.interpolation || 'linear',
+            interpolation: outInterpolation,
+            type: widget.value.type || 'spline',
             repeat: widget.value.repeat || 1,
+            offset: widget.value.offset || 0,
+            a_pause: widget.value.a_pause || 0,
+            z_pause: widget.value.z_pause || 0,
+            driven: !!widget.value.driven,
+            driver: driverName || "",
+            driver_offset_inherit,
             points_store: widget.value.points_store, // Always store the raw control points
-            coordinates: JSON.stringify(normalizedCoords)
+            coordinates: normalizedCoords
         });
     }
 
@@ -741,8 +896,9 @@ export default class SplineEditor2 {
     if (this.coordWidget) {
         const coordString = JSON.stringify(allSplineData);
         this.coordWidget.value = coordString;
+        
     } else {
-        console.log(`[updatePath] WARNING: coordWidget is null/undefined!`);
+        console.warn(`[updatePath] WARNING: coordWidget is null/undefined!`);
     }
   };
   recenterBackgroundImage = () => {
@@ -880,19 +1036,24 @@ export default class SplineEditor2 {
   };
 
   createContextMenu = () => {
-    document.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-    });
-
-    document.addEventListener('click', () => {
-      document.querySelectorAll('.spline-editor-context-menu').forEach(menu => {
-        menu.style.display = 'none';
-      });
-    });
+    // Avoid global handlers that interfere with dialogs/prompts.
 
     this.node.menuItems.forEach((menuItem, index) => {
       menuItem.addEventListener('click', (e) => {
         e.preventDefault();
+        // Scoped handlers to hide menus; ignore clicks inside LiteGraph dialogs/prompts
+        const hideOpenMenus = (ev) => {
+          const target = ev && ev.target;
+          const withinDialog = target && (target.closest?.('.litegraph .dialog') || target.closest?.('.litegraph.liteprompt') || target.closest?.('.litedialog'));
+          if (withinDialog) return;
+          document.querySelectorAll('.spline-editor-context-menu').forEach(menu => {
+            menu.style.display = 'none';
+          });
+          document.removeEventListener('click', hideOpenMenus, true);
+          document.removeEventListener('contextmenu', hideOpenMenus, true);
+        };
+        document.addEventListener('click', hideOpenMenus, true);
+        document.addEventListener('contextmenu', hideOpenMenus, true);
         switch (index) {
           case 0:
             // Invert point order
@@ -1022,7 +1183,7 @@ export default class SplineEditor2 {
       return;
     }
 
-    this.previousSplinesLayer = this.vis.add(pv.Panel);
+    this.previousSplinesLayer = this.vis.add(pv.Panel).events("none");
 
     // Render coordinates (animated paths) as lines
     if (this.previousSplineData && this.previousSplineData.length > 0) {
@@ -1044,6 +1205,7 @@ export default class SplineEditor2 {
             }
             return d.y;
           })
+          .events("none")
           .strokeStyle("rgba(255, 255, 255, 0.5)")
           .lineWidth(3)
           .interpolate("linear");
@@ -1091,6 +1253,7 @@ export default class SplineEditor2 {
             }
             return d.y;
           })
+          .events("none")
           .radius(6)
           .shape("circle")
           .strokeStyle("rgba(255, 255, 255, 0.5)")
