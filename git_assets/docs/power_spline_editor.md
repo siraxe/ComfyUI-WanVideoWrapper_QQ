@@ -15,14 +15,26 @@
 - Ctrl + left - add point between
 - Shift + left - add next point
 - Shift + middle on point - make hard point
+
+</td>
+</tr>
+
+<tr>
+<td width="35%">
+
+![Spline Editor](../img/s3.webp)
+
+</td>
+<td width="65%" valign="top">
+
 ### Draw type splines
 - Shift + Left click drag on layer name to reposition it in the list
 - Right click ui has edit button
 - Middle click on canvas stops edit/create mode
 
-
 </td>
 </tr>
+
 <tr>
 <td width="35%">
 
