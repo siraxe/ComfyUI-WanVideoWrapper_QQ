@@ -555,6 +555,11 @@ class PowerSplineEditor:
                                     driver_acceleration = driver_easing_config.get('acceleration', 0.00)
                                     break
 
+                            # Gather driver's own timing so consumers can respect it
+                            driver_start_pause = int(driver_spline_data.get('a_pause', 0))
+                            driver_end_pause = int(driver_spline_data.get('z_pause', 0))
+                            driver_offset_val = int(driver_spline_data.get('offset', 0))
+
                             # Store driver info for ALL interpolation modes
                             # Let draw_shapes.py apply the offset at the right time
                             driver_info_for_layer = {
@@ -564,7 +569,11 @@ class PowerSplineEditor:
                                 "easing_function": driver_easing_function,
                                 "easing_path": driver_easing_path,
                                 "easing_strength": driver_easing_strength,
-                                "acceleration": driver_acceleration
+                                "acceleration": driver_acceleration,
+                                # Driver timing (used by DrawShapeOnPath to delay/advance driver motion)
+                                "start_pause": driver_start_pause,
+                                "end_pause": driver_end_pause,
+                                "offset": driver_offset_val
                             }
                             print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale}, easing={driver_easing_function})")
                         else:

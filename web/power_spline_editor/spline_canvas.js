@@ -940,13 +940,18 @@ export default class SplineEditor2 {
         const isDrivenOn = !!widget.value.driven;
         const driverName = widget.value._drivenConfig?.driver;
         let driver_offset_inherit = 0;
-        if (interp === 'points' && isDrivenOn && driverName && driverName !== 'None') {
-          const off = Number(widget.value.offset || 0) || 0;
-          const aPause = Number(widget.value.a_pause || 0) || 0;
-          const zPause = Number(widget.value.z_pause || 0) || 0;
-          // Positive offset delays start; negative offset is an early-start (no added delay)
-          // Inherit only delaying components so driver’s motion starts later for this driven layer
-          driver_offset_inherit = Math.max(0, off) + aPause + zPause;
+        if (isDrivenOn && driverName && driverName !== 'None') {
+          // Find the driver widget by its name among all widgets
+          const driverWidget = onWidgets.find(w => (w?.value?.name) === driverName) 
+                              || allWidgets.find(w => (w?.value?.name) === driverName);
+          if (driverWidget && driverWidget.value) {
+            const dOff = Number(driverWidget.value.offset || 0) || 0;
+            const dAPause = Number(driverWidget.value.a_pause || 0) || 0;
+            const dZPause = Number(driverWidget.value.z_pause || 0) || 0;
+            // Offset can delay (positive) or start early (negative). Pauses only delay.
+            // Inherit driver's offset directly and add driver's A/Z pauses.
+            driver_offset_inherit = dOff + dAPause + dZPause;
+          }
         }
 
         allSplineData.push({

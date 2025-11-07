@@ -24,12 +24,20 @@ export function drawDriverLines(ctx, node) {
             const driverWidget = widgetMap.get(driverName);
 
             if (driverWidget && drivenWidget.hitAreas?.drivenToggle && driverWidget.hitAreas?.name) {
-                // Point A (start): Driven layer's toggle button (center, offset left)
-                const startX = drivenWidget.hitAreas.drivenToggle.bounds[0] + drivenWidget.hitAreas.drivenToggle.bounds[1] / 2 - 20;
+                // Safely extract bounds (widgets may store [x,width] or [x,y,w,h])
+                const tBounds = drivenWidget.hitAreas.drivenToggle.bounds || [0,0];
+                const nBounds = driverWidget.hitAreas.name.bounds || [0,0];
+                const tX = tBounds[0];
+                const tW = tBounds.length > 2 ? tBounds[2] : tBounds[1];
+                const nX = nBounds[0];
+                const nW = nBounds.length > 2 ? nBounds[2] : nBounds[1];
+
+                // Point A (start): center of the driven layer's toggle background
+                const startX = tX + (tW || 0) * 0.5;
                 const startY = drivenWidget.last_y + LiteGraph.NODE_WIDGET_HEIGHT / 2;
 
-                // Point B (end): Near the end of the driver layer's name (35% across)
-                const endX = driverWidget.hitAreas.name.bounds[0] + driverWidget.hitAreas.name.bounds[2] * 0.35;
+                // Point B (end): somewhere into the driver layer's name area (35% across)
+                const endX = nX + (nW || 0) * 0.35;
                 const endY = driverWidget.last_y + LiteGraph.NODE_WIDGET_HEIGHT / 2;
 
                 // Draw the line

@@ -830,7 +830,36 @@ export function showCustomLayerMenu(event, widget, node, position) {
             const newName = v || "Spline";
             const otherSplineWidgets = node.widgets.filter(w => w !== widget && w.name?.startsWith("spline_"));
             const existingNames = otherSplineWidgets.map(w => w?.value?.name).filter(n => !!n);
+            const oldName = widget.value.name; // Store old name before changing
             widget.value.name = node.generateUniqueName(newName, existingNames);
+
+            // Update driver references in other layers that were using this layer as a driver
+            if (oldName && oldName !== widget.value.name) {
+                node.widgets.forEach(w => {
+                    if (w !== widget && w.name?.startsWith("spline_") && w.value) {
+                        // Check both active driven config and preserved config
+                        let needsUpdate = false;
+
+                        // Check active driven config
+                        if (w.value.driven && w.value.driven.driver === oldName) {
+                            w.value.driven.driver = widget.value.name;
+                            needsUpdate = true;
+                        }
+
+                        // Check preserved driven config (when toggle is off)
+                        if (w.value._drivenConfig && w.value._drivenConfig.driver === oldName) {
+                            w.value._drivenConfig.driver = widget.value.name;
+                            needsUpdate = true;
+                        }
+
+                        // Log the update for debugging
+                        if (needsUpdate) {
+                            console.log(`Updated driver reference in layer "${w.value.name}" from "${oldName}" to "${widget.value.name}"`);
+                        }
+                    }
+                });
+            }
+
             node.setDirtyCanvas(true, true);
         });
     }));

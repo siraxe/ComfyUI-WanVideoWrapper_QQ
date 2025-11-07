@@ -238,14 +238,12 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                         driver_d_scale = layer_driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
 
                         if interpolated_driver and len(interpolated_driver) > 0:
-                            # Inherit start delay per static layer
-                            inherit_delay = 0
-                            try:
-                                if static_points_pause_frames_list and layer_idx < len(static_points_pause_frames_list):
-                                    inherit_delay = max(0, int(static_points_pause_frames_list[layer_idx][0]))
-                            except Exception:
-                                inherit_delay = 0
-                            eff_frame = max(0, frame_index - inherit_delay)
+                            # Respect DRIVER timing: A-pause delays, offset may delay(+)/advance(-)
+                            driver_start_p = int(layer_driver_info.get('start_pause', 0))
+                            driver_offset_val = int(layer_driver_info.get('offset', 0))
+                            pos_delay = driver_start_p + max(0, driver_offset_val)
+                            neg_lead = -min(0, driver_offset_val)
+                            eff_frame = max(0, frame_index - pos_delay + neg_lead)
                             driver_offset_x, driver_offset_y = self._calculate_driver_offset(
                                 eff_frame, interpolated_driver, (0, 0),
                                 total_frames, driver_d_scale, frame_width, frame_height
@@ -287,11 +285,12 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 driver_pause_frames = driver_info.get('pause_frames', (0, 0))
                 d_scale = driver_info.get('d_scale', 1.0)
                 
-                # Calculate driver offset with inherited start delay from the driven points layer
-                inherit_delay = 0
-                if path_idx < len(path_pause_frames) and isinstance(path_pause_frames[path_idx], tuple):
-                    inherit_delay = max(0, int(path_pause_frames[path_idx][0] or 0))
-                eff_frame = max(0, frame_index - inherit_delay)
+                # Respect DRIVER timing for points layers
+                driver_start_p2 = int(driver_info.get('start_pause', 0))
+                driver_offset_val2 = int(driver_info.get('offset', 0))
+                pos_delay2 = driver_start_p2 + max(0, driver_offset_val2)
+                neg_lead2 = -min(0, driver_offset_val2)
+                eff_frame = max(0, frame_index - pos_delay2 + neg_lead2)
                 driver_offset_x, driver_offset_y = self._calculate_driver_offset(
                     eff_frame, interpolated_driver, driver_pause_frames,
                     total_frames, d_scale, frame_width, frame_height
@@ -346,17 +345,17 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     driver_info = coords_driver_info_list[path_idx]
                     if driver_info and not driver_info.get('is_points_mode', False):
                         interpolated_driver = driver_info.get('interpolated_path')
-                        driver_pause_frames = driver_info.get('pause_frames', (0, 0))
                         d_scale = driver_info.get('d_scale', 1.0)
 
-                        if isinstance(driver_pause_frames, tuple) and len(driver_pause_frames) == 2:
-                            pause_frames_tuple = driver_pause_frames
-                        else:
-                            pause_frames_tuple = (0, 0)
-
                         if interpolated_driver and len(interpolated_driver) > 0:
+                            # Respect driver's own timing if present
+                            driver_start_p3 = int(driver_info.get('start_pause', 0))
+                            driver_offset_val3 = int(driver_info.get('offset', 0))
+                            pos_delay3 = driver_start_p3 + max(0, driver_offset_val3)
+                            neg_lead3 = -min(0, driver_offset_val3)
+                            eff_frame3 = max(0, frame_index - pos_delay3 + neg_lead3)
                             driver_offset_x, driver_offset_y = self._calculate_driver_offset(
-                                frame_index, interpolated_driver, pause_frames_tuple,
+                                eff_frame3, interpolated_driver, (0, 0),
                                 total_frames, d_scale, frame_width, frame_height, driver_path_normalized=False
                             )
 
@@ -890,6 +889,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             'easing_function': driver_easing_function,
                             'easing_path': driver_easing_path,
                             'easing_strength': driver_easing_strength,
+                            # Propagate driver's own timing if available
+                            'start_pause': int(path_driver_info.get('start_pause', 0)),
+                            'end_pause': int(path_driver_info.get('end_pause', 0)),
+                            'offset': int(path_driver_info.get('offset', 0)),
                             'is_points_mode': (path_interpolation == 'points')
                         }
 
@@ -1063,7 +1066,11 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             'd_scale': driver_d_scale,
                             'easing_function': driver_easing_function,
                             'easing_path': driver_easing_path,
-                            'easing_strength': driver_easing_strength
+                            'easing_strength': driver_easing_strength,
+                            # Propagate driver's timing if present
+                            'start_pause': int(driver_info.get('start_pause', 0)),
+                            'end_pause': int(driver_info.get('end_pause', 0)),
+                            'offset': int(driver_info.get('offset', 0))
                         }
         elif static_points_use_driver and static_points_driver_path_processed:
             # Use the single driver for all layers (legacy mode)
@@ -1225,6 +1232,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 'easing_function': driver_info.get('easing_function', 'linear'),
                                 'easing_path': driver_info.get('easing_path', 'full'),
                                 'easing_strength': driver_info.get('easing_strength', 1.0),
+                                # Propagate driver timing fields
+                                'start_pause': int(driver_info.get('start_pause', 0)),
+                                'end_pause': int(driver_info.get('end_pause', 0)),
+                                'offset': int(driver_info.get('offset', 0)),
                                 'is_points_mode': True
                             }
                         else:
@@ -1236,6 +1247,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 'easing_function': driver_info.get('easing_function', 'linear'),
                                 'easing_path': driver_info.get('easing_path', 'full'),
                                 'easing_strength': driver_info.get('easing_strength', 1.0),
+                                # Propagate driver timing fields
+                                'start_pause': int(driver_info.get('start_pause', 0)),
+                                'end_pause': int(driver_info.get('end_pause', 0)),
+                                'offset': int(driver_info.get('offset', 0)),
                                 'is_points_mode': False
                             }
         
@@ -1361,17 +1376,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             driver_info = coords_driver_info_list[path_idx]
                             if driver_info and not driver_info.get('is_points_mode', False):
                                 interpolated_driver = driver_info.get('interpolated_path')
-                                driver_pause_frames = driver_info.get('pause_frames', (0, 0))
                                 d_scale = driver_info.get('d_scale', 1.0)
 
-                                if isinstance(driver_pause_frames, tuple) and len(driver_pause_frames) == 2:
-                                    pause_frames_tuple = driver_pause_frames
-                                else:
-                                    pause_frames_tuple = (0, 0)
-
                                 if interpolated_driver and len(interpolated_driver) > 0:
+                                    driver_start_p = int(driver_info.get('start_pause', 0))
+                                    driver_offset_val = int(driver_info.get('offset', 0))
+                                    pos_delay = driver_start_p + max(0, driver_offset_val)
+                                    neg_lead = -min(0, driver_offset_val)
+                                    eff_frame = max(0, i - pos_delay + neg_lead)
                                     driver_offset_x, driver_offset_y = self._calculate_driver_offset(
-                                        i, interpolated_driver, pause_frames_tuple,
+                                        eff_frame, interpolated_driver, (0, 0),
                                         total_frames, d_scale, frame_width, frame_height, driver_path_normalized=False
                                     )
 
@@ -1466,13 +1480,12 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 driver_d_scale = layer_driver_info.get('d_scale', 1.0)
 
                                 if interpolated_driver and len(interpolated_driver) > 0:
-                                    inherit_delay = 0
-                                    try:
-                                        if layer_idx < len(prev_start_list):
-                                            inherit_delay = max(0, int(prev_start_list[layer_idx]))
-                                    except Exception:
-                                        inherit_delay = 0
-                                    eff_frame = max(0, i - inherit_delay)
+                                    # Respect DRIVER timing in preview as well
+                                    driver_start_p = int(layer_driver_info.get('start_pause', 0))
+                                    driver_offset_val = int(layer_driver_info.get('offset', 0))
+                                    pos_delay = driver_start_p + max(0, driver_offset_val)
+                                    neg_lead = -min(0, driver_offset_val)
+                                    eff_frame = max(0, i - pos_delay + neg_lead)
                                     driver_offset_x, driver_offset_y = self._calculate_driver_offset(
                                         eff_frame, interpolated_driver, (0, 0),
                                         total_frames, driver_d_scale, frame_width, frame_height
