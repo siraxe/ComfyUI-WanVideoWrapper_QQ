@@ -272,6 +272,13 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         // Activate layer when clicking the name area (onDown for immediacy)
         this.hitAreas.name.onDown = (event, pos, node) => {
             if (!node.layerManager) return false;
+            // Shift + Left Click => begin drag-to-reorder for layers
+            if (event && event.shiftKey && (event.button === 0)) {
+                try {
+                    this._beginLayerReorderDrag(event, node);
+                    return true;
+                } catch (e) { console.warn('Failed to start reorder drag', e); }
+            }
             const current = node.layerManager.getActiveWidget?.();
             // Toggle off if clicking the currently active layer name
             if (current === this) {
@@ -282,6 +289,34 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
             return true;
         };
         this.hitAreas.name.onClick = (event, pos, node) => true; // handled onDown
+
+        // Draw insertion indicator line if a layer is being reordered
+        try {
+            const lm = this.parent?.layerManager || node?.layerManager;
+            const layers = lm?.getSplineWidgets?.() || [];
+            const dragging = layers.find(w => w && w._reorderDragActive);
+            if (dragging) {
+                const target = dragging._reorderTargetIndex ?? -1;
+                const myIndex = layers.indexOf(this);
+                const isLast = myIndex === (layers.length - 1);
+                const showTopLine = myIndex === target && target < layers.length;
+                const showBottomLine = isLast && target === layers.length; // after-last sentinel
+                if (showTopLine || showBottomLine) {
+                    ctx.save();
+                    ctx.strokeStyle = '#2cc6ff';
+                    ctx.globalAlpha = app.canvas.editor_alpha;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const left = 10;
+                    const right = node.size[0] - 10;
+                    const y = showTopLine ? (posY - 1) : (posY + height - 1);
+                    ctx.moveTo(left, y);
+                    ctx.lineTo(right, y);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+        } catch {}
 
         ctx.restore();
     }
@@ -572,6 +607,17 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
     mouse(event, pos, node) {
         var _a, _b, _c;
         const canvas = app.canvas;
+        // If currently in a reorder drag (initiated via Shift+Click), swallow events
+        if (this._reorderDragActive) {
+            // Do not process widget hit areas while reordering to avoid accidental toggles
+            if (event.type === 'pointerup') {
+                // Let the global handler finish the drop
+                return true;
+            }
+            if (event.type === 'pointermove') {
+                return true;
+            }
+        }
         if (event.type == "pointerdown") {
             this.mouseDowned = [...pos];
             this.isMouseDownedAndOver = true;
@@ -649,6 +695,89 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
             return (_c = this.onMouseMove(event, pos, node)) !== null && _c !== void 0 ? _c : true;
         }
         return false;
+    }
+
+    // --- Drag-to-reorder (Shift + Left Click on name) ---
+    _beginLayerReorderDrag(pointerDownEvent, node) {
+        // Ensure this layer is the active widget during drag
+        try { node.layerManager?.setActiveWidget(this); } catch {}
+        const splines = node.layerManager?.getSplineWidgets?.() || [];
+        const startIndex = splines.indexOf(this);
+        if (startIndex < 0) return;
+
+        this._reorderDragActive = true;
+        this._reorderStartIndex = startIndex;
+        this._reorderTargetIndex = startIndex;
+        this._reorderStartClientY = pointerDownEvent.clientY;
+
+        // Cursor feedback
+        this._prevBodyCursor = document.body.style.cursor;
+        document.body.style.cursor = 'grabbing';
+        try { app.canvas.canvas.style.cursor = 'grabbing'; } catch {}
+
+        const onMove = (e) => {
+            if (!this._reorderDragActive) return;
+            const dy = (e.clientY - this._reorderStartClientY) || 0;
+            const step = Math.round(dy / (LiteGraph.NODE_WIDGET_HEIGHT || 24));
+            let idx = this._reorderStartIndex + step;
+            // Allow dropping after the last layer (idx === splines.length)
+            idx = Math.max(0, Math.min(splines.length, idx));
+            if (idx !== this._reorderTargetIndex) {
+                this._reorderTargetIndex = idx;
+            }
+            try { node.setDirtyCanvas(true, true); } catch {}
+        };
+        const onUp = (e) => {
+            document.removeEventListener('pointermove', onMove, true);
+            document.removeEventListener('pointerup', onUp, true);
+            // Restore cursor
+            try { app.canvas.canvas.style.cursor = ''; } catch {}
+            document.body.style.cursor = this._prevBodyCursor || '';
+
+            if (!this._reorderDragActive) return;
+            this._reorderDragActive = false;
+
+            const splinesNow = node.layerManager?.getSplineWidgets?.() || [];
+            const from = splinesNow.indexOf(this);
+            let to = this._reorderTargetIndex ?? from;
+            if (from >= 0 && to >= 0 && from !== to) {
+                const w = node.widgets;
+                const before = to < splinesNow.length ? splinesNow[to] : undefined;
+                // Remove from current global position
+                const fromGlobal = w.indexOf(this);
+                if (fromGlobal >= 0) {
+                    w.splice(fromGlobal, 1);
+                    if (before) {
+                        const targetGlobal = w.indexOf(before);
+                        if (targetGlobal >= 0) {
+                            w.splice(targetGlobal, 0, this);
+                        } else {
+                            // If not found, fall through to end-of-block insert
+                            const afterRemovalSplines = node.layerManager?.getSplineWidgets?.() || [];
+                            const last = afterRemovalSplines[afterRemovalSplines.length - 1];
+                            const lastIdx = last ? w.indexOf(last) : -1;
+                            const insertAfter = lastIdx >= 0 ? lastIdx + 1 : w.length;
+                            w.splice(insertAfter, 0, this);
+                        }
+                    } else {
+                        // Insert at end of spline block (after last)
+                        const afterRemovalSplines = node.layerManager?.getSplineWidgets?.() || [];
+                        const last = afterRemovalSplines[afterRemovalSplines.length - 1];
+                        const lastIdx = last ? w.indexOf(last) : -1;
+                        const insertAfter = lastIdx >= 0 ? lastIdx + 1 : w.length;
+                        w.splice(insertAfter, 0, this);
+                    }
+                    try { node.layerManager?.setActiveWidget(this); } catch {}
+                    try { node.setDirtyCanvas(true, true); } catch {}
+                }
+            }
+            this._reorderStartIndex = undefined;
+            this._reorderTargetIndex = undefined;
+            this._reorderStartClientY = undefined;
+        };
+
+        document.addEventListener('pointermove', onMove, true);
+        document.addEventListener('pointerup', onUp, true);
     }
     serializeValue(node, index) {
         // Return a deep copy to prevent reference sharing between widgets during serialization
