@@ -1,5 +1,13 @@
 # ComfyUI-WanVideoWrapper_QQ
 
+## Updates
+**Version 1.0.2** - 2025-11-07
+- **New Hand-Drawn Spline Layer**: Added freeform path drawing with full animation controls. Special thanks to [filliptm](https://github.com/filliptm/ComfyUI_Fill-Nodes) for the implementation example
+- **Enhanced Spline Editor Fixes**: Improved coordinate parsing, multi-spline handling, and UI fixes across canvas, context menus, and layer rendering
+- **Independent Layer Point Control**: Layer points now drive independently for better animation path control
+
+---
+
 A collection of custom nodes for ComfyUI providing video manipulation, LoRA loading, path animation, and visual drawing tools for WanVideo workflows.
 
 <table>
