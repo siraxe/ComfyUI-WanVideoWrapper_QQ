@@ -59,17 +59,52 @@ export default class SplineEditor2 {
 
     // Get interpolation from active widget
     this.interpolation = 'linear';
-    // Handdraw mode (UI/UX first pass)
-    this._handdrawActive = false;
+    // Handdraw modes: 'off' | 'create' | 'edit'
+    this._handdrawMode = 'off';
+    this._handdrawActive = false; // legacy flag used by renderer
+    this._handdrawEditWidget = null;
     this._handdrawPath = [];
-    this.enterHanddrawMode = () => {
+    // Global toggle for inactive flow animation (default ON)
+    this._inactiveFlowEnabled = true;
+    this.enterHanddrawMode = (mode = 'create', widget = null) => {
+      this._handdrawMode = mode;
+      this._handdrawEditWidget = mode === 'edit' ? widget : null;
       this._handdrawActive = true;
       this._handdrawPath = [];
+
+      // Install right-click handler to exit edit mode reliably
+      if (this._teardownHanddrawListeners) {
+        try { this._teardownHanddrawListeners(); } catch {}
+        this._teardownHanddrawListeners = null;
+      }
+      const canvasEl = this.vis?.canvas?.();
+      if ((mode === 'edit' || mode === 'create') && canvasEl) {
+        const onMouseDown = (ev) => {
+          // Middle click exits handdraw modes (edit/create), preserving current curve
+          if (ev && ev.button === 1) {
+            ev.preventDefault?.(); ev.stopPropagation?.();
+            try { this.exitHanddrawMode(false); } catch {}
+            try { this.layerRenderer?.render(); } catch {}
+            try { this.node?.setDirtyCanvas?.(true, true); } catch {}
+          }
+        };
+        canvasEl.addEventListener('mousedown', onMouseDown, true);
+        this._teardownHanddrawListeners = () => {
+          canvasEl.removeEventListener('mousedown', onMouseDown, true);
+        };
+      }
     };
     this.exitHanddrawMode = (commit = false) => {
-      // Only cancel UI state; no commit normalization here (handled in mousedown mouseup flow)
+      // Only cancel UI state; no commit normalization here (handled in mousedown/mouseup flow)
+      this._handdrawMode = 'off';
+      this._handdrawEditWidget = null;
       this._handdrawActive = false;
       this._handdrawPath = [];
+      // Remove temporary listeners
+      if (this._teardownHanddrawListeners) {
+        try { this._teardownHanddrawListeners(); } catch {}
+        this._teardownHanddrawListeners = null;
+      }
       // Re-render to update any UI state
       try { this.layerRenderer?.render(); } catch {}
     };
@@ -333,8 +368,9 @@ export default class SplineEditor2 {
             // Normalize and commit
             const norm = this.normalizePoints(simplified);
             try { this.node?.commitHanddraw?.(norm); } catch {}
-            this._handdrawActive = false;
+            // After committing, remain in current mode; clear temporary path
             this._handdrawPath = [];
+            this._handdrawActive = (this._handdrawMode !== 'off');
             // Reload active points from widget and re-render
             this.points = this.getActivePoints();
             this.layerRenderer.render();
@@ -408,10 +444,19 @@ export default class SplineEditor2 {
           this.updatePath();
         }
         else if (pv.event.button === 2) {
-          // Open custom canvas context menu and suppress native one
+          // Right-click behavior: open custom canvas context menu and suppress native one
           try { pv.event.preventDefault?.(); pv.event.stopPropagation?.(); } catch {}
 
           const menuEl = this.node.contextMenu;
+          // Update first menu item label based on active layer type
+          try {
+            const activeWidget = this.getActiveWidget?.();
+            const isHanddraw = !!(activeWidget && activeWidget.value && activeWidget.value.type === 'handdraw');
+            const firstItem = this.node.menuItems && this.node.menuItems[0];
+            if (firstItem) {
+              firstItem.textContent = isHanddraw ? 'Edit' : 'Invert point order';
+            }
+          } catch {}
           menuEl.style.display = 'block';
           menuEl.style.left = `${pv.event.clientX}px`;
           menuEl.style.top = `${pv.event.clientY}px`;
@@ -444,6 +489,13 @@ export default class SplineEditor2 {
             document.addEventListener('contextmenu', preventBrowserMenu, true);
             document.addEventListener('keydown', onEsc, true);
           }, 0);
+        }
+        // Middle click: exit any handdraw mode (edit/create) and keep current edits
+        else if (pv.event.button === 1) {
+          try { this.exitHanddrawMode(false); } catch {}
+          try { this.layerRenderer?.render(); } catch {}
+          try { this.node?.setDirtyCanvas?.(true, true); } catch {}
+          return this;
         }
       })
       
@@ -479,10 +531,21 @@ export default class SplineEditor2 {
           return;
         }
 
-        // Alt+Middle-Click: Translation (any point)
+        // Alt + Middle-Click: Translation (any point)
         if (pv.event.altKey && pv.event.button === 1) {
           this.isDraggingAll = true;
           this.dragStartPos = { x: mouseX, y: mouseY };
+          // Snapshot original positions to keep a rigid translation anchored at clicked point
+          this.translateAllSnapshot = {
+            points: this.points.map(p => ({ ...p })),
+            pivotIndex: this.i,
+            pivotX: this.points[this.i].x,
+            pivotY: this.points[this.i].y,
+            offsetX: this.dragOffset ? this.dragOffset.x : 0,
+            offsetY: this.dragOffset ? this.dragOffset.y : 0,
+          };
+          // Provide a neutral fix object so Protovis drag doesn't apply extra offsets
+          try { if (dot && typeof dot === 'object') { dot.fix = { x: 0, y: 0 }; } } catch {}
           this.isDragging = true;
           return;
         }
@@ -505,6 +568,7 @@ export default class SplineEditor2 {
         this.isDragging = true;
         if (pv.event.button === 2 && this.i !== 0 && this.i !== this.points.length - 1) {
           this.points.splice(this.i--, 1);
+          this._forceRebuildNextRender = true;
           this.layerRenderer.render();
         }
     };
@@ -516,6 +580,9 @@ export default class SplineEditor2 {
         if (this.pathElements !== null) {
           this.updatePath();
         }
+        // Clear any protovis drag fix offsets left on data objects
+        try { if (Array.isArray(this.points)) { for (const p of this.points) { if (p && p.fix !== undefined) delete p.fix; } } } catch {}
+        this.translateAllSnapshot = null;
         this.dragOffset = null;
         this.isDragging = false;
         this.isDraggingAll = false;
@@ -541,20 +608,20 @@ export default class SplineEditor2 {
 
           // Rotate all points around the anchor point
           for (let j = 0; j < this.originalPoints.length; j++) {
+            const originalPoint = this.originalPoints[j];
             if (j === this.anchorIndex) {
               // Keep anchor point fixed
-              this.points[j] = { ...this.anchorPoint };
+              this.points[j].x = this.anchorPoint.x;
+              this.points[j].y = this.anchorPoint.y;
+              this.points[j].highlighted = !!originalPoint.highlighted;
             } else {
-              const originalPoint = this.originalPoints[j];
               const vecX = originalPoint.x - this.anchorPoint.x;
               const vecY = originalPoint.y - this.anchorPoint.y;
               const rotatedX = vecX * cos - vecY * sin;
               const rotatedY = vecX * sin + vecY * cos;
-              this.points[j] = {
-                x: this.anchorPoint.x + rotatedX,
-                y: this.anchorPoint.y + rotatedY,
-                highlighted: originalPoint.highlighted || false
-              };
+              this.points[j].x = this.anchorPoint.x + rotatedX;
+              this.points[j].y = this.anchorPoint.y + rotatedY;
+              this.points[j].highlighted = !!originalPoint.highlighted;
             }
           }
           this.layerRenderer.render();
@@ -562,15 +629,22 @@ export default class SplineEditor2 {
         }
 
         if (this.isDraggingAll && this.dragStartPos) {
-          const deltaX = adjustedX - this.dragStartPos.x;
-          const deltaY = adjustedY - this.dragStartPos.y;
-          this.points = this.points.map(point => ({
-            x: point.x + deltaX,
-            y: point.y + deltaY,
-            highlighted: point.highlighted || false
-          }));
-          this.dragStartPos.x = adjustedX;
-          this.dragStartPos.y = adjustedY;
+          // Rigid translation anchored at originally clicked point using snapshot
+          const snap = this.translateAllSnapshot;
+          const desiredX = adjustedX + (snap ? snap.offsetX : (this.dragOffset ? this.dragOffset.x : 0));
+          const desiredY = adjustedY + (snap ? snap.offsetY : (this.dragOffset ? this.dragOffset.y : 0));
+          const basePivotX = snap ? snap.pivotX : this.dragStartPos.x;
+          const basePivotY = snap ? snap.pivotY : this.dragStartPos.y;
+          const deltaX = desiredX - basePivotX;
+          const deltaY = desiredY - basePivotY;
+          try { if (d && typeof d === 'object') { d.fix = { x: 0, y: 0 }; } } catch {}
+          const basePoints = snap ? snap.points : this.points;
+          for (let j = 0; j < this.points.length; j++) {
+            const bp = basePoints[j] || this.points[j];
+            this.points[j].x = bp.x + deltaX;
+            this.points[j].y = bp.y + deltaY;
+            this.points[j].highlighted = !!this.points[j].highlighted;
+          }
           this.layerRenderer.render();
           return;
         }
@@ -584,18 +658,18 @@ export default class SplineEditor2 {
 
           // Scale all points relative to the anchor point
           for (let j = 0; j < this.originalPoints.length; j++) {
+            const originalPoint = this.originalPoints[j];
             if (j === this.anchorIndex) {
               // Keep anchor point fixed
-              this.points[j] = { ...this.anchorPoint };
+              this.points[j].x = this.anchorPoint.x;
+              this.points[j].y = this.anchorPoint.y;
+              this.points[j].highlighted = !!originalPoint.highlighted;
             } else {
-              const originalPoint = this.originalPoints[j];
               const vecX = originalPoint.x - this.anchorPoint.x;
               const vecY = originalPoint.y - this.anchorPoint.y;
-              this.points[j] = {
-                x: this.anchorPoint.x + vecX * clampedScaleFactor,
-                y: this.anchorPoint.y + vecY * clampedScaleFactor,
-                highlighted: originalPoint.highlighted || false
-              };
+              this.points[j].x = this.anchorPoint.x + vecX * clampedScaleFactor;
+              this.points[j].y = this.anchorPoint.y + vecY * clampedScaleFactor;
+              this.points[j].highlighted = !!originalPoint.highlighted;
             }
           }
           this.layerRenderer.render();
@@ -604,11 +678,9 @@ export default class SplineEditor2 {
 
         if (!this.isDraggingAll && !this.isScalingAll && !this.isRotatingAll) {
           if (this.dragOffset) {
-            this.points[this.i] = {
-              x: adjustedX + this.dragOffset.x,
-              y: adjustedY + this.dragOffset.y,
-              highlighted: this.points[this.i].highlighted || false
-            };
+            this.points[this.i].x = adjustedX + this.dragOffset.x;
+            this.points[this.i].y = adjustedY + this.dragOffset.y;
+            this.points[this.i].highlighted = !!this.points[this.i].highlighted;
           }
           this.layerRenderer.render();
         }
@@ -616,14 +688,16 @@ export default class SplineEditor2 {
 
     this.mouseOverHandler = (d) => {
         this.hoverIndex = this.points.indexOf(d);
-        this.layerRenderer.render();
+        // Avoid rebuilding the scene on hover; a simple re-render is sufficient
+        if (this.layerRenderer?.vis) this.layerRenderer.vis.render();
     };
 
     this.mouseOutHandler = () => {
         if (!this.isDragging) {
             this.hoverIndex = -1;
         }
-        this.layerRenderer.render();
+        // Avoid rebuilding the scene on hover out
+        if (this.layerRenderer?.vis) this.layerRenderer.vis.render();
     };
       
     this.backgroundImage = this.vis.add(pv.Image).visible(false)
@@ -1056,10 +1130,19 @@ export default class SplineEditor2 {
         document.addEventListener('contextmenu', hideOpenMenus, true);
         switch (index) {
           case 0:
-            // Invert point order
+            // Context action depends on active layer type
             e.preventDefault();
-            this.points.reverse();
-            this.updatePath();
+            const aw = this.getActiveWidget?.();
+            const isHand = !!(aw && aw.value && aw.value.type === 'handdraw');
+            if (isHand) {
+              // Enter edit mode for the active handdraw layer
+              try { this.enterHanddrawMode('edit', aw); } catch {}
+              try { this.layerRenderer?.render(); } catch {}
+            } else {
+              // Invert point order for non-handdraw layers
+              this.points.reverse();
+              this.updatePath();
+            }
             this.node.contextMenu.style.display = 'none';
             break;
           case 1:

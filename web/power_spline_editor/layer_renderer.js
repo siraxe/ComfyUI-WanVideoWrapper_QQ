@@ -18,27 +18,228 @@ export class LayerRenderer {
         // Store metadata for inactive layers to enable hit detection
         // Format: [{ widget: widgetRef, points: [...], panel: panelRef }, ...]
         this.inactiveLayerMetadata = [];
+
+        // Flow animation for inactive layers (non-"points" types)
+        this._dashAnimOffset = 0;
+        this._lastDashUpdateMs = 0;
+        this._dashTimer = setInterval(() => {
+            this._dashAnimOffset = (this._dashAnimOffset + 2) % 1000;
+            try { this.updateInactiveDash(); } catch {}
+        }, 80);
+    }
+
+    // Apply/update marching-dash on inactive paths via DOM attributes
+    updateInactiveDash() {
+        if (!this.splineEditor) return;
+        const svg = this.vis && this.vis.canvas ? this.vis.canvas() : null;
+        if (!svg) return;
+        // If disabled, strip dash styling and stop
+        if (this.splineEditor._inactiveFlowEnabled === false) {
+            const allPaths = svg.getElementsByTagName('path');
+            for (const p of allPaths) {
+                if (p.hasAttribute('stroke-dasharray')) p.removeAttribute('stroke-dasharray');
+                if (p.hasAttribute('stroke-dashoffset')) p.removeAttribute('stroke-dashoffset');
+                if (p.dataset && 'dashOffset' in p.dataset) delete p.dataset.dashOffset;
+            }
+            return;
+        }
+        const paths = svg.getElementsByTagName('path');
+        // If any target path lacks a dasharray, force an immediate apply (skip throttle)
+        let needsInitialApply = false;
+        for (const el of paths) {
+            if (el.getAttribute) {
+                const stroke = (el.getAttribute('stroke') || '').toLowerCase();
+                const sw = Number(el.getAttribute('stroke-width') || '0');
+                if ((stroke.includes('120,70,180') || stroke.includes('#7846b4') || stroke.includes('255,127,14') || stroke.includes('#ff7f0e')) && sw > 1 && !el.hasAttribute('stroke-dasharray')) {
+                    needsInitialApply = true; break;
+                }
+            }
+        }
+        // Throttle dash updates to reduce load during active drawing
+        const now = Date.now();
+        const minInterval = this.splineEditor._handdrawActive ? 120 : 60; // slower while drawing
+        if (!needsInitialApply && (now - this._lastDashUpdateMs < minInterval)) return;
+        this._lastDashUpdateMs = now;
+        const norm = (s) => (s || '').replace(/\s+/g, '').toLowerCase();
+        const isInactiveTarget = (p) => {
+            const stroke = norm(p.getAttribute('stroke'));
+            const blue = '#1f77b4'; // active normal
+            const yellow = '#d7c400'; // active handdraw
+            if (stroke === blue || stroke === '#1f77b4' || stroke === yellow || stroke === '#d7c400') return false;
+            // Orange inactive (rgba or rgb) or purple inactive
+            const isOrange = stroke.includes('255,127,14') || stroke.includes('#ff7f0e') || stroke.includes('rgba(255,127,14') || stroke.includes('rgb(255,127,14)');
+            const isPurple = stroke.includes('120,70,180') || stroke.includes('#7846b4') || stroke.includes('rgb(120,70,180)');
+            if (!(isOrange || isPurple)) return false;
+            // Exclude thin 1px orange (points type) by stroke-width
+            const sw = Number(p.getAttribute('stroke-width') || '0');
+            if (isOrange && sw <= 1.01) return false;
+            return true;
+        };
+        // Helper easing functions (return 0..1 shape factor)
+        const easeValue = (t, mode) => {
+            t = Math.max(0, Math.min(1, t));
+            switch (mode) {
+                case 'in': return t; // grow along path
+                case 'out': return 1 - t; // shrink along path
+                case 'in_out': return Math.sin(Math.PI * t); // squeezed at ends, widest in middle
+                case 'out_in': return 1 - Math.sin(Math.PI * t); // widest at ends, squeezed middle
+                case 'linear':
+                default: return 1; // constant strip size
+            }
+        };
+        // Split candidates by color to preserve draw order mapping
+        const phase = ((this._dashAnimOffset % 200) / 200);
+        const purplePaths = [];
+        const orangePaths = [];
+        for (const p of paths) {
+            if (!isInactiveTarget(p)) continue;
+            const stroke = norm(p.getAttribute('stroke'));
+            const isPurple = stroke.includes('120,70,180') || stroke.includes('#7846b4') || stroke.includes('rgb(120,70,180)');
+            const list = isPurple ? purplePaths : orangePaths;
+            const len = (typeof p.getTotalLength === 'function') ? p.getTotalLength() : 0;
+            list.push({ p, len });
+        }
+        const purpleMetas = (this.inactiveLayerMetadata || []).filter(d => d?.widget?.value?.type === 'handdraw');
+        const orangeMetas = (this.inactiveLayerMetadata || []).filter(d => (d?.widget?.value?.type !== 'handdraw') && ((d?.widget?.value?.interpolation || 'linear') !== 'points'));
+        const applyFor = (pairs, metas) => {
+            const count = Math.min(pairs.length, metas.length);
+            for (let idx = 0; idx < count; idx++) {
+                const { p, len: pathLength } = pairs[idx];
+                const easingMode = metas[idx]?.widget?.value?.easing || 'linear';
+                const segments = Math.max(14, Math.min(100, Math.round(pathLength / 36)));
+                const baseDash = 10;
+                const baseGap = 6;
+                const minFactor = 0.25;
+                const maxFactor = 1.6;
+                const pattern = [];
+                let sum = 0;
+                for (let i = 0; i < segments; i++) {
+                    const t = (i / segments + phase) % 1;
+                    const f = easeValue(t, easingMode);
+                    const dash = Math.max(2, baseDash * (minFactor + (maxFactor - minFactor) * f));
+                    const gap = Math.max(2, baseGap * (1.0 - 0.2 * f));
+                    pattern.push(dash, gap);
+                    sum += dash + gap;
+                }
+                if (sum > 0 && pathLength > 0) {
+                    const scale = pathLength / sum;
+                    for (let k = 0; k < pattern.length; k++) pattern[k] = Math.max(1, pattern[k] * scale);
+                }
+                p.setAttribute('stroke-dasharray', pattern.join(' '));
+                const dashOffsetPx = -phase * (pathLength || 1);
+                p.setAttribute('stroke-dashoffset', String(dashOffsetPx));
+            }
+        };
+        applyFor(purplePaths, purpleMetas);
+        applyFor(orangePaths, orangeMetas);
+    }
+
+    // Apply/update easing-shaped dash for ACTIVE handdraw layer (yellow line)
+    updateActiveHanddrawDash() {
+        if (!this.splineEditor || this.splineEditor._inactiveFlowEnabled === false) return;
+        const now = Date.now();
+        const minInterval = this.splineEditor._handdrawActive ? 120 : 60;
+        if ((this._lastDashUpdateMs || 0) && (now - this._lastDashUpdateMs < minInterval)) return;
+        this._lastDashUpdateMs = now;
+
+        const svg = this.vis && this.vis.canvas ? this.vis.canvas() : null;
+        if (!svg) return;
+        const active = this.node?.layerManager?.getActiveWidget?.();
+        if (!active || active.value?.type !== 'handdraw') return;
+
+        const easingMode = active.value?.easing || 'linear';
+        const paths = svg.getElementsByTagName('path');
+        const norm = (s) => (s || '').replace(/\s+/g, '').toLowerCase();
+        const yellow = '#d7c400';
+
+        // Easing factor
+        const easeValue = (t, mode) => {
+            t = Math.max(0, Math.min(1, t));
+            switch (mode) {
+                case 'in': return t;
+                case 'out': return 1 - t;
+                case 'in_out': return Math.sin(Math.PI * t);
+                case 'out_in': return 1 - Math.sin(Math.PI * t);
+                case 'linear':
+                default: return 1;
+            }
+        };
+
+        const phase = ((this._dashAnimOffset % 200) / 200);
+
+        for (const p of paths) {
+            const stroke = norm(p.getAttribute('stroke'));
+            if (stroke !== yellow && stroke !== '#d7c400') continue;
+            const pathLength = (typeof p.getTotalLength === 'function') ? p.getTotalLength() : 0;
+            const segments = Math.max(14, Math.min(100, Math.round(pathLength / 36)));
+            const baseDash = 10;
+            const baseGap = 6;
+            const minFactor = 0.35;
+            const maxFactor = 1.45;
+            const pattern = [];
+            let sum = 0;
+            for (let i = 0; i < segments; i++) {
+                const t = (i / segments + phase) % 1;
+                const f = easeValue(t, easingMode);
+                const dash = Math.max(2, baseDash * (minFactor + (maxFactor - minFactor) * f));
+                const gap = baseGap;
+                pattern.push(dash, gap);
+                sum += dash + gap;
+            }
+            if (sum > 0 && pathLength > 0) {
+                const scale = pathLength / sum;
+                for (let k = 0; k < pattern.length; k++) pattern[k] = Math.max(1, pattern[k] * scale);
+            }
+            p.setAttribute('stroke-dasharray', pattern.join(' '));
+            const dashOffsetPx = -phase * (pathLength || 1);
+            p.setAttribute('stroke-dashoffset', String(dashOffsetPx));
+        }
     }
 
     /**
      * Main render method. Clears previous drawings and redraws all layers.
      */
     render() {
+        // During drag operations, avoid rebuilding the scene graph.
+        // Recreating marks while Protovis drag behavior is active breaks internal state
+        // and causes errors like reading undefined 'x'/'fix'. Just re-render in place.
+        const forceRebuild = !!this.splineEditor._forceRebuildNextRender;
+        if (forceRebuild) {
+            this.splineEditor._forceRebuildNextRender = false;
+        }
+        if (!forceRebuild && (this.splineEditor.isDragging || this.splineEditor.isDraggingAll || this.splineEditor.isScalingAll || this.splineEditor.isRotatingAll)) {
+            this.vis.render();
+            return;
+        }
+
         this.clearLayers();
 
         const activeWidget = this.node.layerManager.getActiveWidget();
         const allWidgets = this.node.layerManager.getSplineWidgets();
+        const isDrawing = !!this.splineEditor._handdrawActive;
+        const handdrawMode = this.splineEditor._handdrawMode || 'off';
+        const activeIsHand = !!(activeWidget && activeWidget.value && activeWidget.value.type === 'handdraw');
 
         // Render inactive and off layers - each in its own isolated panel
         allWidgets.forEach(widget => {
-            if (widget !== activeWidget) {
+            // While drawing in 'create' mode, also render the currently selected layer as inactive
+            const treatActiveAsInactive = isDrawing && handdrawMode === 'create' && widget === activeWidget;
+            if (widget !== activeWidget || treatActiveAsInactive) {
                 this.drawInactiveLayer(widget);
             }
         });
 
         // Draw the active layer on top in its dedicated panel
-        if (activeWidget) {
+        if (activeWidget && !(isDrawing && handdrawMode === 'create')) {
+            // Normal case: draw the active widget unless we're creating a new handdraw stroke
             this.drawActiveLayer(activeWidget);
+        } 
+        if (this.splineEditor._handdrawActive && this.splineEditor.points && this.splineEditor.points.length > 0) {
+            // During handdraw drawing, render a live preview on top (even if another layer is selected)
+            // No active widget yet (e.g., first-ever handdraw stroke). Render a live preview
+            // using handdraw styling so users can see the stroke while drawing.
+            const pseudoWidget = { value: { interpolation: 'linear', type: 'handdraw' } };
+            this.drawActiveLayer(pseudoWidget);
         }
 
         // Ensure active panel is always the last child so it renders on top
@@ -51,6 +252,14 @@ export class LayerRenderer {
 
         // Apply the changes to the SVG
         this.vis.render();
+        // Avoid extra DOM work while freehand drawing; timer will animate
+        if (!this.splineEditor._handdrawActive) {
+            this.updateInactiveDash();
+            this.updateActiveHanddrawDash();
+        } else {
+            // still update lazily by throttle
+            this.updateActiveHanddrawDash();
+        }
     }
 
     /**
@@ -148,7 +357,11 @@ export class LayerRenderer {
                 }
                 return '#1f77b4';
             })
-            .lineWidth(() => interpolation === 'points' ? 1 : 3);
+            .lineWidth(() => {
+                // Handdraw (active) should have same thickness as normal lines
+                if (isHanddraw) return 3;
+                return interpolation === 'points' ? 1 : 3;
+            });
 
         // ALWAYS draw dots - bigger for points mode, all circles
         // Use closures to ensure drag handlers can find points via indexOf()
@@ -157,7 +370,7 @@ export class LayerRenderer {
             .left(d => d.x)
             .top(d => d.y)
             .radius(() => {
-                if (isHanddraw) return 4; // smaller points for handdraw
+                if (isHanddraw) return 2; // make yellow hand-draw points smaller
                 return interpolation === 'points' ? 9 : 6;
             })
         .shape((dot) => {
@@ -213,12 +426,12 @@ export class LayerRenderer {
     drawInactiveLayer(widget) {
         const isOff = !widget.value.on;
         const isHanddraw = widget?.value?.type === 'handdraw';
-        const strokeColor = isOff
+        let strokeColor = isOff
             ? "rgba(255, 255, 255, 0.1)"
-            : (isHanddraw ? "rgba(70, 40, 110, 0.7)" : "rgba(255, 127, 14, 0.5)");
+            : (isHanddraw ? "rgba(120, 70, 180, 0.85)" : "rgba(255, 127, 14, 0.5)");
         const fillColor = isOff
             ? "rgba(255, 255, 255, 0.1)"
-            : (isHanddraw ? "rgba(70, 40, 110, 0.5)" : "rgba(255, 127, 14, 0.4)");
+            : (isHanddraw ? "rgba(120, 70, 180, 0.6)" : "rgba(255, 127, 14, 0.4)");
 
         let points;
         try {
@@ -243,6 +456,10 @@ export class LayerRenderer {
         });
 
         const interpolation = widget.value.interpolation || 'linear';
+        // For inactive points layers (non-handdraw), reduce line opacity to 20%
+        if (!isHanddraw && !isOff && interpolation === 'points') {
+            strokeColor = "rgba(255, 127, 14, 0.2)";
+        }
 
         // Snapshot points to avoid closure issues
         const pointsSnapshot = [...points];
@@ -285,13 +502,14 @@ export class LayerRenderer {
 
         // ALWAYS draw line
         const lineWidthMain = (interpolation === 'points') ? (isHanddraw ? 3 : 1) : 3;
-        layerPanel.add(pv.Line).events("none")
+        const inactiveLine = layerPanel.add(pv.Line).events("none")
             .data(renderPoints)
             .left(d => d.x)
             .top(d => d.y)
             .interpolate(interpolation === 'points' ? 'linear' : interpolation)
             .strokeStyle(strokeColor)
             .lineWidth(lineWidthMain);
+        // Note: dash animation is applied post-render via updateInactiveDash()
 
         // If this is a handdraw layer in inactive (purple) state, render line-only and skip markers/dots
         if (isHanddraw) {
@@ -308,8 +526,17 @@ export class LayerRenderer {
                 .interpolate('linear')
                 .strokeStyle(strokeColor)
                 .lineWidth(lineWidthPts);
-            // Do not draw circles for inactive layers. Optionally keep first-point triangle for non-handdraw.
+            // For points-type layers, also show point markers when inactive (non-handdraw only)
             if (!isHanddraw && pointsSnapshot.length > 0) {
+                layerPanel.add(pv.Dot).events("none")
+                    .data(pointsSnapshot)
+                    .left(d => d.x)
+                    .top(d => d.y)
+                    .radius(7.0)
+                    .shape('circle')
+                    .strokeStyle(strokeColor)
+                    .fillStyle(fillColor);
+                // Keep first-point triangle marker for direction
                 layerPanel.add(pv.Dot).events("none")
                     .data([pointsSnapshot[0]])
                     .left(d => d.x)

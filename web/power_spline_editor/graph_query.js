@@ -250,13 +250,6 @@ async function extractImageFromSourceNode(sourceNodeObj) {
     }
 
     const sourceNode = sourceNodeObj.node;
-    console.log(`Attempting to extract image from source node:`, {
-        id: sourceNode.id,
-        type: sourceNode.type,
-        widgets: sourceNode.widgets ? sourceNode.widgets.map(w => ({name: w.name, type: w.type})) : [],
-        properties: sourceNode.properties
-    });
-
     try {
         // Different node types store image data differently
         switch (sourceNode.type) {
@@ -402,15 +395,6 @@ async function extractImageFromSourceNode(sourceNodeObj) {
                 }
             }
         }
-
-        // Debug: log all available information about the source node
-        console.log(`Debug: No image found in source node ${sourceNode.type}. Available data:`, {
-            id: sourceNode.id,
-            type: sourceNode.type,
-            widgets: sourceNode.widgets?.map(w => ({name: w.name, type: w.type, value: typeof w.value === 'object' ? JSON.stringify(w.value) : w.value})),
-            properties: sourceNode.properties,
-            outputs: sourceNode.outputs
-        });
 
         return null;
     } catch (error) {

@@ -13,7 +13,7 @@ export class HandDrawLayerWidget extends RgthreeBaseWidget {
         this.hitAreas = {
             toggle: { bounds: [0,0], onDown: this.onToggleDown },
             name: { bounds: [0,0] },
-            drawLabel: { bounds: [0,0] },
+            drawLabel: { bounds: [0,0], onClick: this.onEditToggle },
             repeatDec: { bounds: [0,0], onClick: this.onRepeatDec },
             repeatVal: { bounds: [0,0], onClick: this.onRepeatClick },
             repeatInc: { bounds: [0,0], onClick: this.onRepeatInc },
@@ -82,6 +82,11 @@ export class HandDrawLayerWidget extends RgthreeBaseWidget {
         this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: this.value.on });
         posX += this.hitAreas.toggle.bounds[1] + innerMargin;
 
+        // Match normal layers: dim contents when layer is off
+        if (!this.value.on) {
+            ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
+        }
+
         // Name
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
         ctx.textAlign = 'left';
@@ -101,11 +106,33 @@ export class HandDrawLayerWidget extends RgthreeBaseWidget {
         this.hitAreas.repeatAny.bounds = [repeatL[0], repeatR[0] + repeatR[1] - repeatL[0]];
         rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
 
-        // Draw label in the Interpolation slot (70px)
+        // Replace the "draw" text with a centered edit icon button occupying the 70px slot
         const labelWidth = 70;
+        // Armed only when editor is in per-layer edit mode for this widget
+        const armed = (node?.editor?._handdrawMode === 'edit') && (node?.editor?._handdrawEditWidget === this);
+        const slotX = rposX - labelWidth; // left edge of 70px slot
+        const slotY = posY + (height - (height * 0.8)) / 2; // slight vertical inset
+        const slotH = height * 0.8;
+
+        ctx.save();
+        ctx.fillStyle = armed ? '#0d3b4a' : LiteGraph.WIDGET_BGCOLOR;
+        ctx.strokeStyle = armed ? '#2cc6ff' : LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.lineWidth = armed ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(slotX, slotY, labelWidth, slotH, [6]);
+        ctx.fill();
+        ctx.stroke();
+        // Pencil glyph centered in slot
         ctx.textAlign = 'center';
-        ctx.fillText('draw', rposX - labelWidth / 2, midY);
-        this.hitAreas.drawLabel.bounds = [rposX - labelWidth, labelWidth];
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.font = `${Math.max(11, Math.min(16, slotH * 0.7))}px monospace`;
+        ctx.fillText('✏️', slotX + labelWidth / 2, slotY + slotH / 2 + 0.5);
+        ctx.restore();
+        // Entire 70px area is clickable to toggle edit mode
+        this.hitAreas.drawLabel.bounds = [slotX, labelWidth];
+
+        // Advance position accounting only for the slot width
         rposX -= labelWidth + 10;
 
         // Z-Pause
@@ -170,15 +197,45 @@ export class HandDrawLayerWidget extends RgthreeBaseWidget {
         ctx.textAlign = 'left';
         const nameText = fitString(ctx, this.value.name || 'Handdraw', rposX - posX - innerMargin);
         ctx.fillText(nameText, posX, midY);
-        this.hitAreas.name.bounds = [posX, 0, rposX - posX, height];
+        // Make name hit area wide and simple (x + width only) to avoid y-mismatch
+        this.hitAreas.name.bounds = [posX, rposX - posX];
+        // Activate layer when clicking the name area
+        this.hitAreas.name.onDown = (event, pos, node) => {
+            if (!node.layerManager) return false;
+            const current = node.layerManager.getActiveWidget?.();
+            if (current === this) {
+                node.layerManager.setActiveWidget(null);
+            } else {
+                node.layerManager.setActiveWidget(this);
+            }
+            return true;
+        };
+        this.hitAreas.name.onClick = (event, pos, node) => true; // handled onDown
         ctx.restore();
     }
 
-    onMouseDown(event, pos, node) {
-        // Selecting the row should activate this layer
+    onEditToggle(event, pos, node) {
+        // Ensure this layer is active
         if (node.layerManager) {
             node.layerManager.setActiveWidget(this);
         }
+        // Toggle handdraw mode on the editor, mirroring top-row pencil
+        if (node?.editor) {
+            if (node.editor._handdrawMode === 'edit' && node.editor._handdrawEditWidget === this) {
+                node.editor.exitHanddrawMode?.(false);
+            } else {
+                node.editor.enterHanddrawMode?.('edit', this);
+            }
+            node.setDirtyCanvas(true, true);
+            // Re-render canvas overlays
+            try { node.editor.layerRenderer?.render(); } catch {}
+        }
+        this.cancelMouseDown?.();
+        return true;
+    }
+
+    onMouseDown(event, pos, node) {
+        // Activation is handled via hitAreas.name.onDown; do not duplicate here
         return super.onMouseDown?.(event, pos, node);
     }
 
@@ -294,20 +351,27 @@ export function commitHanddrawPath(node, points) {
     const lm = node.layerManager;
     if (!lm) return;
     const active = lm.getActiveWidget?.();
+    const mode = node?.editor?._handdrawMode || 'off';
+    const editWidget = node?.editor?._handdrawEditWidget || null;
     const isHand = active && active.value?.type === 'handdraw';
     const pointsStore = JSON.stringify(points || []);
-    if (isHand) {
-        active.value.points_store = pointsStore;
+    if (mode === 'edit' && editWidget) {
+        // Replace points in the targeted handdraw layer
+        editWidget.value.points_store = pointsStore;
+        // Avoid disarming edit mode due to active-layer refresh
+        if (node?.editor) node.editor._suppressHanddrawExitOnce = true;
+        lm.setActiveWidget(editWidget);
         node.setDirtyCanvas(true, true);
         if (node.editor?.layerRenderer) node.editor.layerRenderer.render();
         if (node.editor?.updatePath) node.editor.updatePath();
-        return active;
+        return editWidget;
     }
-    // create new handdraw layer
+    // In 'create' mode, or fallback: create a new handdraw layer for each stroke
     if (lm.addNewHanddraw) {
-        const w = lm.addNewHanddraw('Handdraw');
+        const w = lm.addNewHanddraw('Handdraw', /*activate*/ false);
         w.value.points_store = pointsStore;
-        // Make the new handdraw layer active
+        // Suppress one-shot exit of create mode during programmatic switch
+        if (node?.editor) node.editor._suppressHanddrawExitOnce = true;
         lm.setActiveWidget(w);
         node.setDirtyCanvas(true, true);
         if (node.editor?.layerRenderer) node.editor.layerRenderer.render();

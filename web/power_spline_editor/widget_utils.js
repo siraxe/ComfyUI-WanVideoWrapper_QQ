@@ -267,20 +267,27 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         ctx.textAlign = "left";
         const nameText = fitString(ctx, this.value.name || "Spline", rposX - posX - innerMargin);
         ctx.fillText(nameText, posX, midY);
-        this.hitAreas.name.bounds = [posX, 0, rposX - posX, height];
+        // Make name hit area wide and simple (x + width only) to avoid y-mismatch
+        this.hitAreas.name.bounds = [posX, rposX - posX];
+        // Activate layer when clicking the name area (onDown for immediacy)
+        this.hitAreas.name.onDown = (event, pos, node) => {
+            if (!node.layerManager) return false;
+            const current = node.layerManager.getActiveWidget?.();
+            // Toggle off if clicking the currently active layer name
+            if (current === this) {
+                node.layerManager.setActiveWidget(null);
+            } else {
+                node.layerManager.setActiveWidget(this);
+            }
+            return true;
+        };
+        this.hitAreas.name.onClick = (event, pos, node) => true; // handled onDown
 
         ctx.restore();
     }
 
     onMouseDown(event, pos, node) {
-        // Check if the click was on the toggle button
-        if (this.hitAreas.toggle && this.clickWasWithinBounds(pos, this.hitAreas.toggle.bounds)) {
-            // If it was on the toggle, do not set active widget.
-            // The onToggleDown handler will take care of the toggle action.
-        } else if (node.layerManager) {
-            // Otherwise, set this widget as active
-            node.layerManager.setActiveWidget(this);
-        }
+        // Activation is handled via hitAreas.name.onDown; do not duplicate here
         return super.onMouseDown?.(event, pos, node);
     }
 
@@ -508,11 +515,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
     onMouseUp(event, pos, node) {
         super.onMouseUp(event, pos, node);
         this.haveMouseMovedValue = false;
-
-        // Set this widget as active when clicked
-        if (node.layerManager) {
-            node.layerManager.setActiveWidget(this);
-        }
+        // Activation handled by hitAreas; no action here
     }
 
     onDrivenToggleDown(event, pos, node) {

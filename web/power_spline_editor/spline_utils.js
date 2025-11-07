@@ -153,7 +153,13 @@ export class TopRowWidget extends RgthreeBaseWidget {
         const refreshButtonWidth = availableWidth * 0.15;
         const bgImgDropdownWidth = availableWidth * 0.15;
         const drawButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
-        const dimensionsAreaWidth = availableWidth - (refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + drawButtonWidth + spacing);
+        // Account for both the pencil button and the animation toggle button
+        const dimensionsAreaWidth = availableWidth - (
+            refreshButtonWidth + spacing +
+            bgImgDropdownWidth + spacing +
+            drawButtonWidth + spacing + // ✏️
+            drawButtonWidth + spacing   // 〰
+        );
         
         // Calculate total width and starting position to center everything
         const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + dimensionsAreaWidth;
@@ -199,7 +205,8 @@ export class TopRowWidget extends RgthreeBaseWidget {
         posX += bgImgDropdownWidth + spacing;
 
         // Small Draw icon button between overlay picker and dimensions
-        const isArmed = !!(node?.editor?._handdrawActive);
+        // Armed when in create-new-stroke mode (separate from per-layer edit)
+        const isArmed = (node?.editor?._handdrawMode === 'create');
         drawWidgetButton(
             ctx,
             { size: [drawButtonWidth, height], pos: [posX, posY] },
@@ -208,24 +215,53 @@ export class TopRowWidget extends RgthreeBaseWidget {
         );
         // Add blue outline when armed to match active layer style
         if (isArmed) {
-            // Slightly inset outline to overlay nicely
+            // Slightly inset outline to overlay nicely; match thickness with layer edit button (2px)
             const pad = 0.5;
-            drawRoundedRectangle(ctx, {
-                pos: [posX + pad, posY + pad],
-                size: [drawButtonWidth - pad * 2, height - pad * 2],
-                colorBackground: 'transparent',
-                colorStroke: '#2cc6ff',
-                borderRadius: 4
-            });
+            ctx.save();
+            ctx.strokeStyle = '#2cc6ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(posX + pad, posY + pad, drawButtonWidth - pad * 2, height - pad * 2, [4]);
+            ctx.stroke();
+            ctx.restore();
         }
         this.hitAreas.drawButton = { bounds: [posX, drawButtonWidth], onClick: (e, p, n) => {
             // Toggle draw mode on the editor; canvas will handle capture on mousedown
             if (n?.editor) {
-                if (n.editor._handdrawActive) {
+                if (n.editor._handdrawMode === 'create') {
                     n.editor.exitHanddrawMode?.(false);
                 } else {
-                    n.editor.enterHanddrawMode?.();
+                    // enter create-new-stroke mode (each stroke creates a new handdraw layer)
+                    n.editor.enterHanddrawMode?.('create');
                 }
+                n.setDirtyCanvas(true, true);
+            }
+            return true;
+        }};
+        posX += drawButtonWidth + spacing;
+
+        // Animation toggle icon for inactive flow animation (default ON)
+        const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? true);
+        drawWidgetButton(
+            ctx,
+            { size: [drawButtonWidth, height], pos: [posX, posY] },
+            "〰", // wavy line icon
+            isAnimOn
+        );
+        if (isAnimOn) {
+            const pad = 0.5;
+            ctx.save();
+            ctx.strokeStyle = '#2cc6ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(posX + pad, posY + pad, drawButtonWidth - pad * 2, height - pad * 2, [4]);
+            ctx.stroke();
+            ctx.restore();
+        }
+        this.hitAreas.animToggleButton = { bounds: [posX, drawButtonWidth], onClick: (e, p, n) => {
+            if (n?.editor) {
+                n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
+                try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
                 n.setDirtyCanvas(true, true);
             }
             return true;

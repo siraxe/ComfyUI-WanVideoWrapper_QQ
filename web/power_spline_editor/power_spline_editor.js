@@ -69,7 +69,7 @@ async function saveRefImageToCache(base64Data) {
     try {
         // Create a cache key to track the current ref_image
         const currentHash = await simpleHash(base64Data);
-        sessionStorage.setItem('spline-editor-ref-image-hash', currentHash);
+        safeSetSessionItem('spline-editor-ref-image-hash', currentHash);
         
         // Try to save the file to the bg folder via the backend API
         try {
@@ -86,7 +86,7 @@ async function saveRefImageToCache(base64Data) {
                 if (result.success) {
                  
                     // Save to sessionStorage as backup
-                    sessionStorage.setItem('spline-editor-cached-ref-image', JSON.stringify({
+                    safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                         base64: base64Data,
                         type: 'image/png',
                         name: 'ref_image.jpg',
@@ -98,7 +98,7 @@ async function saveRefImageToCache(base64Data) {
                 } else {
                     console.error('Backend error saving ref image:', result.error);
                     // Fallback to sessionStorage only
-                    sessionStorage.setItem('spline-editor-cached-ref-image', JSON.stringify({
+                    safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                         base64: base64Data,
                         type: 'image/png',
                         name: 'ref_image.jpg',
@@ -110,7 +110,7 @@ async function saveRefImageToCache(base64Data) {
             } else {
                 console.error('Failed to save ref image via API:', response.status);
                 // Fallback to sessionStorage only
-                sessionStorage.setItem('spline-editor-cached-ref-image', JSON.stringify({
+                safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                     base64: base64Data,
                     type: 'image/png',
                     name: 'ref_image.jpg',
@@ -123,7 +123,7 @@ async function saveRefImageToCache(base64Data) {
             console.warn('API save failed, using sessionStorage fallback:', error);
             
             // Fallback to sessionStorage if API fails
-            sessionStorage.setItem('spline-editor-cached-ref-image', JSON.stringify({
+            safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                 base64: base64Data,
                 type: 'image/png',
                 name: 'ref_image.jpg',
@@ -233,17 +233,27 @@ class SplineLayerManager {
         this.node = node;
         this.activeWidget = null;
         this.node.splineWidgetsCounter = 0;
+        this._noActiveSelection = false;
     }
 
     setActiveWidget(widget) {
         if (this.activeWidget === widget) {
-            console.log("[SplineLayerManager] setActiveWidget: already active:", widget?.value?.name);
             return;
         }
-        console.log("[SplineLayerManager] setActiveWidget: switching from", this.activeWidget?.value?.name, "to", widget?.value?.name);
+        // Track explicit "no selection" state
+        this._noActiveSelection = (widget == null);
+        // If the editor is in handdraw create/edit mode, disarm it when switching layers
+        // Exception: when switch is initiated by handdraw commit flow, one-shot suppress exit
+        try {
+            const ed = this.node?.editor;
+            const suppressOnce = !!ed?._suppressHanddrawExitOnce;
+            if (ed) ed._suppressHanddrawExitOnce = false; // always reset flag
+            if (ed && ed._handdrawMode && ed._handdrawMode !== 'off' && !suppressOnce) {
+                ed.exitHanddrawMode?.(false);
+            }
+        } catch {}
         this.activeWidget = widget;
         if (this.node.editor) {
-            console.log("[SplineLayerManager] setActiveWidget: notifying editor");
             this.node.editor.onActiveLayerChanged(); // Notify canvas
         }
         this.node.setDirtyCanvas(true, true);
@@ -254,6 +264,7 @@ class SplineLayerManager {
             this.activeWidget = null;
         }
         if (!this.activeWidget) {
+            if (this._noActiveSelection) return null;
             const splines = this.getSplineWidgets();
             if (splines.length > 0) {
                 // Find the first visible/active spline widget, not just any spline
@@ -331,7 +342,7 @@ class SplineLayerManager {
         return widget;
     }
 
-    addNewHanddraw(name) {
+    addNewHanddraw(name, activate = true) {
         this.node.splineWidgetsCounter++;
         const widget = new HandDrawLayerWidget("spline_" + this.node.splineWidgetsCounter);
 
@@ -357,11 +368,13 @@ class SplineLayerManager {
         }
 
         this.node.updateNodeHeight();
-        this.setActiveWidget(widget);
-        if (this.node.editor && this.node.editor.vis) {
-            this.node.editor.vis.render();
+        if (activate) {
+            this.setActiveWidget(widget);
+            if (this.node.editor && this.node.editor.vis) {
+                this.node.editor.vis.render();
+            }
+            this.node.setDirtyCanvas(true, true);
         }
-        this.node.setDirtyCanvas(true, true);
         return widget;
     }
 
@@ -624,6 +637,11 @@ class SplineLayerManager {
     }
 }
 
+// Safe sessionStorage setter to avoid quota errors
+function safeSetSessionItem(key, value) {
+    try { sessionStorage.setItem(key, value); } catch (e) { /* ignore quota/unsupported */ }
+}
+
 app.registerExtension({
     name: 'WanVideoWrapper_QQ.PowerSplineEditor',
 
@@ -826,19 +844,19 @@ app.registerExtension({
             }
 
             this.hasSplineWidgets = function() {
-              return this.widgets && this.widgets.some(w => w instanceof PowerSplineWidget);
+              return this.widgets && this.widgets.some(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
             };
 
             this.allSplinesState = function() {
-              const splineWidgets = this.widgets.filter(w => w instanceof PowerSplineWidget);
-              if (!splineWidgets.length) return false;
-              return splineWidgets.every(w => w.value.on);
+              const layerWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+              if (!layerWidgets.length) return false;
+              return layerWidgets.every(w => w.value.on);
             };
 
             this.toggleAllSplines = function() {
-              const splineWidgets = this.widgets.filter(w => w instanceof PowerSplineWidget);
+              const layerWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
               const newState = !this.allSplinesState();
-              splineWidgets.forEach(w => w.value.on = newState);
+              layerWidgets.forEach(w => w.value.on = newState);
               this.setDirtyCanvas(true, true);
             };
 
@@ -1192,8 +1210,6 @@ app.registerExtension({
                         alert('Could not retrieve reference image from connected node. Make sure an image node is connected to the ref_image input.');
                         return;
                     }
-
-                    console.log('Successfully retrieved reference image from connected node, updating...');
                     
                     // Store the original reference image separately to use as base for overlays
                     this.originalRefImageData = {
@@ -1222,7 +1238,6 @@ app.registerExtension({
                         this.editor.refreshBackgroundImage();
                     }
                     
-                    console.log('Reference image updated successfully from connected node');
                 } catch (error) {
                     console.error('Error updating reference image from connected node:', error);
                     alert('Error updating reference image: ' + error.message);
@@ -1818,7 +1833,7 @@ app.registerExtension({
                   
                   // Also save dimensions to sessionStorage for persistence across page refreshes
                   try {
-                      sessionStorage.setItem(`spline-editor-dims-${this.uuid}`, JSON.stringify({
+                      safeSetSessionItem(`spline-editor-dims-${this.uuid}`, JSON.stringify({
                           width: dims.width,
                           height: dims.height
                       }));
@@ -1837,7 +1852,7 @@ app.registerExtension({
                     try {
                         const size = JSON.stringify(this.imgData).length;
                         if (size < 640 * 480) { // 1MB limit
-                            sessionStorage.setItem(`spline-editor-img-${this.uuid}`, JSON.stringify(this.imgData));
+                            safeSetSessionItem(`spline-editor-img-${this.uuid}`, JSON.stringify(this.imgData));
                         } else {
                             console.warn("Spline Editor: Image not saved to session storage because it is too large.", size);
                         }
