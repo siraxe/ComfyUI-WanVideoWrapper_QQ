@@ -9,11 +9,16 @@
 </td>
 <td width="65%" valign="top">
 
+### All splines
 - Double click - change spline layer
 - Click alt + left/right/middle to rotate/scale/move curves from their base point
 - Ctrl + left - add point between
 - Shift + left - add next point
 - Shift + middle on point - make hard point
+### Draw type splines
+- Right click ui has edit button
+- Middle click on canvas stops edit/create mode
+
 
 </td>
 </tr>
