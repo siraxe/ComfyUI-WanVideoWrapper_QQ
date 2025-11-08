@@ -1396,10 +1396,11 @@ app.registerExtension({
             // Create an array of menu items using the createMenuItem function
             this.menuItems = [
               createMenuItem(0, "Invert point order"),
-              createMenuItem(1, "Delete spline"),
-              createMenuItem(2, "Background image"),
-              createMenuItem(3, "Clear Image"),
-              createMenuItem(4, "Delete all splines"),
+              createMenuItem(1, "Smooth"),
+              createMenuItem(2, "Delete spline"),
+              createMenuItem(3, "Background image"),
+              createMenuItem(4, "Clear Image"),
+              createMenuItem(5, "Delete all splines"),
             ];
             
             // Add mouseover and mouseout event listeners to each menu item for styling

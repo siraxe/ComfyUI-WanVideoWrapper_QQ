@@ -453,8 +453,12 @@ export default class SplineEditor2 {
             const activeWidget = this.getActiveWidget?.();
             const isHanddraw = !!(activeWidget && activeWidget.value && activeWidget.value.type === 'handdraw');
             const firstItem = this.node.menuItems && this.node.menuItems[0];
+            const smoothItem = this.node.menuItems && this.node.menuItems[1];
             if (firstItem) {
               firstItem.textContent = isHanddraw ? 'Edit' : 'Invert point order';
+            }
+            if (smoothItem) {
+              smoothItem.style.display = isHanddraw ? 'block' : 'none';
             }
           } catch {}
           menuEl.style.display = 'block';
@@ -923,6 +927,226 @@ export default class SplineEditor2 {
     });
   }
 
+  smoothActiveHanddraw(tolerancePx, relaxStrength = 0.15, relaxIterations = 1) {
+    const activeWidget = this.getActiveWidget?.();
+    if (!activeWidget || activeWidget.value?.type !== 'handdraw') {
+      return false;
+    }
+
+    let storedPoints = [];
+    try {
+      storedPoints = JSON.parse(activeWidget.value.points_store || '[]');
+    } catch (e) {
+      console.error("[SplineEditor] smoothActiveHanddraw: failed to parse points_store", e);
+      return false;
+    }
+    if (!Array.isArray(storedPoints) || storedPoints.length < 3) {
+      return false;
+    }
+
+    const denorm = this.denormalizePoints(storedPoints);
+    if (!Array.isArray(denorm) || denorm.length < 3) {
+      return false;
+    }
+
+    const desiredCount = Math.max(2, Math.round(denorm.length * 0.7));
+    const maxReduction = Math.max(2, denorm.length - 1);
+    let targetCount = Math.min(desiredCount, maxReduction);
+    if (targetCount >= denorm.length && denorm.length > 2) {
+      targetCount = denorm.length - 1;
+    }
+    targetCount = Math.max(2, Math.min(targetCount, denorm.length));
+
+    const resampled = this.resampleStroke(denorm, targetCount);
+    const relaxed = this.relaxStrokePoints(resampled, relaxIterations, relaxStrength);
+    if (!relaxed || relaxed.length < 2) {
+      return false;
+    }
+
+    this.points = relaxed;
+    this.setActivePoints(relaxed);
+    try { this.layerRenderer?.render(); } catch {}
+    try { this.node?.setDirtyCanvas?.(true, true); } catch {}
+    return true;
+  }
+
+  simplifyStrokePoints(points, tolerancePx = 10) {
+    if (!Array.isArray(points) || points.length <= 2) {
+      return Array.isArray(points) ? points.slice() : [];
+    }
+    const len = points.length;
+    const sqTolerance = Math.max(4, tolerancePx) ** 2;
+    const markers = new Uint8Array(len);
+    const stack = [[0, len - 1]];
+    markers[0] = 1;
+    markers[len - 1] = 1;
+
+    while (stack.length) {
+      const [first, last] = stack.pop();
+      if (last <= first + 1) {
+        continue;
+      }
+      let maxSqDist = 0;
+      let index = -1;
+      for (let i = first + 1; i < last; i++) {
+        const sqDist = this.pointSegmentDistanceSq(points[i], points[first], points[last]);
+        if (sqDist > maxSqDist) {
+          index = i;
+          maxSqDist = sqDist;
+        }
+      }
+      if (maxSqDist > sqTolerance && index !== -1) {
+        markers[index] = 1;
+        stack.push([first, index], [index, last]);
+      }
+    }
+
+    const simplified = [];
+    for (let i = 0; i < len; i++) {
+      if (markers[i]) {
+        simplified.push({ ...points[i], highlighted: false });
+      }
+    }
+
+    // Ensure the final point is included exactly once
+    if (simplified.length === 0) {
+      simplified.push({ ...points[0], highlighted: false });
+      if (len > 1) {
+        simplified.push({ ...points[len - 1], highlighted: false });
+      }
+    } else if (simplified[simplified.length - 1] !== points[len - 1]) {
+      simplified[simplified.length - 1] = { ...points[len - 1], highlighted: false };
+    }
+
+    // Secondary pass to enforce minimum spacing so we actually reduce point count
+    const spacing = Math.max(1, Math.max(baseTolerance, tolerancePx || baseTolerance) * 0.2);
+    const spacingSq = spacing * spacing;
+    const filtered = [];
+    for (let i = 0; i < simplified.length; i++) {
+      const pt = simplified[i];
+      if (i === 0) {
+        filtered.push(pt);
+        continue;
+      }
+      if (i === simplified.length - 1) {
+        filtered.push(pt);
+        continue;
+      }
+      const last = filtered[filtered.length - 1];
+      const dx = pt.x - last.x;
+      const dy = pt.y - last.y;
+      if ((dx * dx + dy * dy) >= spacingSq) {
+        filtered.push(pt);
+      }
+    }
+    if (filtered.length < 2) {
+      filtered.length = 0;
+      filtered.push({ ...points[0], highlighted: false });
+      filtered.push({ ...points[len - 1], highlighted: false });
+    } else {
+      filtered[filtered.length - 1] = { ...points[len - 1], highlighted: false };
+    }
+
+    return filtered;
+  }
+
+  relaxStrokePoints(points, iterations = 2, strength = 0.45) {
+    if (!Array.isArray(points) || points.length <= 2) {
+      return Array.isArray(points) ? points.slice() : [];
+    }
+    const clampedStrength = Math.max(0, Math.min(1, strength));
+    let current = points.map(p => ({ ...p, highlighted: false }));
+    for (let iter = 0; iter < Math.max(1, iterations); iter++) {
+      const next = current.map((p, idx) => {
+        if (idx === 0) {
+          return { ...points[0], highlighted: false };
+        }
+        if (idx === current.length - 1) {
+          return { ...points[points.length - 1], highlighted: false };
+        }
+        const prev = current[idx - 1];
+        const after = current[idx + 1];
+        return {
+          ...p,
+          x: p.x * (1 - clampedStrength) + ((prev.x + after.x) * 0.5) * clampedStrength,
+          y: p.y * (1 - clampedStrength) + ((prev.y + after.y) * 0.5) * clampedStrength,
+          highlighted: false
+        };
+      });
+      current = next;
+    }
+    return current;
+  }
+
+  pointSegmentDistanceSq(point, start, end) {
+    let x = start.x;
+    let y = start.y;
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+
+    if (dx !== 0 || dy !== 0) {
+      const t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy);
+      if (t > 1) {
+        x = end.x;
+        y = end.y;
+      } else if (t > 0) {
+        x += dx * t;
+        y += dy * t;
+      }
+    }
+
+    dx = point.x - x;
+    dy = point.y - y;
+    return dx * dx + dy * dy;
+  }
+
+  resampleStroke(points, targetCount) {
+    if (!Array.isArray(points) || points.length === 0) {
+      return [];
+    }
+    if (points.length === 1) {
+      return [{ ...points[0], highlighted: false }];
+    }
+    const sanitizedCount = Math.max(2, Math.min(targetCount, points.length));
+    const cumulative = new Array(points.length).fill(0);
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const dx = (curr.x ?? 0) - (prev.x ?? 0);
+      const dy = (curr.y ?? 0) - (prev.y ?? 0);
+      cumulative[i] = cumulative[i - 1] + Math.hypot(dx, dy);
+    }
+    const totalLength = cumulative[cumulative.length - 1];
+    const result = [];
+    for (let i = 0; i < sanitizedCount; i++) {
+      const t = sanitizedCount === 1 ? 0 : i / (sanitizedCount - 1);
+      const targetLen = totalLength * t;
+      let segmentIndex = 0;
+      while (segmentIndex < cumulative.length - 1 && cumulative[segmentIndex + 1] < targetLen) {
+        segmentIndex++;
+      }
+      if (segmentIndex >= points.length - 1) {
+        segmentIndex = points.length - 2;
+      }
+      const segStart = points[segmentIndex];
+      const segEnd = points[segmentIndex + 1] || segStart;
+      const startLen = cumulative[segmentIndex];
+      const segLen = (cumulative[segmentIndex + 1] ?? startLen) - startLen;
+      const localLen = targetLen - startLen;
+      const ratio = segLen <= 0 ? 0 : Math.max(0, Math.min(1, localLen / segLen));
+      result.push({
+        x: segStart.x + (segEnd.x - segStart.x) * ratio,
+        y: segStart.y + (segEnd.y - segStart.y) * ratio,
+        highlighted: false
+      });
+    }
+    if (result.length) {
+      result[0] = { ...points[0], highlighted: false };
+      result[result.length - 1] = { ...points[points.length - 1], highlighted: false };
+    }
+    return result;
+  }
+
   updatePath = () => {
     if (!this.points || this.points.length === 0) {
       return;
@@ -1242,6 +1466,12 @@ export default class SplineEditor2 {
             this.node.contextMenu.style.display = 'none';
             break;
           case 1:
+            // Smooth active handdraw layer (hidden for non-handdraw layers)
+            e.preventDefault();
+            this.smoothActiveHanddraw?.();
+            this.node.contextMenu.style.display = 'none';
+            break;
+          case 2:
             // Delete spline
             e.preventDefault();
             const activeWidget = this.getActiveWidget();
@@ -1250,7 +1480,7 @@ export default class SplineEditor2 {
             }
             this.node.contextMenu.style.display = 'none';
             break;
-          case 2:
+          case 3:
             // Background image
             // Create file input element
             const fileInput = document.createElement('input');
@@ -1273,7 +1503,7 @@ export default class SplineEditor2 {
 
             this.node.contextMenu.style.display = 'none';
             break;
-          case 3:
+          case 4:
             // Clear Image
             this.backgroundImage.visible(false); // Hide image
             this.layerRenderer.render(); // Re-render to show changes
@@ -1288,7 +1518,7 @@ export default class SplineEditor2 {
             this.node.contextMenu.style.display = 'none';
             this.updatePath(); // Update coordinates after clearing image
             break;
-          case 4:
+          case 5:
             // Remove all splines
             e.preventDefault();
             this.node.layerManager.removeAllSplines();
