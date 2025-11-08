@@ -5,7 +5,7 @@ nodes/__pycache__/
 .claude-code-router
 .env
 .env2
-.env 22
+opencode.json
 wanvideo_cached_samples.pt
 wanvideo_cached_videos.pt
 ref_image.jpg

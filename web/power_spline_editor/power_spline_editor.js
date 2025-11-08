@@ -286,6 +286,9 @@ class SplineLayerManager {
     }
 
     addNewSpline(name) {
+        try {
+            this.node?.editor?.exitHanddrawMode?.(false);
+        } catch {}
         this.node.splineWidgetsCounter++;
         const widget = new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
 
@@ -317,10 +320,11 @@ class SplineLayerManager {
         // This ensures order: canvas → button_bar → header → splines
         const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
         if (headerIndex !== -1) {
-            // Find the last spline widget after the header
+            // Find the last layer widget (spline or handdraw) after the header
             let insertIndex = headerIndex + 1;
             for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
-                if (this.node.widgets[i] instanceof PowerSplineWidget) {
+                const wi = this.node.widgets[i];
+                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
                     insertIndex = i + 1;
                 } else {
                     break;
@@ -481,6 +485,9 @@ class SplineLayerManager {
     duplicateSpline(sourceWidget) {
         if (!sourceWidget) return;
 
+        try {
+            this.node?.editor?.exitHanddrawMode?.(false);
+        } catch {}
         this.node.splineWidgetsCounter++;
         const newWidget = new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
 
@@ -506,7 +513,8 @@ class SplineLayerManager {
             if (headerIndex !== -1) {
                 let insertIndex = headerIndex + 1;
                 for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
-                    if (this.node.widgets[i] instanceof PowerSplineWidget) {
+                    const wi = this.node.widgets[i];
+                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
                         insertIndex = i + 1;
                     } else {
                         break;
@@ -598,10 +606,11 @@ class SplineLayerManager {
             // Insert spline widgets AFTER the header (same as addNewSpline logic)
             const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
             if (headerIndex !== -1) {
-                // Find the last spline widget after the header
+                // Find the last layer widget after the header
                 let insertIndex = headerIndex + 1;
                 for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
-                    if (this.node.widgets[i] instanceof PowerSplineWidget) {
+                    const wi = this.node.widgets[i];
+                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
                         insertIndex = i + 1;
                     } else {
                         break;
@@ -1533,17 +1542,23 @@ app.registerExtension({
                     const addSplineWidth = (width - margin * 2 - gap) * 0.70;
                     const duplicateWidth = (width - margin * 2 - gap) * 0.30;
 
-                    // Handle Add Spline button click
-                    if (this.addSplineMouseDown && pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
-                        node.layerManager.addNewSpline();
+                // Handle Add Spline button click
+                if (this.addSplineMouseDown && pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
+                    if (node?.editor && node.editor._handdrawMode === 'create') {
+                        node.editor.exitHanddrawMode?.(false);
                     }
-                    // Handle Duplicate button click
-                    else if (this.duplicateMouseDown &&
-                             pos[0] >= margin + addSplineWidth + gap &&
-                             pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
-                        const activeWidget = node.layerManager.getActiveWidget();
-                        if (activeWidget) {
-                            node.layerManager.duplicateSpline(activeWidget);
+                    node.layerManager.addNewSpline();
+                }
+                // Handle Duplicate button click
+                else if (this.duplicateMouseDown &&
+                         pos[0] >= margin + addSplineWidth + gap &&
+                         pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
+                    if (node?.editor && node.editor._handdrawMode === 'create') {
+                        node.editor.exitHanddrawMode?.(false);
+                    }
+                    const activeWidget = node.layerManager.getActiveWidget();
+                    if (activeWidget) {
+                        node.layerManager.duplicateSpline(activeWidget);
                         }
                     }
 

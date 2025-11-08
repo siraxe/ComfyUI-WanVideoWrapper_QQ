@@ -377,11 +377,15 @@ export class LayerRenderer {
             if (interpolation === 'points') return "circle";
             // If interpolation is 'basis' AND the point is highlighted, draw a square
             if (interpolation === 'basis' && dot.highlighted) return "square";
-            const index = this.splineEditor.points.indexOf(dot);
+            const index = this.splineEditor.resolvePointIndex
+                ? this.splineEditor.resolvePointIndex(dot)
+                : this.splineEditor.points.indexOf(dot);
             return index === 0 ? "triangle" : "circle";
         })            .angle((dot) => {
                 if (interpolation === 'points') return 0;
-                const index = this.splineEditor.points.indexOf(dot);
+                const index = this.splineEditor.resolvePointIndex
+                    ? this.splineEditor.resolvePointIndex(dot)
+                    : this.splineEditor.points.indexOf(dot);
                 if (index !== 0 || points.length <= 1) return 0;
 
                 const dx = points[1].x - points[0].x;
@@ -394,7 +398,9 @@ export class LayerRenderer {
             })
             .cursor("move")
             .strokeStyle((dot) => {
-                const index = this.splineEditor.points.indexOf(dot);
+                const index = this.splineEditor.resolvePointIndex
+                    ? this.splineEditor.resolvePointIndex(dot)
+                    : this.splineEditor.points.indexOf(dot);
                 if (!isHanddraw && index === 0 && interpolation !== 'points') {
                     return "green";
                 }
@@ -402,17 +408,20 @@ export class LayerRenderer {
                 return interpolation === 'points' ? "#139613" : "#1f77b4";
             })
             .fillStyle((dot) => {
-                const index = this.splineEditor.points.indexOf(dot);
+                const index = this.splineEditor.resolvePointIndex
+                    ? this.splineEditor.resolvePointIndex(dot)
+                    : this.splineEditor.points.indexOf(dot);
                 if (!isHanddraw && index === 0 && interpolation !== 'points') {
                     return "rgba(0, 255, 0, 0.5)";
                 }
                 if (isHanddraw) return "rgba(215, 196, 0, 0.45)";
                 return interpolation === 'points' ? "rgba(19, 150, 19, 0.5)" : "rgba(100, 100, 100, 0.5)";
             })
-            .event("mousedown", pv.Behavior.drag())
-            .event("dragstart", this.splineEditor.dragStartHandler)
-            .event("dragend", this.splineEditor.dragEndHandler)
-            .event("drag", this.splineEditor.dragHandler)
+            .event("mousedown", (dot) => {
+                if (this.splineEditor.handlePointPointerDown) {
+                    this.splineEditor.handlePointPointerDown(dot, pv.event);
+                }
+            })
             .event("mouseover", this.splineEditor.mouseOverHandler)
             .event("mouseout", this.splineEditor.mouseOutHandler);
         // No labels for any mode - removed the label anchor

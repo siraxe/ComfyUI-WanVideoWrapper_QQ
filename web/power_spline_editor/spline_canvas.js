@@ -499,19 +499,110 @@ export default class SplineEditor2 {
         }
       })
       
-    this.dragStartHandler = (d) => {
-        const dot = d;
-        this.i = this.points.indexOf(dot);
-        this.hoverIndex = this.i;
+    this.resolvePointIndex = (dot) => {
+      if (!Array.isArray(this.points) || !dot) {
+        return -1;
+      }
+      const directIdx = this.points.indexOf(dot);
+      if (directIdx !== -1) {
+        return directIdx;
+      }
+      let fallbackIdx = -1;
+      let bestDist = Infinity;
+      const dxDot = dot.x ?? 0;
+      const dyDot = dot.y ?? 0;
+      for (let idx = 0; idx < this.points.length; idx++) {
+        const p = this.points[idx];
+        if (!p) continue;
+        const dx = (p.x ?? 0) - dxDot;
+        const dy = (p.y ?? 0) - dyDot;
+        const dist = dx * dx + dy * dy;
+        if (dist <= 1e-4) {
+          return idx;
+        }
+        if (dist < bestDist) {
+          bestDist = dist;
+          fallbackIdx = idx;
+        }
+      }
+      return fallbackIdx;
+    };
 
-        const mouseX = this.vis.mouse().x / app.canvas.ds.scale;
-        const mouseY = this.vis.mouse().y / app.canvas.ds.scale;
+    this._getPointerCoords = (event) => {
+      const canvasEl = this.vis?.canvas?.();
+      if (!canvasEl || !event) {
+        return { x: 0, y: 0 };
+      }
+      const e = (event.touches && event.touches.length > 0) ? event.touches[0] : event;
+      const rect = canvasEl.getBoundingClientRect();
+      const scale = app.canvas.ds.scale || 1;
+      return {
+        x: (e.clientX - rect.left) / scale,
+        y: (e.clientY - rect.top) / scale
+      };
+    };
+
+    this.handlePointPointerDown = (dot, pvEvent) => {
+      const event = pvEvent || window.event;
+      if (!event) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      const { x, y } = this._getPointerCoords(event);
+      this.dragStartHandler(dot, x, y, event);
+      const needsTracking = this.isDragging || this.isDraggingAll || this.isScalingAll || this.isRotatingAll;
+      if (!needsTracking) return;
+      const usePointer = typeof PointerEvent !== 'undefined';
+      const move = (evt) => {
+        evt.preventDefault?.();
+        const coords = this._getPointerCoords(evt);
+        this.dragHandler(dot, coords.x, coords.y);
+      };
+      const end = (evt) => {
+        cleanup();
+        this.dragEndHandler(evt);
+      };
+      const cleanup = () => {
+        if (usePointer) {
+          document.removeEventListener('pointermove', move, true);
+          document.removeEventListener('pointerup', end, true);
+          document.removeEventListener('pointercancel', end, true);
+        } else {
+          document.removeEventListener('mousemove', move, true);
+          document.removeEventListener('mouseup', end, true);
+        }
+      };
+      if (usePointer) {
+        document.addEventListener('pointermove', move, true);
+        document.addEventListener('pointerup', end, true);
+        document.addEventListener('pointercancel', end, true);
+      } else {
+        document.addEventListener('mousemove', move, true);
+        document.addEventListener('mouseup', end, true);
+      }
+    };
+
+    this.dragStartHandler = (d, mouseX, mouseY, rawEvent) => {
+        const dot = d;
+        this.i = this.resolvePointIndex(dot);
+        this.hoverIndex = this.i;
+        if (this.i === -1 || !this.points[this.i]) {
+          console.warn("[SplineEditor] dragStartHandler: unable to resolve point for drag", dot);
+          return;
+        }
+
+        let localX = mouseX;
+        let localY = mouseY;
+        if (typeof localX !== 'number' || typeof localY !== 'number') {
+          const coords = this._getPointerCoords(rawEvent || pv.event);
+          localX = coords.x;
+          localY = coords.y;
+        }
         const pointX = this.points[this.i].x;
         const pointY = this.points[this.i].y;
-        this.dragOffset = { x: pointX - mouseX, y: pointY - mouseY };
+        this.dragOffset = { x: pointX - localX, y: pointY - localY };
 
         // Shift+Middle-Click: Toggle highlighted state on points (except first point)
-        if (pv.event.shiftKey && pv.event.button === 1) {
+        if ((rawEvent?.shiftKey) && (rawEvent?.button === 1)) {
           if (this.i !== 0 && this.i !== -1) {
             this.points[this.i].highlighted = !this.points[this.i].highlighted;
             this.layerRenderer.render();
@@ -521,20 +612,20 @@ export default class SplineEditor2 {
         }
 
         // Alt+Left-Click: Rotation around clicked point (any point)
-        if (pv.event.altKey && pv.event.button === 0) {
+        if ((rawEvent?.altKey) && (rawEvent?.button === 0)) {
           this.isRotatingAll = true;
           this.originalPoints = this.points.map(p => ({ ...p }));
           this.anchorPoint = { ...this.points[this.i] }; // Use clicked point as anchor
           this.anchorIndex = this.i; // Store anchor index
-          this.initialRotationAngle = Math.atan2(mouseY - this.anchorPoint.y, mouseX - this.anchorPoint.x);
+          this.initialRotationAngle = Math.atan2(localY - this.anchorPoint.y, localX - this.anchorPoint.x);
           this.isDragging = true;
           return;
         }
 
         // Alt + Middle-Click: Translation (any point)
-        if (pv.event.altKey && pv.event.button === 1) {
+        if ((rawEvent?.altKey) && (rawEvent?.button === 1)) {
           this.isDraggingAll = true;
-          this.dragStartPos = { x: mouseX, y: mouseY };
+          this.dragStartPos = { x: localX, y: localY };
           // Snapshot original positions to keep a rigid translation anchored at clicked point
           this.translateAllSnapshot = {
             points: this.points.map(p => ({ ...p })),
@@ -551,12 +642,12 @@ export default class SplineEditor2 {
         }
 
         // Alt+Right-Click: Scaling relative to clicked point (any point)
-        if (pv.event.altKey && pv.event.button === 2) {
+        if ((rawEvent?.altKey) && (rawEvent?.button === 2)) {
           this.isScalingAll = true;
           this.originalPoints = this.points.map(p => ({ ...p }));
           this.anchorPoint = { ...this.points[this.i] }; // Use clicked point as anchor
           this.anchorIndex = this.i; // Store anchor index
-          this.initialXDistance = mouseX - this.anchorPoint.x;
+          this.initialXDistance = localX - this.anchorPoint.x;
           if (Math.abs(this.initialXDistance) < 10) {
             this.initialXDistance = this.initialXDistance >= 0 ? 10 : -10;
           }
@@ -566,7 +657,7 @@ export default class SplineEditor2 {
 
         // Regular drag or delete
         this.isDragging = true;
-        if (pv.event.button === 2 && this.i !== 0 && this.i !== this.points.length - 1) {
+        if ((rawEvent?.button === 2) && this.i !== 0 && this.i !== this.points.length - 1) {
           this.points.splice(this.i--, 1);
           this._forceRebuildNextRender = true;
           this.layerRenderer.render();
@@ -596,9 +687,9 @@ export default class SplineEditor2 {
         this.originalPoints = null;
     };
 
-    this.dragHandler = (d) => {
-        let adjustedX = this.vis.mouse().x / app.canvas.ds.scale;
-        let adjustedY = this.vis.mouse().y / app.canvas.ds.scale;
+    this.dragHandler = (d, mouseX, mouseY) => {
+        let adjustedX = (typeof mouseX === 'number') ? mouseX : (this.vis.mouse().x / app.canvas.ds.scale);
+        let adjustedY = (typeof mouseY === 'number') ? mouseY : (this.vis.mouse().y / app.canvas.ds.scale);
 
         if (this.isRotatingAll && this.anchorPoint && this.originalPoints) {
             const currentAngle = Math.atan2(adjustedY - this.anchorPoint.y, adjustedX - this.anchorPoint.x);
@@ -677,7 +768,7 @@ export default class SplineEditor2 {
         }
 
         if (!this.isDraggingAll && !this.isScalingAll && !this.isRotatingAll) {
-          if (this.dragOffset) {
+          if (this.dragOffset && this.i >= 0 && this.points[this.i]) {
             this.points[this.i].x = adjustedX + this.dragOffset.x;
             this.points[this.i].y = adjustedY + this.dragOffset.y;
             this.points[this.i].highlighted = !!this.points[this.i].highlighted;
@@ -687,7 +778,7 @@ export default class SplineEditor2 {
     };
 
     this.mouseOverHandler = (d) => {
-        this.hoverIndex = this.points.indexOf(d);
+        this.hoverIndex = this.resolvePointIndex(d);
         // Avoid rebuilding the scene on hover; a simple re-render is sufficient
         if (this.layerRenderer?.vis) this.layerRenderer.vis.render();
     };
