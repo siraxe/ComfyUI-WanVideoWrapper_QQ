@@ -233,34 +233,31 @@ class WanVideoPowerLoraLoader:
                 # Check if JavaScript detected a low variant for this LoRA
                 is_low = value.get('is_low', False)
                 low_variant_name = value.get('low_variant_name')
-                
-                # Add to high loras summary
-                high_loras_summary.append((strength_model, lora_filename))
+                use_for_both = value.get('use_for_both', False)
+                low_only = value.get('low_only', False)
+                high_only = value.get('high_only', False)
 
-                if is_low and low_variant_name and value.get('low_active', True):
-                    # Use low_strength for the low variant LoRA, fallback to strength_model if not available
+                # Handle different LoRA states
+                if high_only:
+                    # "High only" mode - only add to high list, not low list (same as default but with visual indicator)
+                    print(f"[WanVideoPowerLoraLoader] Using LoRA '{lora_filename}' for HIGH output only")
+                    # Add to high loras summary
+                    high_loras_summary.append((strength_model, f"{lora_filename} (high only)"))
+
+                elif low_only:
+                    # "Low only" mode - only add to low list, not high list
+                    print(f"[WanVideoPowerLoraLoader] Using LoRA '{lora_filename}' for LOW output only")
+
+                    # Use the same strength for low output, or use low_strength if available
                     low_strength = value.get('low_strength', strength_model)
-                    # Ensure low_strength is not None
                     if low_strength is None:
-                        low_strength = 0.0
-                    
-                    # Use the sophisticated LoRA path resolution for low variant
-                    try:
-                        from rgthree_comfy.py.power_prompt_utils import get_lora_by_filename
-                        low_variant_filename = get_lora_by_filename(low_variant_name, log_node=self.__class__.__name__)
-                    except ImportError:
-                        # Fallback to basic path resolution if rgthree-comfy is not available
-                        low_variant_filename = get_lora_by_filename_basic(low_variant_name, log_node=self.__class__.__name__)
-                    
-                    if low_variant_filename is None:
-                        print(f"[WanVideoPowerLoraLoader] Low variant LoRA '{low_variant_name}' not found, skipping low variant.")
-                        continue
-                    
-                    # Create entry for the low variant LoRA
+                        low_strength = strength_model
+
+                    # Create entry for the low variant using the same LoRA
                     low_lora_entry = {
-                        "path": folder_paths.get_full_path("loras", low_variant_filename),
+                        "path": folder_paths.get_full_path("loras", lora_filename),
                         "strength": low_strength,
-                        "name": os.path.splitext(low_variant_filename)[0],
+                        "name": os.path.splitext(lora_filename)[0] + "_low_only",
                         "blocks": blocks.get("selected_blocks", {}) if blocks else {},
                         "layer_filter": blocks.get("layer_filter", "") if blocks else "",
                         "low_mem_load": low_mem_load,
@@ -269,14 +266,87 @@ class WanVideoPowerLoraLoader:
 
                     # Add clip strength if the original high LoRA was using separate model/clip strengths
                     if strength_clip is not None and strength_clip != strength_model:
-                        # For low variant with separate model/clip strengths, we should probably use the same clip strength
-                        # but some users might want to apply the low_strength concept to clip as well
-                        # For now, maintain the same clip strength relationship as the original
                         low_lora_entry["strength_clip"] = strength_clip
 
                     low_loras_list.append(low_lora_entry)
-                    # Add to low loras summary
-                    low_loras_summary.append((low_strength, low_variant_filename))
+                    # Add to low loras summary with indicator
+                    low_loras_summary.append((low_strength, f"{lora_filename} (low only)"))
+
+                else:
+                    # Normal mode - add to high loras summary
+                    high_loras_summary.append((strength_model, lora_filename))
+
+                    # Handle low variant LoRA OR "use_for_both" mode
+                    if (is_low and low_variant_name and value.get('low_active', True)) or use_for_both:
+                        if use_for_both:
+                            # "Enable for both" mode - use the same LoRA for both high and low
+                            print(f"[WanVideoPowerLoraLoader] Using LoRA '{lora_filename}' for both HIGH and LOW outputs")
+
+                            # Use the same strength for low output, or use low_strength if available
+                            low_strength = value.get('low_strength', strength_model)
+                            if low_strength is None:
+                                low_strength = strength_model
+
+                            # Create entry for the low variant using the same LoRA
+                            low_lora_entry = {
+                                "path": folder_paths.get_full_path("loras", lora_filename),
+                                "strength": low_strength,
+                                "name": os.path.splitext(lora_filename)[0] + "_both",
+                                "blocks": blocks.get("selected_blocks", {}) if blocks else {},
+                                "layer_filter": blocks.get("layer_filter", "") if blocks else "",
+                                "low_mem_load": low_mem_load,
+                                "merge_loras": merge_loras,
+                            }
+
+                            # Add clip strength if the original high LoRA was using separate model/clip strengths
+                            if strength_clip is not None and strength_clip != strength_model:
+                                low_lora_entry["strength_clip"] = strength_clip
+
+                            low_loras_list.append(low_lora_entry)
+                            # Add to low loras summary with indicator
+                            low_loras_summary.append((low_strength, f"{lora_filename} (both)"))
+
+                        else:
+                            # Original low variant logic
+                            # Use low_strength for the low variant LoRA, fallback to strength_model if not available
+                            low_strength = value.get('low_strength', strength_model)
+                            # Ensure low_strength is not None
+                            if low_strength is None:
+                                low_strength = 0.0
+
+                            # Use the sophisticated LoRA path resolution for low variant
+                            try:
+                                from rgthree_comfy.py.power_prompt_utils import get_lora_by_filename
+                                low_variant_filename = get_lora_by_filename(low_variant_name, log_node=self.__class__.__name__)
+                            except ImportError:
+                                # Fallback to basic path resolution if rgthree-comfy is not available
+                                low_variant_filename = get_lora_by_filename_basic(low_variant_name, log_node=self.__class__.__name__)
+
+                            if low_variant_filename is None:
+                                print(f"[WanVideoPowerLoraLoader] Low variant LoRA '{low_variant_name}' not found, skipping low variant.")
+                                continue
+
+                            # Create entry for the low variant LoRA
+                            low_lora_entry = {
+                                "path": folder_paths.get_full_path("loras", low_variant_filename),
+                                "strength": low_strength,
+                                "name": os.path.splitext(low_variant_filename)[0],
+                                "blocks": blocks.get("selected_blocks", {}) if blocks else {},
+                                "layer_filter": blocks.get("layer_filter", "") if blocks else "",
+                                "low_mem_load": low_mem_load,
+                                "merge_loras": merge_loras,
+                            }
+
+                            # Add clip strength if the original high LoRA was using separate model/clip strengths
+                            if strength_clip is not None and strength_clip != strength_model:
+                                # For low variant with separate model/clip strengths, we should probably use the same clip strength
+                                # but some users might want to apply the low_strength concept to clip as well
+                                # For now, maintain the same clip strength relationship as the original
+                                low_lora_entry["strength_clip"] = strength_clip
+
+                            low_loras_list.append(low_lora_entry)
+                            # Add to low loras summary
+                            low_loras_summary.append((low_strength, low_variant_filename))
 
         # Print the summary in the requested format
         if high_loras_summary:
@@ -429,12 +499,55 @@ class PowerLoraLoaderV2:
 
                 loras_list.append(lora_entry)
 
+                # Check if JavaScript detected special mode flags
+                use_for_both = value.get('use_for_both', False)
+                low_only = value.get('low_only', False)
+                high_only = value.get('high_only', False)
+
                 # Check if JavaScript detected a low variant for this LoRA
                 is_low = value.get('is_low', False)
                 low_variant_name = value.get('low_variant_name')
-                
-                # Add to high loras summary
-                high_loras_summary.append((strength_model, lora_filename))
+
+                # Handle different LoRA states for PowerLoraLoaderV2
+                if high_only:
+                    # "High only" mode - apply to main model only (same as default but with visual indicator)
+                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for HIGH model only")
+                    high_loras_summary.append((strength_model, f"{lora_filename} (high only)"))
+
+                elif low_only:
+                    # "Low only" mode - apply to model_low only
+                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for LOW model only")
+                    # Apply LoRA to model_low if it exists
+                    if model_low is not None:
+                        try:
+                            if not has_clip:
+                                model_low, _ = LoraLoader().load_lora(model_low, None, lora_filename, strength_model, 0)
+                            else:
+                                model_low, clip = LoraLoader().load_lora(model_low, clip, lora_filename, strength_model, 0)
+                        except Exception as e:
+                            print(f"[PowerLoraLoaderV2] Error applying LoRA to model_low: {e}")
+                    low_loras_summary.append((strength_model, f"{lora_filename} (low only)"))
+                    continue  # Skip adding to main model
+
+                elif use_for_both:
+                    # "Enable for both" mode - apply to both main and model_low
+                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for both HIGH and LOW models")
+                    high_loras_summary.append((strength_model, f"{lora_filename} (both)"))
+
+                    # Apply LoRA to model_low if it exists
+                    if model_low is not None:
+                        try:
+                            if not has_clip:
+                                model_low, _ = LoraLoader().load_lora(model_low, None, lora_filename, strength_model, 0)
+                            else:
+                                model_low, clip = LoraLoader().load_lora(model_low, clip, lora_filename, strength_model, 0)
+                        except Exception as e:
+                            print(f"[PowerLoraLoaderV2] Error applying LoRA to model_low: {e}")
+                    low_loras_summary.append((strength_model, f"{lora_filename} (both)"))
+
+                else:
+                    # Normal mode - apply to main model only
+                    high_loras_summary.append((strength_model, lora_filename))
 
                 if is_low and low_variant_name and value.get('low_active', True):
                     # Use low_strength for the low variant LoRA, fallback to strength_model if not available

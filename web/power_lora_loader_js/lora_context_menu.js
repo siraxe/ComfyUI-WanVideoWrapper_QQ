@@ -218,8 +218,12 @@ export function getLoraSlotInPosition(canvasX, canvasY) {
 
                         if (canvasX >= iconAbsXStart && canvasX <= iconAbsXEnd &&
                             canvasY >= iconAbsYStart && canvasY <= iconAbsYEnd) {
-                            // Check if this widget has a low variant
+                            // Check if this widget has a low variant or is in "both" mode
                             if (widget.value.is_low && widget.value.low_variant_name) {
+                                return { widget: widget, output: { type: "LOW_VARIANT_ICON" } };
+                            }
+                            // Check if widget is in "both" mode or has no low variant (gray icon)
+                            if (!widget.value.is_low || widget.value.use_for_both) {
                                 return { widget: widget, output: { type: "LOW_VARIANT_ICON" } };
                             }
                         }
@@ -330,11 +334,11 @@ function showLowVariantMenu(event, widget, node, position) {
         existingMenu.remove();
     }
 
-    // Extract just the filename from the full path
-    const fullPath = widget.value.low_variant_name;
-    const fileName = fullPath.includes('/') || fullPath.includes('\\')
-        ? fullPath.split(/[\/\\]/).pop()
-        : fullPath;
+    // Determine which state this widget is in
+    const hasLowVariant = widget.value.is_low && widget.value.low_variant_name;
+    const isBothMode = widget.value.use_for_both;
+    const isLowOnlyMode = widget.value.low_only;
+    const isHighOnlyMode = widget.value.high_only;
 
     const menu = document.createElement('div');
     menu.id = 'low-variant-menu';
@@ -414,45 +418,151 @@ function showLowVariantMenu(event, widget, node, position) {
         return separator;
     };
 
-    // Add menu item showing the low variant name
-    const nameItem = document.createElement('div');
-    nameItem.style.cssText = `
-        padding: 4px 8px !important;
-        cursor: default !important;
-        color: #ddd !important;
-        background-color: #1a1a1a !important;
-        user-select: none !important;
-        display: flex !important;
-        align-items: center !important;
-    `;
-
-    const textSpan = document.createElement('span');
-    textSpan.textContent = fileName;
-
-    nameItem.appendChild(textSpan);
-    menu.appendChild(nameItem);
-
-    // Add separator
-    menu.appendChild(createSeparator());
-
-    // Add Toggle On/Off option
-    menu.appendChild(createMenuItem(
-        widget.value.low_active ? '⚫' : '🟢',
-        widget.value.low_active ? 'Toggle Off' : 'Toggle On',
-        () => {
-            widget.value.low_active = !widget.value.low_active;
-            node.setDirtyCanvas(true, true);
+    if (hasLowVariant || isBothMode || isLowOnlyMode || isHighOnlyMode) {
+        // For low variant, both mode, low only mode, or high only mode: show the name
+        let displayText;
+        if (isBothMode) {
+            displayText = `${widget.value.lora} (both)`;
+        } else if (isLowOnlyMode) {
+            displayText = `${widget.value.lora} (low only)`;
+        } else if (isHighOnlyMode) {
+            displayText = `${widget.value.lora} (high only)`;
+        } else {
+            displayText = widget.value.low_variant_name;
         }
-    ));
 
-    // Add separator
-    menu.appendChild(createSeparator());
+        const fileName = displayText.includes('/') || displayText.includes('\\')
+            ? displayText.split(/[\/\\]/).pop()
+            : displayText;
 
-    // Add Show Info option
-    menu.appendChild(createMenuItem('ℹ️', 'Show Info', () => {
-        // Show info for the low variant LoRA
-        widget.showLoraInfoDialog('low');
-    }));
+        const nameItem = document.createElement('div');
+        nameItem.style.cssText = `
+            padding: 4px 8px !important;
+            cursor: default !important;
+            color: #ddd !important;
+            background-color: #1a1a1a !important;
+            user-select: none !important;
+            display: flex !important;
+            align-items: center !important;
+        `;
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = fileName;
+
+        nameItem.appendChild(textSpan);
+        menu.appendChild(nameItem);
+
+        // Add separator
+        menu.appendChild(createSeparator());
+
+        if (hasLowVariant) {
+            // For low variant: add Toggle On/Off option
+            menu.appendChild(createMenuItem(
+                widget.value.low_active ? '⚫' : '🟢',
+                widget.value.low_active ? 'Toggle Off' : 'Toggle On',
+                () => {
+                    widget.value.low_active = !widget.value.low_active;
+                    node.setDirtyCanvas(true, true);
+                }
+            ));
+
+            // Add separator
+            menu.appendChild(createSeparator());
+
+            // Add Show Info option
+            menu.appendChild(createMenuItem('ℹ️', 'Show Info', () => {
+                widget.showLoraInfoDialog('low');
+            }));
+        } else if (isBothMode) {
+            // For both mode: add Disable and switching options
+            menu.appendChild(createMenuItem('⚪', 'Disable', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = false;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🔵', 'Switch to Low only', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = true;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🔴', 'Switch to High only', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = false;
+                widget.value.high_only = true;
+                node.setDirtyCanvas(true, true);
+            }));
+        } else if (isLowOnlyMode) {
+            // For low only mode: add Disable and switching options
+            menu.appendChild(createMenuItem('⚪', 'Disable', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = false;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🟣', 'Switch to Both', () => {
+                widget.value.use_for_both = true;
+                widget.value.low_only = false;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🔴', 'Switch to High only', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = false;
+                widget.value.high_only = true;
+                node.setDirtyCanvas(true, true);
+            }));
+        } else if (isHighOnlyMode) {
+            // For high only mode: add Disable and switching options
+            menu.appendChild(createMenuItem('⚪', 'Disable', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = false;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🟣', 'Switch to Both', () => {
+                widget.value.use_for_both = true;
+                widget.value.low_only = false;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+
+            menu.appendChild(createMenuItem('🔵', 'Switch to Low only', () => {
+                widget.value.use_for_both = false;
+                widget.value.low_only = true;
+                widget.value.high_only = false;
+                node.setDirtyCanvas(true, true);
+            }));
+        }
+    } else {
+        // No low variant: show all three options
+        menu.appendChild(createMenuItem('🟣', 'Enable for both', () => {
+            widget.value.use_for_both = true;
+            widget.value.low_only = false;
+            widget.value.high_only = false;
+            node.setDirtyCanvas(true, true);
+        }));
+
+        menu.appendChild(createMenuItem('🔵', 'Low only', () => {
+            widget.value.use_for_both = false;
+            widget.value.low_only = true;
+            widget.value.high_only = false;
+            node.setDirtyCanvas(true, true);
+        }));
+
+        menu.appendChild(createMenuItem('🔴', 'High only', () => {
+            widget.value.use_for_both = false;
+            widget.value.low_only = false;
+            widget.value.high_only = true;
+            node.setDirtyCanvas(true, true);
+        }));
+    }
 
     document.body.appendChild(menu);
     console.log("Low variant menu appended to body, position:", position);

@@ -596,7 +596,7 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     constructor(name, showLoraChooser) {
         super(name);
         this.showLoraChooser = showLoraChooser;
-        this.value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false, low_active: true };
+        this.value = { on: true, lora: "None", strength: 1, low_strength: 1, is_low: false, low_active: true, use_for_both: false, low_only: false, high_only: false };
         this.haveMouseMovedStrength = false;
         this.hitAreas = {
             toggle: { bounds: [0, 0], onDown: this.onToggleDown },
@@ -621,6 +621,21 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         if (this._value.low_active === undefined) {
             this._value.low_active = true;
         }
+
+        // Ensure use_for_both is always initialized (default to false)
+        if (this._value.use_for_both === undefined) {
+            this._value.use_for_both = false;
+        }
+
+        // Ensure low_only is always initialized (default to false)
+        if (this._value.low_only === undefined) {
+            this._value.low_only = false;
+        }
+
+        // Ensure high_only is always initialized (default to false)
+        if (this._value.high_only === undefined) {
+            this._value.high_only = false;
+        }
     }
 
     get value() {
@@ -639,11 +654,17 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
         posX += this.hitAreas.toggle.bounds[1] + MARGIN;
 
         let rposX = w - MARGIN;
-        if (this.value.is_low) {
-        ctx.fillStyle = this.value.low_active ? "lime" : "orange";
-    } else {
-        ctx.fillStyle = "#555";
-    }
+        if (this.value.use_for_both) {
+            ctx.fillStyle = "#9370DB"; // Purple for "both" state
+        } else if (this.value.low_only) {
+            ctx.fillStyle = "#4169E1"; // Blue for "low only" state
+        } else if (this.value.high_only) {
+            ctx.fillStyle = "#DC143C"; // Red for "high only" state
+        } else if (this.value.is_low) {
+            ctx.fillStyle = this.value.low_active ? "lime" : "orange";
+        } else {
+            ctx.fillStyle = "#555";
+        }
         ctx.beginPath();
         ctx.arc(rposX - ICON_WIDTH / 2, y + h / 2, h * 0.2, 0, Math.PI * 2);
         ctx.fill();
@@ -687,6 +708,10 @@ export class PowerLoraLoaderWidget extends RgthreeBaseWidget {
     setLora(lora) {
         // Store the original lora path/name as received from the picker
         this.value.lora = lora;
+        // Reset all flags when a new LoRA is selected
+        this.value.use_for_both = false;
+        this.value.low_only = false;
+        this.value.high_only = false;
         this.checkLowLoraVariant(lora);
     }
 
