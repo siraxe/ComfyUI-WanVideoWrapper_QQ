@@ -7,9 +7,7 @@ nodes/__pycache__/
 .env2
 opencode.json
 wanvideo_cached_samples.pt
-wanvideo_cached_videos.pt
 ref_image.jpg
 QWEN.md
-ComfyUI-WanVideoWrapper/
 rgthree-comfy-main/
 utility/userdata/info/

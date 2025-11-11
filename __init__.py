@@ -22,6 +22,7 @@ from .nodes.image_nodes import *
 from .nodes.image_nodes_extra import *
 from .nodes.image_to_video import *
 from .nodes.video_nodes_extra import *
+from .nodes.wan_first_middle_last import *
 
 from .nodes.vace_utils import *
 from .nodes.cache_samples import *
