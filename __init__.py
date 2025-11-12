@@ -13,6 +13,7 @@ from .nodes.lora_extract_v2 import *
 from .nodes.lora_change import *
 from .nodes.lora_combine import *
 from .nodes.math_nodes import *
+from .nodes.text_nodes import *
 
 from .nodes.draw_shapes import *
 from .nodes.draw_joints import *
