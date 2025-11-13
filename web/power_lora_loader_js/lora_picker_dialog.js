@@ -678,7 +678,8 @@ function saveAllUIState(dialog) {
     const uiState = {
         foldersVisible: dialog.options.foldersVisible,
         eyeRefreshState: dialog.eyeRefreshState,
-        selectedFolder: dialog.selectedFolder
+        selectedFolder: dialog.selectedFolder,
+        circleIconState: dialog.circleIconState
     };
 
     saveFoldersVisible(dialog.options.foldersVisible);
@@ -705,7 +706,8 @@ function loadAllUIState(dialog) {
     let uiState = {
         foldersVisible: undefined,
         eyeRefreshState: undefined,
-        selectedFolder: undefined
+        selectedFolder: undefined,
+        circleIconState: undefined
     };
 
     if (dialog.parentNode && dialog.parentNode.widgets) {
@@ -732,10 +734,14 @@ function loadAllUIState(dialog) {
     if (uiState.selectedFolder === undefined) {
         uiState.selectedFolder = loadSelectedFolder();
     }
+    if (uiState.circleIconState === undefined) {
+        uiState.circleIconState = 0; // Default to 0 (empty circle)
+    }
 
     dialog.options.foldersVisible = uiState.foldersVisible !== false;
     dialog.eyeRefreshState = uiState.eyeRefreshState || false;
     dialog.selectedFolder = uiState.selectedFolder || null;
+    dialog.circleIconState = uiState.circleIconState || 0;
 
     if (dialog.parentNode && dialog.parentNode.widgets) {
         // Try both widget names to support both node types
@@ -743,7 +749,7 @@ function loadAllUIState(dialog) {
         if (!uiStateWidget) {
             uiStateWidget = dialog.parentNode.widgets.find(w => w.name === "ui_state");
         }
-        if (uiStateWidget && (uiState.foldersVisible !== undefined || uiState.eyeRefreshState !== undefined || uiState.selectedFolder !== undefined)) {
+        if (uiStateWidget && (uiState.foldersVisible !== undefined || uiState.eyeRefreshState !== undefined || uiState.selectedFolder !== undefined || uiState.circleIconState !== undefined)) {
             saveAllUIState(dialog);
         }
     }
@@ -767,6 +773,9 @@ export class LoraPickerDialog {
 
         loadAllUIState(this);
 
+        // Initialize circle icon state if not already set
+        this.circleIconState = this.circleIconState || 0;
+
         if (this.options.favoritesOnly === undefined) {
             this.options.favoritesOnly = loadFavoritesOnly();
         }
@@ -782,6 +791,20 @@ export class LoraPickerDialog {
 
         // Note: Don't call loadPreviewAvailability() here - it will be called in show() method
         // This prevents race conditions and ensures proper async loading
+    }
+
+    getCircleIconSymbol() {
+        // Returns the circle symbol based on current state (0: empty, 1: half, 2: full)
+        switch(this.circleIconState) {
+            case 0:
+                return "◎"; // Empty circle with dot
+            case 1:
+                return "◐"; // Half circle (left half filled)
+            case 2:
+                return "◑"; // Half circle (right half filled)
+            default:
+                return "◎"; // Default to empty circle with dot
+        }
     }
 
     show() {
@@ -1060,17 +1083,37 @@ export class LoraPickerDialog {
         refreshContainer.appendChild(refreshIcon);
         
         refreshContainer.addEventListener("click", () => {
+            // Visual feedback when clicked
+            refreshIcon.style.color = "#4488bb";
+            refreshContainer.style.backgroundColor = "#2a2a2a";
+
             if (this.refreshCallback) {
                 this.refreshCallback();
                 // After refresh, reload preview availability to update blue dots
                 this.loadPreviewAvailability().then(() => {
                     // Re-render the list to show updated blue indicators
                     this.renderList();
+                    // Reset visual feedback after refresh completes
+                    setTimeout(() => {
+                        refreshIcon.style.color = "#aaa";
+                        refreshContainer.style.backgroundColor = "#1a1a1a";
+                    }, 300);
                 }).catch(error => {
                     console.error('Error refreshing preview availability:', error);
                     // Still render list even if preview refresh fails
                     this.renderList();
+                    // Reset visual feedback even if there's an error
+                    setTimeout(() => {
+                        refreshIcon.style.color = "#aaa";
+                        refreshContainer.style.backgroundColor = "#1a1a1a";
+                    }, 300);
                 });
+            } else {
+                // Reset visual feedback if no refresh callback
+                setTimeout(() => {
+                    refreshIcon.style.color = "#aaa";
+                    refreshContainer.style.backgroundColor = "#1a1a1a";
+                }, 300);
             }
         });
 
@@ -1088,7 +1131,7 @@ export class LoraPickerDialog {
         eyeRefreshContainer.style.alignItems = "center";
         eyeRefreshContainer.style.gap = "5px";
         eyeRefreshContainer.style.cursor = "pointer";
-        eyeRefreshContainer.style.margin = "0 10px";
+        eyeRefreshContainer.style.margin = "0 5px";
         eyeRefreshContainer.style.padding = "4px 8px";
         eyeRefreshContainer.style.borderRadius = "4px";
         eyeRefreshContainer.style.backgroundColor = this.eyeRefreshState ? "#2a2a2a" : "#1a1a1a";
@@ -1123,13 +1166,47 @@ export class LoraPickerDialog {
 
         header.appendChild(eyeRefreshContainer);
 
+        // New 3-position circle icon
+        const circleIconContainer = document.createElement("div");
+        circleIconContainer.style.display = "flex";
+        circleIconContainer.style.alignItems = "center";
+        circleIconContainer.style.cursor = "pointer";
+        circleIconContainer.style.margin = "0 5px";
+        circleIconContainer.style.padding = "4px 8px";
+        circleIconContainer.style.borderRadius = "4px";
+        circleIconContainer.style.backgroundColor = this.circleIconState ? "#2a2a2a" : "#1a1a1a";
+        circleIconContainer.style.userSelect = "none";
+        circleIconContainer.title = "Circle Icon State (Empty/Half/Full)";
+
+        const circleIcon = document.createElement("span");
+        circleIcon.textContent = this.getCircleIconSymbol();
+        circleIcon.style.fontSize = "14px";
+        circleIcon.style.color = this.circleIconState ? "#4488bb" : "#aaa";
+        circleIcon.style.userSelect = "none";
+
+        circleIconContainer.appendChild(circleIcon);
+
+        circleIconContainer.addEventListener("click", () => {
+            // Cycle through states: 0 -> 1 -> 2 -> 0
+            this.circleIconState = (this.circleIconState + 1) % 3;
+            circleIcon.textContent = this.getCircleIconSymbol();
+            circleIcon.style.color = this.circleIconState > 0 ? "#4488bb" : "#aaa";
+            circleIconContainer.style.backgroundColor = this.circleIconState > 0 ? "#2a2a2a" : "#1a1a1a";
+            // Save all UI state to both localStorage and workflow
+            saveAllUIState(this);
+            // Re-render the list to apply the new filter
+            this.renderList();
+        });
+
+        header.appendChild(circleIconContainer);
+
         // Folders button
         const foldersContainer = document.createElement("div");
         foldersContainer.style.display = "flex";
         foldersContainer.style.alignItems = "center";
         foldersContainer.style.gap = "5px";
         foldersContainer.style.cursor = "pointer";
-        foldersContainer.style.margin = "0 10px";
+        foldersContainer.style.margin = "0 5px";
         foldersContainer.style.padding = "4px 8px";
         foldersContainer.style.borderRadius = "4px";
         foldersContainer.style.backgroundColor = this.options.foldersVisible ? "#2a2a2a" : "#1a1a1a";
@@ -1529,6 +1606,21 @@ export class LoraPickerDialog {
             filteredLoras = filteredLoras.filter(l => this.matchesSearchQuery((typeof l === 'string' ? l : l.name), query));
         }
 
+        // Apply circle icon filter (HIGH/LOW filtering)
+        if (this.circleIconState > 0) {
+            filteredLoras = filteredLoras.filter(l => {
+                const name = typeof l === 'string' ? l : l.name;
+                if (this.circleIconState === 1) {
+                    // ◐ state: Show only HIGH variants
+                    return this.isHighVariant(name);
+                } else if (this.circleIconState === 2) {
+                    // ◑ state: Show only LOW variants
+                    return this.isLowVariant(name);
+                }
+                return true;
+            });
+        }
+
         return filteredLoras;
     }
 
@@ -1552,6 +1644,28 @@ export class LoraPickerDialog {
         
         // Check if ALL search words are present in the LoRA name
         return searchWords.every(word => lowerLoraName.includes(word));
+    }
+
+    /**
+     * Check if a LoRA name indicates it's a HIGH variant
+     * @param {string} loraName - The LoRA name to check
+     * @returns {boolean} - True if the LoRA is a HIGH variant
+     */
+    isHighVariant(loraName) {
+        if (!loraName) return false;
+        const name = loraName.toLowerCase();
+        return name.includes('high') || name.includes('_h.') || name.includes('_h_');
+    }
+
+    /**
+     * Check if a LoRA name indicates it's a LOW variant
+     * @param {string} loraName - The LoRA name to check
+     * @returns {boolean} - True if the LoRA is a LOW variant
+     */
+    isLowVariant(loraName) {
+        if (!loraName) return false;
+        const name = loraName.toLowerCase();
+        return name.includes('low') || name.includes('_l.') || name.includes('_l_');
     }
 
     updateFolderIndicator() {
