@@ -1,6 +1,12 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 ## Updates
+**Version 1.0.6** - 2025-11-13
+- **New Wan22FMLF**: A better way to add midframe control from https://github.com/wallen0322/ComfyUI-Wan22FMLF + amplitude test in one node
+- **Lora high.low filter**: Clicking the circle icon cycles through: ◎ → ◐ → ◑ → ◎ + right icon right
+ click options (low/high only / both)
+- **Mp4 muulti cache**: save/load steps between samplers
+
 **Version 1.0.3** - 2025-11-07
 - **New Hand-Drawn Spline Layer**: Added freeform path drawing with full animation controls. Special thanks to [filliptm](https://github.com/filliptm/ComfyUI_Fill-Nodes) for the implementation example
 - **Enhanced Spline Editor Fixes**: Improved coordinate parsing, multi-spline handling, and UI fixes across canvas, context menus, and layer rendering
