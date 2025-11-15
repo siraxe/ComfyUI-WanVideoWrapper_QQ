@@ -1,6 +1,17 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 ## Updates
+**Version 1.0.7** - 2025-11-13
+- **Box layer type**: new layer type that can scale "points" type layer points when driving them (only points for now)
+- Right click drag in inner border of boxes to scale each one individually.
+- If updated spline editor messes up workflow , open it ,delete node , refresh page ,create new.
+
+https://github.com/user-attachments/assets/e5849627-5f1a-4056-a941-a15b40bfc6c4
+
+
+
+
+
 **Version 1.0.6** - 2025-11-13
 - **New Wan22FMLF**: A better way to add midframe control from https://github.com/wallen0322/ComfyUI-Wan22FMLF + amplitude test in one node
 - **Lora high.low filter**: Clicking the circle icon cycles through: ◎ → ◐ → ◑ → ◎ + right icon right

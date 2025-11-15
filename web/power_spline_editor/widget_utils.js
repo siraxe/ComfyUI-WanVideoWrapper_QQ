@@ -192,8 +192,8 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
 
         // Draw interpolation selector
-        const interpModes = ['linear', 'cardinal', 'basis', 'points'];
-        const interpShortNames = ['linear', 'cardinal', 'basis', 'points'];
+        const interpModes = ['linear', 'cardinal', 'basis', 'points', 'box'];
+        const interpShortNames = ['linear', 'cardinal', 'basis', 'points', 'box'];
         const interpIndex = interpModes.indexOf(this.value.interpolation || 'linear');
         const interpDisplayText = interpIndex >= 0 ? interpShortNames[interpIndex] : 'linear';
         const interpTextWidth = 70;
@@ -340,7 +340,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
     }
 
     onInterpDec() {
-        const modes = ['linear', 'cardinal', 'basis', 'points'];
+        const modes = ['linear', 'cardinal', 'basis', 'points', 'box'];
         const currentIndex = modes.indexOf(this.value.interpolation || 'linear');
         const newIndex = (currentIndex - 1 + modes.length) % modes.length;
         this.value.interpolation = modes[newIndex];
@@ -355,7 +355,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
     }
 
     onInterpInc() {
-        const modes = ['linear', 'cardinal', 'basis', 'points'];
+        const modes = ['linear', 'cardinal', 'basis', 'points', 'box'];
         const currentIndex = modes.indexOf(this.value.interpolation || 'linear');
         const newIndex = (currentIndex + 1) % modes.length;
         this.value.interpolation = modes[newIndex];

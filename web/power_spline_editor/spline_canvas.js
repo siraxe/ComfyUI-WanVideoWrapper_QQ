@@ -1,5 +1,6 @@
 import { app } from '../../../scripts/app.js';
 import { LayerRenderer } from './layer_renderer.js';
+import { BOX_BASE_RADIUS, BOX_BORDER_BAND } from './spline_utils.js';
 
 export default class SplineEditor2 {
   constructor(context, reset = false) {
@@ -129,7 +130,13 @@ export default class SplineEditor2 {
       try {
         const points = JSON.parse(activeWidget.value.points_store || '[]');
         const denorm = this.denormalizePoints(points);
-        return denorm;
+        this.ensurePointScaleFields(denorm);
+        this.ensurePointUids(denorm);
+        return denorm.map(point => ({
+          ...point,
+          scale: (typeof point.scale === 'number' ? point.scale : 1.0),
+          uid: point.uid
+        }));
       } catch (e) {
         console.error("[SplineEditor] getActivePoints: failed to parse points_store", e);
         return [];
@@ -142,6 +149,7 @@ export default class SplineEditor2 {
         console.warn("[SplineEditor] setActivePoints: no active widget");
         return;
       }
+      this.ensurePointUids(points);
       activeWidget.value.points_store = JSON.stringify(this.normalizePoints(points));
       // Only call updatePath if vis is already created
       if (this.vis) {
@@ -260,12 +268,79 @@ export default class SplineEditor2 {
       this.vis.render();
     }
 
+    this.nextPointUid = 1;
+    this.ensurePointUids = (points) => {
+      if (!Array.isArray(points)) return;
+      let nextUid = this.nextPointUid || 1;
+      for (const point of points) {
+        if (!point) continue;
+        const rawUid = Number(point.uid);
+        const hasUid = (point.uid !== undefined && point.uid !== null && !Number.isNaN(rawUid));
+        if (hasUid) {
+          const candidate = Math.max(nextUid, rawUid + 1);
+          nextUid = candidate;
+        } else {
+          point.uid = nextUid;
+          nextUid += 1;
+        }
+      }
+      this.nextPointUid = nextUid;
+    };
+
+    this.clampScaleValue = (value) => {
+      if (typeof value !== 'number' || Number.isNaN(value)) return 1;
+      return Math.max(0.2, Math.min(3.0, value));
+    };
+
+    this.ensurePointScaleFields = (points) => {
+      if (!Array.isArray(points)) return;
+      for (const point of points) {
+        if (!point) continue;
+        const boxRaw = (typeof point.boxScale === 'number' && !Number.isNaN(point.boxScale))
+          ? point.boxScale
+          : ((typeof point.scale === 'number' && !Number.isNaN(point.scale)) ? point.scale : 1);
+        point.boxScale = this.clampScaleValue(boxRaw);
+
+        const pointRaw = (typeof point.pointScale === 'number' && !Number.isNaN(point.pointScale))
+          ? point.pointScale
+          : 1;
+        point.pointScale = this.clampScaleValue(pointRaw);
+
+        if (typeof point.scale !== 'number' || Number.isNaN(point.scale)) {
+          point.scale = point.boxScale;
+        } else {
+          point.scale = this.clampScaleValue(point.scale);
+        }
+      }
+    };
+
+    this.getPointScaleForMode = (point, forBox = true) => {
+      if (!point) return 1;
+      const candidate = (() => {
+        if (forBox && typeof point.boxScale === 'number' && !Number.isNaN(point.boxScale)) {
+          return point.boxScale;
+        }
+        if (!forBox && typeof point.pointScale === 'number' && !Number.isNaN(point.pointScale)) {
+          return point.pointScale;
+        }
+        if (typeof point.scale === 'number' && !Number.isNaN(point.scale)) {
+          return point.scale;
+        }
+        return 1;
+      })();
+      return this.clampScaleValue(candidate);
+    };
+
     // Initialize or reset points array
     this.drawRuler = true;
     this.hoverIndex = -1;
     this.isDragging = false;
     this.isDraggingAll = false; // Flag for Alt+middle-drag (translation)
     this.isScalingAll = false; // Flag for Alt+right-drag (scaling)
+    this.isScalingPoint = false; // Flag for Alt+right-drag when box mode (point scale)
+    this.scalingPointIndex = -1;
+    this.scalingPointBaseScale = 1.0;
+    this.scalingPointInitialDistance = 0;
     this.isRotatingAll = false; // Flag for Alt+left-drag (rotation)
     this.dragStartPos = null; // Store initial drag position
     this.initialXDistance = 0; // Store initial X distance for horizontal scaling
@@ -290,16 +365,18 @@ export default class SplineEditor2 {
         // Two points: center and 40px right
         const centerX = this.width / 2;
         const centerY = this.height / 2;
-        this.points = [
-          { x: centerX, y: centerY, highlighted: false },
-          { x: centerX + 40, y: centerY, highlighted: false }
+      this.points = [
+          { x: centerX, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0 },
+          { x: centerX + 40, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0 }
         ];
+      this.ensurePointUids(this.points);
       } else {
         // Default initial points (bottom-left, top-right)
         this.points = [
-          { x: 0, y: this.height, highlighted: false },
-          { x: this.width, y: 0, highlighted: false }
+          { x: 0, y: this.height, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0 },
+          { x: this.width, y: 0, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0 }
         ];
+      this.ensurePointUids(this.points);
       }
       this.setActivePoints(this.points);
     }
@@ -415,7 +492,11 @@ export default class SplineEditor2 {
           let scaledMouse = {
             x: mouseX,
             y: mouseY,
-            highlighted: false
+            highlighted: false,
+            scale: 1.0,
+            boxScale: 1.0,
+            pointScale: 1.0,
+            uid: this.nextPointUid++
           };
           this.i = this.points.push(scaledMouse) - 1;
           this.updatePath();
@@ -435,7 +516,11 @@ export default class SplineEditor2 {
           let midpoint = {
             x: (this.points[point1Index].x + this.points[point2Index].x) / 2,
             y: (this.points[point1Index].y + this.points[point2Index].y) / 2,
-            highlighted: false
+            highlighted: false,
+            scale: 1.0,
+            boxScale: 1.0,
+            pointScale: 1.0,
+            uid: this.nextPointUid++
           };
 
           // Insert the midpoint into the array
@@ -502,10 +587,60 @@ export default class SplineEditor2 {
           return this;
         }
       })
-      
+      .event("mousemove", (e) => {
+        const coords = this._getPointerCoords(pv.event || e);
+        this.updateBoxCursor(coords);
+      })
+      .event("mouseout", () => {
+        const canvasEl = this.vis?.canvas?.();
+        if (canvasEl) canvasEl.style.cursor = 'default';
+      })
+
+    this.getBoxPointRadius = (point) => {
+      const boxScale = this.getPointScaleForMode(point, true);
+      return BOX_BASE_RADIUS * boxScale;
+    };
+
+    this.pickBoxPointFromCoords = (coords) => {
+      if (!coords || !Array.isArray(this.points)) return null;
+      const bandWidth = BOX_BORDER_BAND;
+      let best = null;
+      let bestEdgeDist = Infinity;
+      for (let idx = 0; idx < this.points.length; idx++) {
+        const point = this.points[idx];
+        if (!point) continue;
+        const dx = Math.abs(coords.x - (point.x ?? 0));
+        const dy = Math.abs(coords.y - (point.y ?? 0));
+        const maxDist = Math.max(dx, dy); // square border distance
+        const radius = this.getBoxPointRadius(point);
+        const inner = Math.max(radius - bandWidth, 0);
+        if (maxDist < inner || maxDist > radius) {
+          continue;
+        }
+        const edgeDist = Math.abs(radius - maxDist);
+        if (
+          edgeDist < bestEdgeDist ||
+          (Math.abs(edgeDist - bestEdgeDist) < 1e-3 && radius < (best?.radius ?? Infinity))
+        ) {
+          bestEdgeDist = edgeDist;
+          best = { point, index: idx, radius };
+        }
+      }
+      return best;
+    };
+
     this.resolvePointIndex = (dot) => {
       if (!Array.isArray(this.points) || !dot) {
         return -1;
+      }
+      const dotUid = dot?.uid;
+      if (dotUid !== undefined && dotUid !== null) {
+        for (let idx = 0; idx < this.points.length; idx++) {
+          const p = this.points[idx];
+          if (p && (p.uid === dotUid)) {
+            return idx;
+          }
+        }
       }
       const directIdx = this.points.indexOf(dot);
       if (directIdx !== -1) {
@@ -546,20 +681,46 @@ export default class SplineEditor2 {
       };
     };
 
+    this.updateBoxCursor = (coords) => {
+      const canvasEl = this.vis?.canvas?.();
+      if (!canvasEl) return;
+      const activeInterp = this.getActiveWidget()?.value?.interpolation || this.interpolation;
+      let desired = 'default';
+      if (activeInterp === 'box' && coords) {
+        const picked = this.pickBoxPointFromCoords(coords);
+        if (picked) {
+          desired = 'move';
+        }
+      }
+      if (canvasEl.style.cursor !== desired) {
+        canvasEl.style.cursor = desired;
+      }
+    };
+
     this.handlePointPointerDown = (dot, pvEvent) => {
       const event = pvEvent || window.event;
       if (!event) return;
+      const { x, y } = this._getPointerCoords(event);
+      const activeInterp = this.getActiveWidget()?.value?.interpolation || this.interpolation;
+      let dragDot = dot;
+      if (activeInterp === 'box') {
+        const picked = this.pickBoxPointFromCoords({ x, y });
+        if (!picked) {
+          return;
+        }
+        dragDot = picked.point;
+      }
       event.preventDefault?.();
       event.stopPropagation?.();
-      const { x, y } = this._getPointerCoords(event);
-      this.dragStartHandler(dot, x, y, event);
+      this.dragStartHandler(dragDot, x, y, event);
+      const dragTarget = dragDot;
       const needsTracking = this.isDragging || this.isDraggingAll || this.isScalingAll || this.isRotatingAll;
       if (!needsTracking) return;
       const usePointer = typeof PointerEvent !== 'undefined';
       const move = (evt) => {
         evt.preventDefault?.();
         const coords = this._getPointerCoords(evt);
-        this.dragHandler(dot, coords.x, coords.y);
+        this.dragHandler(dragTarget, coords.x, coords.y);
       };
       const end = (evt) => {
         cleanup();
@@ -647,6 +808,23 @@ export default class SplineEditor2 {
 
         // Alt+Right-Click: Scaling relative to clicked point (any point)
         if ((rawEvent?.altKey) && (rawEvent?.button === 2)) {
+          const activeInterp = this.getActiveWidget()?.value?.interpolation || this.interpolation;
+          if (activeInterp === 'box') {
+            this.isScalingPoint = true;
+            this.scalingPointIndex = this.i;
+            const targetPoint = this.points[this.i];
+            if (!targetPoint) {
+              this.isScalingPoint = false;
+              return;
+            }
+            this.scalingPointBaseScale = (targetPoint.scale || 1.0);
+            this.scalingPointInitialDistance = localX - targetPoint.x;
+            if (Math.abs(this.scalingPointInitialDistance) < 10) {
+              this.scalingPointInitialDistance = this.scalingPointInitialDistance >= 0 ? 10 : -10;
+            }
+            this.isDragging = true;
+            return;
+          }
           this.isScalingAll = true;
           this.originalPoints = this.points.map(p => ({ ...p }));
           this.anchorPoint = { ...this.points[this.i] }; // Use clicked point as anchor
@@ -682,6 +860,10 @@ export default class SplineEditor2 {
         this.isDragging = false;
         this.isDraggingAll = false;
         this.isScalingAll = false;
+        this.isScalingPoint = false;
+        this.scalingPointIndex = -1;
+        this.scalingPointBaseScale = 1.0;
+        this.scalingPointInitialDistance = 0;
         this.isRotatingAll = false;
         this.dragStartPos = null;
         this.initialXDistance = 0;
@@ -744,9 +926,24 @@ export default class SplineEditor2 {
           return;
         }
 
+        if (this.isScalingPoint && this.scalingPointIndex >= 0 && this.scalingPointInitialDistance !== 0) {
+          const point = this.points[this.scalingPointIndex];
+          if (point) {
+            const currentXDistance = adjustedX - point.x;
+            const scaleFactor = currentXDistance / this.scalingPointInitialDistance;
+            const dampingFactor = 0.1;
+            const dampedFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
+            const newScale = Math.max(0.2, Math.min(3.0, this.scalingPointBaseScale * dampedFactor));
+            point.boxScale = newScale;
+            point.scale = newScale;
+            this.layerRenderer.render();
+          }
+          return;
+        }
+
         if (this.isScalingAll && this.anchorPoint && this.originalPoints && this.initialXDistance !== 0) {
-          const currentXDistance = adjustedX - this.anchorPoint.x;
-          const scaleFactor = currentXDistance / this.initialXDistance;
+            const currentXDistance = adjustedX - this.anchorPoint.x;
+            const scaleFactor = currentXDistance / this.initialXDistance;
           const dampingFactor = 0.1;
           const dampedScaleFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
           const clampedScaleFactor = Math.max(0.1, Math.min(10, dampedScaleFactor));
@@ -807,7 +1004,7 @@ export default class SplineEditor2 {
     // Helper to get render points with duplicates at highlighted positions
     // This forces hard corners while keeping the curve continuous
     this.getRenderPoints = () => {
-      if (this.interpolation === 'linear' || this.interpolation === 'points') {
+      if (this.interpolation === 'linear' || this.interpolation === 'points' || this.interpolation === 'box') {
         return this.points;
       }
 
@@ -1226,7 +1423,7 @@ export default class SplineEditor2 {
             }
         }
 
-        if (widget.value.interpolation === 'points' || !usePathSampling) {
+        if (widget.value.interpolation === 'points' || widget.value.interpolation === 'box' || !usePathSampling) {
             sampledCoords = controlPoints;
         } else if (pathElement) {
             sampledCoords = [];

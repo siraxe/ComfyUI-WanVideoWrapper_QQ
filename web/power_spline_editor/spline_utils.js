@@ -32,6 +32,10 @@ export {
 };
 
 //from melmass
+export const BOX_BASE_RADIUS = 40;
+export const POINT_BASE_RADIUS = 8;
+export const BOX_BORDER_BAND = 20;
+
 export function makeUUID() {
   let dt = new Date().getTime()
   const uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -637,8 +641,8 @@ export class InterpolationWidget extends RgthreeBaseWidget {
         const interpValue = interpWidget ? interpWidget.value : "linear";
 
         // Interpolation modes - display abbreviated versions
-        const interpModes = ['linear', 'cardinal', 'basis', 'points'];
-        const interpShortNames = ['linear', 'cardinal', 'basis', 'points'];
+        const interpModes = ['linear', 'cardinal', 'basis', 'points', 'box'];
+        const interpShortNames = ['linear', 'cardinal', 'basis', 'points', 'box'];
         const interpIndex = interpModes.indexOf(interpValue);
         const interpDisplayText = interpIndex >= 0 ? interpShortNames[interpIndex] : 'linear';
 
@@ -656,7 +660,8 @@ export class InterpolationWidget extends RgthreeBaseWidget {
             ctx.measureText("cardinal").width,
             ctx.measureText("linear").width,
             ctx.measureText("basis").width,
-            ctx.measureText("points").width
+            ctx.measureText("points").width,
+            ctx.measureText("box").width
         ) + 20; // Add padding
 
         const arrowWidth = 9;
@@ -698,7 +703,7 @@ export class InterpolationWidget extends RgthreeBaseWidget {
     stepInterp(node, step) {
         const widget = node.widgets?.find(w => w.name === "interpolation");
         if (widget) {
-            const modes = ['linear', 'cardinal', 'basis', 'points'];
+            const modes = ['linear', 'cardinal', 'basis', 'points', 'box'];
             const currentIndex = modes.indexOf(widget.value);
             const newIndex = (currentIndex + step + modes.length) % modes.length;
             widget.value = modes[newIndex];
