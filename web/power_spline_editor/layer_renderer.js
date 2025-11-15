@@ -1,3 +1,5 @@
+import { BOX_BASE_RADIUS, POINT_BASE_RADIUS } from './spline_utils.js';
+
 /**
  * @class LayerRenderer
  * A dedicated class to handle the rendering of active and inactive spline layers
@@ -26,6 +28,27 @@ export class LayerRenderer {
             this._dashAnimOffset = (this._dashAnimOffset + 2) % 1000;
             try { this.updateInactiveDash(); } catch {}
         }, 80);
+    }
+
+    clampPointScale(value) {
+        if (typeof value !== 'number' || Number.isNaN(value)) {
+            return 1;
+        }
+        return Math.max(0.2, Math.min(3.0, value));
+    }
+
+    getPointScale(point, forBox = false) {
+        if (!point) return 1;
+        if (forBox && typeof point.boxScale === 'number' && !Number.isNaN(point.boxScale)) {
+            return this.clampPointScale(point.boxScale);
+        }
+        if (!forBox && typeof point.pointScale === 'number' && !Number.isNaN(point.pointScale)) {
+            return this.clampPointScale(point.pointScale);
+        }
+        if (typeof point.scale === 'number' && !Number.isNaN(point.scale)) {
+            return this.clampPointScale(point.scale);
+        }
+        return 1;
     }
 
     // Apply/update marching-dash on inactive paths via DOM attributes
@@ -100,7 +123,10 @@ export class LayerRenderer {
             list.push({ p, len });
         }
         const purpleMetas = (this.inactiveLayerMetadata || []).filter(d => d?.widget?.value?.type === 'handdraw');
-        const orangeMetas = (this.inactiveLayerMetadata || []).filter(d => (d?.widget?.value?.type !== 'handdraw') && ((d?.widget?.value?.interpolation || 'linear') !== 'points'));
+        const orangeMetas = (this.inactiveLayerMetadata || []).filter(d => {
+            const interp = d?.widget?.value?.interpolation || 'linear';
+            return (d?.widget?.value?.type !== 'handdraw') && (interp !== 'points' && interp !== 'box');
+        });
         const applyFor = (pairs, metas) => {
             const count = Math.min(pairs.length, metas.length);
             for (let idx = 0; idx < count; idx++) {
@@ -289,10 +315,23 @@ export class LayerRenderer {
      * @param {object} widget - The active spline widget.
      */
     drawActiveLayer(widget) {
-        const points = this.splineEditor.points;
-        if (!points || points.length === 0) return;
+        const points = Array.isArray(this.splineEditor.points) ? this.splineEditor.points : [];
+        if (!points.length) return;
+        const pointIndexMap = new Map(points.map((p, i) => [p, i]));
 
         const interpolation = widget.value.interpolation || 'linear';
+        const isPointMode = (interpolation === 'points' || interpolation === 'box');
+        const isBoxPointMode = interpolation === 'box';
+        const pointMarkerShape = isBoxPointMode ? 'square' : 'circle';
+        const orderedDots = isPointMode
+            ? [...points].sort((a, b) => this.splineEditor.getBoxPointRadius(b) - this.splineEditor.getBoxPointRadius(a))
+            : points;
+        const getPointIndex = (dot) => {
+            if (!dot) return -1;
+            if (pointIndexMap.has(dot)) return pointIndexMap.get(dot);
+            if (this.splineEditor.resolvePointIndex) return this.splineEditor.resolvePointIndex(dot);
+            return this.splineEditor.points.indexOf(dot);
+        };
         // Treat preview drawing as handdraw for styling when armed
         const isHanddraw = (widget?.value?.type === 'handdraw') || !!this.splineEditor._handdrawActive;
 
@@ -302,7 +341,7 @@ export class LayerRenderer {
         this.activeLayerPanel.add(pv.Line)
             .data(() => {
                 // Special handling for curve rendering when points are highlighted
-                if (interpolation !== 'points' && interpolation !== 'linear') {
+                if (!isPointMode && interpolation !== 'linear') {
                     const hasAnyHighlighted = points.some(p => p.highlighted);
                     if (hasAnyHighlighted) {
                         // Insert duplicate points at highlighted positions to force linear segments
@@ -350,7 +389,7 @@ export class LayerRenderer {
             })
             .left(d => d.x)
             .top(d => d.y)
-            .interpolate(() => interpolation === 'points' ? 'linear' : interpolation)
+            .interpolate(() => isPointMode ? 'linear' : interpolation)
             .strokeStyle(() => {
                 if (isHanddraw) {
                     return '#d7c400'; // muted yellow for active handdraw
@@ -360,21 +399,28 @@ export class LayerRenderer {
             .lineWidth(() => {
                 // Handdraw (active) should have same thickness as normal lines
                 if (isHanddraw) return 3;
-                return interpolation === 'points' ? 1 : 3;
+                return isPointMode ? 1 : 3;
             });
 
         // ALWAYS draw dots - bigger for points mode, all circles
         // Use closures to ensure drag handlers can find points via indexOf()
         this.activeLayerPanel.add(pv.Dot)
-            .data(() => points)
+            .data(() => orderedDots)
             .left(d => d.x)
             .top(d => d.y)
-            .radius(() => {
-                if (isHanddraw) return 2; // make yellow hand-draw points smaller
-                return interpolation === 'points' ? 9 : 6;
+            .radius((dot) => {
+                if (isHanddraw) return 2;
+                if (interpolation === 'box') {
+                    return BOX_BASE_RADIUS * this.getPointScale(dot, true);
+                }
+                if (interpolation === 'points') {
+                    return POINT_BASE_RADIUS;
+                }
+                return 6;
             })
         .shape((dot) => {
             if (interpolation === 'points') return "circle";
+            if (interpolation === 'box') return "square";
             // If interpolation is 'basis' AND the point is highlighted, draw a square
             if (interpolation === 'basis' && dot.highlighted) return "square";
             const index = this.splineEditor.resolvePointIndex
@@ -382,7 +428,7 @@ export class LayerRenderer {
                 : this.splineEditor.points.indexOf(dot);
             return index === 0 ? "triangle" : "circle";
         })            .angle((dot) => {
-                if (interpolation === 'points') return 0;
+                if (isPointMode) return 0;
                 const index = this.splineEditor.resolvePointIndex
                     ? this.splineEditor.resolvePointIndex(dot)
                     : this.splineEditor.points.indexOf(dot);
@@ -396,26 +442,26 @@ export class LayerRenderer {
                 }
                 return 0;
             })
-            .cursor("move")
+            .cursor(() => (isPointMode ? "default" : "move"))
             .strokeStyle((dot) => {
                 const index = this.splineEditor.resolvePointIndex
                     ? this.splineEditor.resolvePointIndex(dot)
                     : this.splineEditor.points.indexOf(dot);
-                if (!isHanddraw && index === 0 && interpolation !== 'points') {
+                if (!isHanddraw && index === 0 && !isPointMode) {
                     return "green";
                 }
                 if (isHanddraw) return '#d7c400';
-                return interpolation === 'points' ? "#139613" : "#1f77b4";
+                return isPointMode ? "#139613" : "#1f77b4";
             })
             .fillStyle((dot) => {
                 const index = this.splineEditor.resolvePointIndex
                     ? this.splineEditor.resolvePointIndex(dot)
                     : this.splineEditor.points.indexOf(dot);
-                if (!isHanddraw && index === 0 && interpolation !== 'points') {
+                if (!isHanddraw && index === 0 && !isPointMode) {
                     return "rgba(0, 255, 0, 0.5)";
                 }
                 if (isHanddraw) return "rgba(215, 196, 0, 0.45)";
-                return interpolation === 'points' ? "rgba(19, 150, 19, 0.5)" : "rgba(100, 100, 100, 0.5)";
+                return isPointMode ? "rgba(19, 150, 19, 0.1)" : "rgba(100, 100, 100, 0.5)";
             })
             .event("mousedown", (dot) => {
                 if (this.splineEditor.handlePointPointerDown) {
@@ -424,6 +470,22 @@ export class LayerRenderer {
             })
             .event("mouseover", this.splineEditor.mouseOverHandler)
             .event("mouseout", this.splineEditor.mouseOutHandler);
+
+        if (interpolation === 'box') {
+            this.activeLayerPanel.add(pv.Label)
+                .data(() => orderedDots)
+                .left(d => d.x - (BOX_BASE_RADIUS * this.getPointScale(d, true)) + 6)
+                .top(d => d.y - (BOX_BASE_RADIUS * this.getPointScale(d, true)) + 7)
+                .text((dot) => {
+                    const idx = getPointIndex(dot);
+                    return idx >= 0 ? `${idx + 1}` : "";
+                })
+                .textAlign("left")
+                .textBaseline("top")
+                .font("14px monospace")
+                .textStyle("#4dc55a")
+                .events("none");
+        }
         // No labels for any mode - removed the label anchor
     }
 
@@ -465,8 +527,11 @@ export class LayerRenderer {
         });
 
         const interpolation = widget.value.interpolation || 'linear';
+        const isPointMode = (interpolation === 'points' || interpolation === 'box');
+        const isBoxPointMode = interpolation === 'box';
+        const pointMarkerShape = isBoxPointMode ? 'square' : 'circle';
         // For inactive points layers (non-handdraw), reduce line opacity to 20%
-        if (!isHanddraw && !isOff && interpolation === 'points') {
+        if (!isHanddraw && !isOff && isPointMode) {
             strokeColor = "rgba(255, 127, 14, 0.2)";
         }
 
@@ -475,7 +540,7 @@ export class LayerRenderer {
 
         // For inactive layers, we also need to handle highlighted points for consistency
         let renderPoints = pointsSnapshot;
-        if (interpolation !== 'points' && interpolation !== 'linear') {
+        if (!isPointMode && interpolation !== 'linear') {
             const hasAnyHighlighted = points.some(p => p.highlighted);
             if (hasAnyHighlighted) {
                 // Insert duplicate points at highlighted positions to force linear segments
@@ -510,12 +575,12 @@ export class LayerRenderer {
         }
 
         // ALWAYS draw line
-        const lineWidthMain = (interpolation === 'points') ? (isHanddraw ? 3 : 1) : 3;
+        const lineWidthMain = isPointMode ? (isHanddraw ? 3 : 1) : 3;
         const inactiveLine = layerPanel.add(pv.Line).events("none")
             .data(renderPoints)
             .left(d => d.x)
             .top(d => d.y)
-            .interpolate(interpolation === 'points' ? 'linear' : interpolation)
+            .interpolate(isPointMode ? 'linear' : interpolation)
             .strokeStyle(strokeColor)
             .lineWidth(lineWidthMain);
         // Note: dash animation is applied post-render via updateInactiveDash()
@@ -526,7 +591,7 @@ export class LayerRenderer {
         }
 
         // Handle different interpolation modes for inactive layers
-        if (interpolation === 'points') {
+        if (isPointMode) {
             const lineWidthPts = isHanddraw ? 3 : 1;
             layerPanel.add(pv.Line).events("none")
                 .data(pointsSnapshot)
@@ -537,62 +602,25 @@ export class LayerRenderer {
                 .lineWidth(lineWidthPts);
             // For points-type layers, also show point markers when inactive (non-handdraw only)
             if (!isHanddraw && pointsSnapshot.length > 0) {
+                const inactiveDots = isPointMode
+                    ? [...pointsSnapshot].sort((a, b) => this.splineEditor.getBoxPointRadius(b) - this.splineEditor.getBoxPointRadius(a))
+                    : pointsSnapshot;
                 layerPanel.add(pv.Dot).events("none")
-                    .data(pointsSnapshot)
+                    .data(inactiveDots)
                     .left(d => d.x)
                     .top(d => d.y)
-                    .radius(7.0)
-                    .shape('circle')
-                    .strokeStyle(strokeColor)
-                    .fillStyle(fillColor);
-                // Keep first-point triangle marker for direction
-                layerPanel.add(pv.Dot).events("none")
-                    .data([pointsSnapshot[0]])
-                    .left(d => d.x)
-                    .top(d => d.y)
-                    .radius(6)
-                    .shape("triangle")
-                    .strokeStyle(strokeColor)
-                    .fillStyle(fillColor)
-                    .angle((dot) => {
-                        const points = pointsSnapshot;
-                        if (points.length <= 1) return 0;
-                        const firstPoint = points[0];
-                        const secondPoint = points[1];
-                        const dx = secondPoint.x - firstPoint.x;
-                        const dy = secondPoint.y - firstPoint.y;
-                        if (dx !== 0 || dy !== 0) {
-                            const angle = Math.atan2(dy, dx) - Math.PI / 2;
-                            return (angle + 2 * Math.PI) % (2 * Math.PI);
-                        }
-                        return 0;
-                    });
+                .radius((dot) => {
+                    if (isBoxPointMode) {
+                        return BOX_BASE_RADIUS * this.getPointScale(dot, true);
+                    }
+                    return POINT_BASE_RADIUS;
+                })
+                    .shape(pointMarkerShape)
+                        .strokeStyle(strokeColor)
+                        .fillStyle(isPointMode ? "rgba(19, 150, 19, 0.1)" : fillColor);
             }
         } else {
-            // ONLY draw triangle at first point for all other modes
-            if (!isHanddraw && pointsSnapshot.length > 0) {
-                layerPanel.add(pv.Dot)
-                    .data([pointsSnapshot[0]])
-                    .left(d => d.x)
-                    .top(d => d.y)
-                    .radius(6)
-                    .shape("triangle")
-                    .strokeStyle(strokeColor)
-                    .fillStyle(fillColor)
-                    .angle((dot) => {
-                        const points = pointsSnapshot;
-                        if (points.length <= 1) return 0;
-                        const firstPoint = points[0];
-                        const secondPoint = points[1];
-                        const dx = secondPoint.x - firstPoint.x;
-                        const dy = secondPoint.y - firstPoint.y;
-                        if (dx !== 0 || dy !== 0) {
-                            const angle = Math.atan2(dy, dx) - Math.PI / 2;
-                            return (angle + 2 * Math.PI) % (2 * Math.PI);
-                        }
-                        return 0;
-                    });
-            }
+            // No triangles for other modes
         }
     }
 
