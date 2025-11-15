@@ -496,7 +496,7 @@ export function showInterpolationMenu(event, widget, position) {
         transform: translateX(-40%) !important;
     `;
 
-    const options = ['linear', 'cardinal', 'basis', 'points'];
+    const options = ['linear', 'cardinal', 'basis', 'points', 'box'];
     const current = widget.value.interpolation || 'linear';
 
     const list = document.createElement('div');

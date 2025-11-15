@@ -7,6 +7,8 @@ import math
 from torchvision import transforms
 from ..utility.driver_utils import apply_driver_offset
 
+BOX_BASE_RADIUS = 56
+
 class PowerSplineEditor:
     @classmethod
     def INPUT_TYPES(cls):
@@ -394,23 +396,36 @@ class PowerSplineEditor:
         all_coord_types: list = []
         all_coord_start_frames = list(incoming_coord_start_frames)
         all_coord_end_frames = list(incoming_coord_end_frames)
+        all_box_paths = []
+        all_box_names: list = []
+        all_box_types: list = []
+        all_box_start_frames = []
+        all_box_end_frames = []
 
         all_p_offsets = [] # Initialize list for p_coordinates offsets
         all_coord_offsets = [] # Initialize list for coordinates offsets
+        all_box_offsets = [] # Initialize list for box offsets
         all_p_interpolations = [] # Initialize list for p_coordinates interpolations
         all_coord_interpolations = [] # Initialize list for coordinates interpolations
+        all_box_interpolations = [] # Initialize list for box interpolations
         all_p_easing_functions = [] # Initialize list for p_coordinates easing functions
         all_coord_easing_functions = [] # Initialize list for coordinates easing functions
+        all_box_easing_functions = [] # Initialize list for box easing functions
         all_p_easing_paths = [] # Initialize list for p_coordinates easing paths
         all_coord_easing_paths = [] # Initialize list for coordinates easing paths
+        all_box_easing_paths = [] # Initialize list for box easing paths
         all_p_easing_strengths = [] # Initialize list for p_coordinates easing strengths
         all_coord_easing_strengths = [] # Initialize list for coordinates easing strengths
+        all_box_easing_strengths = [] # Initialize list for box easing strengths
         all_p_accelerations = [] # Initialize list for p_coordinates accelerations
         all_coord_accelerations = [] # Initialize list for coordinates accelerations
+        all_box_accelerations = [] # Initialize list for box accelerations
         all_p_scales = [] # Initialize list for p_coordinates scales
         all_coord_scales = [] # Initialize list for coordinates scales
+        all_box_scales = [] # Initialize list for box scales
         all_p_drivers = []  # Driver info for p_coordinates
         all_coord_drivers = []  # Driver info for coordinates
+        all_box_drivers = []  # Driver info for box coordinates
 
         # Build layer lookup map for driver processing
         # Map layer names to their processed coordinates for driving
@@ -546,6 +561,7 @@ class PowerSplineEditor:
                             driver_acceleration = 0.00  # Default
                             
                             # Search for the driver layer in all_splines to get its interpolation parameters
+                            driver_type = 'linear'
                             for driver_spline_data in all_splines:
                                 if isinstance(driver_spline_data, dict) and driver_spline_data.get('name', '') == driver_name:
                                     driver_easing_function = driver_spline_data.get('easing', 'linear')
@@ -553,6 +569,7 @@ class PowerSplineEditor:
                                     driver_easing_path = driver_easing_config.get('path', 'full')
                                     driver_easing_strength = driver_easing_config.get('strength', 1.0)
                                     driver_acceleration = driver_easing_config.get('acceleration', 0.00)
+                                    driver_type = driver_spline_data.get('interpolation', 'linear')
                                     break
 
                             # Gather driver's own timing so consumers can respect it
@@ -560,8 +577,37 @@ class PowerSplineEditor:
                             driver_end_pause = int(driver_spline_data.get('z_pause', 0))
                             driver_offset_val = int(driver_spline_data.get('offset', 0))
 
-                            # Store driver info for ALL interpolation modes
-                            # Let draw_shapes.py apply the offset at the right time
+                            def extract_point_scale(point):
+                                if not isinstance(point, dict):
+                                    return 1.0
+                                for key in ('boxScale', 'scale'):
+                                    value = point.get(key)
+                                    if isinstance(value, (int, float)):
+                                        return float(value)
+                                return 1.0
+
+                            driver_scale_profile = []
+                            driver_scale_factor = 1.0
+                            if driver_coords and isinstance(driver_coords, list) and len(driver_coords) > 0:
+                                base_scale = extract_point_scale(driver_coords[0]) or 1.0
+                                if abs(base_scale) < 1e-6:
+                                    base_scale = 1.0
+                                for pt in driver_coords:
+                                    scale_val = extract_point_scale(pt)
+                                    ratio = scale_val / base_scale if base_scale else 1.0
+                                    driver_scale_profile.append(ratio)
+                                driver_scale_factor = max(driver_scale_profile) if driver_scale_profile else 1.0
+                            driver_radius_delta = BOX_BASE_RADIUS * (driver_scale_factor - 1.0)
+                            driver_pivot = None
+                            if driver_coords and isinstance(driver_coords[0], dict):
+                                try:
+                                    driver_pivot = (
+                                        float(driver_coords[0].get('x', 0.0)),
+                                        float(driver_coords[0].get('y', 0.0))
+                                    )
+                                except (TypeError, ValueError):
+                                    driver_pivot = None
+
                             driver_info_for_layer = {
                                 "path": driver_coords,
                                 "rotate": driver_rotate,
@@ -573,7 +619,12 @@ class PowerSplineEditor:
                                 # Driver timing (used by DrawShapeOnPath to delay/advance driver motion)
                                 "start_pause": driver_start_pause,
                                 "end_pause": driver_end_pause,
-                                "offset": driver_offset_val
+                                "offset": driver_offset_val,
+                                "driver_type": driver_type,
+                                "driver_scale_profile": driver_scale_profile,
+                                "driver_scale_factor": driver_scale_factor,
+                                "driver_radius_delta": driver_radius_delta,
+                                "driver_pivot": driver_pivot
                             }
                             print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale}, easing={driver_easing_function})")
                         else:
@@ -611,6 +662,20 @@ class PowerSplineEditor:
                     all_p_accelerations.append(acceleration) # Collect acceleration value
                     all_p_scales.append(scale) # Collect scale value
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
+                elif spline_interpolation == 'box':
+                    all_box_paths.append(spline_coords)
+                    all_box_names.append(spline_data.get('name', ''))
+                    all_box_types.append('box')
+                    all_box_start_frames.append(start_frames)
+                    all_box_end_frames.append(end_frames)
+                    all_box_offsets.append(offset)
+                    all_box_interpolations.append(spline_interpolation)
+                    all_box_easing_functions.append(easing_function)
+                    all_box_easing_paths.append(easing_path)
+                    all_box_easing_strengths.append(easing_strength)
+                    all_box_accelerations.append(acceleration)
+                    all_box_scales.append(scale)
+                    all_box_drivers.append(driver_info_for_layer)
                 else:
                     all_coord_paths.append(spline_coords)
                     all_coord_names.append(spline_data.get('name', ''))
@@ -640,93 +705,84 @@ class PowerSplineEditor:
         coord_out_data = {}
 
         # Add p_coordinates if present
+        p_start_out = []
+        p_end_out = []
         if all_p_paths:
             if len(all_p_paths) > 1:
-                # Multiple paths - output as list of lists
                 coord_out_data["p_coordinates"] = all_p_paths
                 p_start_out = all_p_start_frames
                 p_end_out = all_p_end_frames
-            elif len(all_p_paths) == 1:
-                # Single path - output as simple list for backward compatibility
+            else:
                 coord_out_data["p_coordinates"] = all_p_paths[0]
                 p_start_out = all_p_start_frames[0] if all_p_start_frames else 0
                 p_end_out = all_p_end_frames[0] if all_p_end_frames else 0
-        else:
-            p_start_out = []
-            p_end_out = []
 
         # Add coordinates if present
+        c_start_out = []
+        c_end_out = []
         if all_coord_paths:
             if len(all_coord_paths) > 1:
-                # Multiple paths - output as list of lists
                 coord_out_data["coordinates"] = all_coord_paths
                 c_start_out = all_coord_start_frames
                 c_end_out = all_coord_end_frames
-            elif len(all_coord_paths) == 1:
-                # Single path - output as simple list for backward compatibility
+            else:
                 coord_out_data["coordinates"] = all_coord_paths[0]
                 c_start_out = all_coord_start_frames[0] if all_coord_start_frames else 0
                 c_end_out = all_coord_end_frames[0] if all_coord_end_frames else 0
-        else:
-            c_start_out = []
-            c_end_out = []
 
-        # Add pause frames, offsets, interpolations, easing params, scales, and drivers based on what exists
-        if all_p_paths and all_coord_paths:
-            # Both types exist - use new format with separate pause frames, offsets, interpolations, easing params, scales, and drivers
-            coord_out_data["start_p_frames"] = {"p": p_start_out, "c": c_start_out}
-            coord_out_data["end_p_frames"] = {"p": p_end_out, "c": c_end_out}
-            coord_out_data["offsets"] = {"p": all_p_offsets, "c": all_coord_offsets}
-            coord_out_data["interpolations"] = {"p": all_p_interpolations, "c": all_coord_interpolations}
-            coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": all_coord_easing_functions}
-            coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": all_coord_easing_paths}
-            coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": all_coord_easing_strengths}
-            coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": all_coord_accelerations}
-            coord_out_data["scales"] = {"p": all_p_scales, "c": all_coord_scales}
-            coord_out_data["drivers"] = {"p": all_p_drivers, "c": all_coord_drivers}
-            coord_out_data["names"] = {"p": all_p_names, "c": all_coord_names}
-            coord_out_data["types"] = {"p": all_p_types, "c": all_coord_types}
-        elif all_p_paths:
-            # Only p_coordinates - use new format for consistency
-            coord_out_data["start_p_frames"] = {"p": p_start_out, "c": []}
-            coord_out_data["end_p_frames"] = {"p": p_end_out, "c": []}
-            coord_out_data["offsets"] = {"p": all_p_offsets, "c": []}
-            coord_out_data["interpolations"] = {"p": all_p_interpolations, "c": []}
-            coord_out_data["easing_functions"] = {"p": all_p_easing_functions, "c": []}
-            coord_out_data["easing_paths"] = {"p": all_p_easing_paths, "c": []}
-            coord_out_data["easing_strengths"] = {"p": all_p_easing_strengths, "c": []}
-            coord_out_data["accelerations"] = {"p": all_p_accelerations, "c": []}
-            coord_out_data["scales"] = {"p": all_p_scales, "c": []}
-            coord_out_data["drivers"] = {"p": all_p_drivers, "c": []}
-            coord_out_data["names"] = {"p": all_p_names, "c": []}
-            coord_out_data["types"] = {"p": all_p_types, "c": []}
-        elif all_coord_paths:
-            # Only coordinates - use new format for consistency
-            coord_out_data["start_p_frames"] = {"p": [], "c": c_start_out}
-            coord_out_data["end_p_frames"] = {"p": [], "c": c_end_out}
-            coord_out_data["offsets"] = {"p": [], "c": all_coord_offsets}
-            coord_out_data["interpolations"] = {"p": [], "c": all_coord_interpolations}
-            coord_out_data["easing_functions"] = {"p": [], "c": all_coord_easing_functions}
-            coord_out_data["easing_paths"] = {"p": [], "c": all_coord_easing_paths}
-            coord_out_data["easing_strengths"] = {"p": [], "c": all_coord_easing_strengths}
-            coord_out_data["accelerations"] = {"p": [], "c": all_coord_accelerations}
-            coord_out_data["scales"] = {"p": [], "c": all_coord_scales}
-            coord_out_data["drivers"] = {"p": [], "c": all_coord_drivers}
-            coord_out_data["names"] = {"p": [], "c": all_coord_names}
-            coord_out_data["types"] = {"p": [], "c": all_coord_types}
-        else:
+        # Add box coordinates if present
+        b_start_out = []
+        b_end_out = []
+        if all_box_paths:
+            if len(all_box_paths) > 1:
+                coord_out_data["box_coordinates"] = all_box_paths
+                b_start_out = all_box_start_frames
+                b_end_out = all_box_end_frames
+            else:
+                coord_out_data["box_coordinates"] = all_box_paths[0]
+                b_start_out = all_box_start_frames[0] if all_box_start_frames else 0
+                b_end_out = all_box_end_frames[0] if all_box_end_frames else 0
+
+        def assemble_meta(p_has, p_val, c_has, c_val, b_has, b_val):
+            if not (p_has or c_has or b_has):
+                return []
+            return {
+                "p": p_val if p_has else [],
+                "c": c_val if c_has else [],
+                "b": b_val if b_has else []
+            }
+
+        has_p = bool(all_p_paths)
+        has_c = bool(all_coord_paths)
+        has_b = bool(all_box_paths)
+        if not (has_p or has_c or has_b):
             # No paths at all
             coord_out_data["start_p_frames"] = 0
             coord_out_data["end_p_frames"] = 0
-            coord_out_data["offsets"] = [] # Default empty list
-            coord_out_data["interpolations"] = [] # Default empty list
-            coord_out_data["easing_functions"] = [] # Default empty list for easing functions
-            coord_out_data["easing_paths"] = [] # Default empty list for easing paths
-            coord_out_data["easing_strengths"] = [] # Default empty list for easing strengths
-            coord_out_data["accelerations"] = [] # Default empty list for accelerations
-            coord_out_data["scales"] = [] # Default empty list for scales
-            coord_out_data["drivers"] = [] # Default empty list
+            coord_out_data["offsets"] = []  # Default empty list
+            coord_out_data["interpolations"] = []  # Default empty list
+            coord_out_data["easing_functions"] = []  # Default empty list for easing functions
+            coord_out_data["easing_paths"] = []  # Default empty list for easing paths
+            coord_out_data["easing_strengths"] = []  # Default empty list for easing strengths
+            coord_out_data["accelerations"] = []  # Default empty list for accelerations
+            coord_out_data["scales"] = []  # Default empty list for scales
+            coord_out_data["drivers"] = []  # Default empty list
+            coord_out_data["names"] = {"p": [], "c": [], "b": []}
+            coord_out_data["types"] = {"p": [], "c": [], "b": []}
             print("Warning: No paths to output")
+        else:
+            coord_out_data["start_p_frames"] = assemble_meta(has_p, p_start_out, has_c, c_start_out, has_b, b_start_out)
+            coord_out_data["end_p_frames"] = assemble_meta(has_p, p_end_out, has_c, c_end_out, has_b, b_end_out)
+            coord_out_data["offsets"] = assemble_meta(has_p, all_p_offsets, has_c, all_coord_offsets, has_b, all_box_offsets)
+            coord_out_data["interpolations"] = assemble_meta(has_p, all_p_interpolations, has_c, all_coord_interpolations, has_b, all_box_interpolations)
+            coord_out_data["easing_functions"] = assemble_meta(has_p, all_p_easing_functions, has_c, all_coord_easing_functions, has_b, all_box_easing_functions)
+            coord_out_data["easing_paths"] = assemble_meta(has_p, all_p_easing_paths, has_c, all_coord_easing_paths, has_b, all_box_easing_paths)
+            coord_out_data["easing_strengths"] = assemble_meta(has_p, all_p_easing_strengths, has_c, all_coord_easing_strengths, has_b, all_box_easing_strengths)
+            coord_out_data["accelerations"] = assemble_meta(has_p, all_p_accelerations, has_c, all_coord_accelerations, has_b, all_box_accelerations)
+            coord_out_data["scales"] = assemble_meta(has_p, all_p_scales, has_c, all_coord_scales, has_b, all_box_scales)
+            coord_out_data["drivers"] = assemble_meta(has_p, all_p_drivers, has_c, all_coord_drivers, has_b, all_box_drivers)
+            coord_out_data["names"] = assemble_meta(has_p, all_p_names, has_c, all_coord_names, has_b, all_box_names)
+            coord_out_data["types"] = assemble_meta(has_p, all_p_types, has_c, all_coord_types, has_b, all_box_types)
 
         # Include coordinate space dimensions so DrawShapeOnPath can scale if needed
         # Coordinates from the frontend are in normalized 0-1 range
