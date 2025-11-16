@@ -1,6 +1,10 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 ## Updates
+**Version 1.0.7** - 2025-11-13
+- **Box layer type**: new layer type that can scale "points" type layer points when driving them
+
+
 **Version 1.0.6** - 2025-11-13
 - **New Wan22FMLF**: A better way to add midframe control from https://github.com/wallen0322/ComfyUI-Wan22FMLF + amplitude test in one node
 - **Lora high.low filter**: Clicking the circle icon cycles through: ◎ → ◐ → ◑ → ◎ + right icon right
