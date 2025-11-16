@@ -124,7 +124,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                  frame_height: int = DEFAULT_FRAME_HEIGHT,
                                  driver_scale_factor: float = 1.0,
                                  driver_radius_delta: float = 0.0,
-                                 driver_path_normalized: bool = True) -> Tuple[float, float]:
+                                 driver_path_normalized: bool = True,
+                                 apply_scale_to_offset: bool = True) -> Tuple[float, float]:
         """
         Calculate driver offset for a given frame based on interpolated driver path.
 
@@ -146,7 +147,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             current_y = float(interpolated_driver[driver_index]['y'])
 
             # Driver offset is computed relative to the driver's first keyframe
-            scale_multiplier = driver_scale * driver_scale_factor
+            scale_multiplier = driver_scale * driver_scale_factor if apply_scale_to_offset else driver_scale
             offset_x = (current_x - ref_x) * scale_multiplier
             offset_y = (current_y - ref_y) * scale_multiplier
 
@@ -171,11 +172,17 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         if pivot_normalized:
             pivot_x *= frame_width
             pivot_y *= frame_height
-        pivot_x += offset_x
-        pivot_y += offset_y
-        dx = loc_x - pivot_x
-        dy = loc_y - pivot_y
-        return pivot_x + dx * scale_factor, pivot_y + dy * scale_factor
+
+        # Remove the active translation before scaling so the driver offset can be re-applied afterward.
+        base_loc_x = loc_x - offset_x
+        base_loc_y = loc_y - offset_y
+
+        dx = base_loc_x - pivot_x
+        dy = base_loc_y - pivot_y
+        scaled_x = pivot_x + dx * scale_factor
+        scaled_y = pivot_y + dy * scale_factor
+
+        return scaled_x + offset_x, scaled_y + offset_y
 
     def _resample_scale_profile(self, scale_profile: Optional[List[float]], target_length: int,
                                 easing_function: str = "linear", easing_strength: float = 1.0) -> List[float]:
@@ -315,6 +322,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     if layer_driver_info and isinstance(layer_driver_info, dict):
                         interpolated_driver = layer_driver_info.get('path')
                         driver_d_scale = layer_driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
+                        is_box_driver = layer_driver_info.get('driver_type') == 'box'
 
                         if interpolated_driver and len(interpolated_driver) > 0:
                             # Respect DRIVER timing: A-pause delays, offset may delay(+)/advance(-)
@@ -329,7 +337,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 eff_frame, interpolated_driver, (0, 0),
                                 total_frames, driver_d_scale, frame_width, frame_height,
                                 driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
-                                driver_path_normalized=pivot_normalized
+                                driver_path_normalized=pivot_normalized,
+                                apply_scale_to_offset=not is_box_driver
                             )
 
                     try:
@@ -377,21 +386,25 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 interpolated_driver = driver_info.get('interpolated_path')
                 driver_pause_frames = driver_info.get('pause_frames', (0, 0))
                 d_scale = driver_info.get('d_scale', 1.0)
-                
+                driver_type = driver_info.get('driver_type') if driver_info else None
+                is_box_driver = driver_type == 'box'
+
                 # Respect DRIVER timing for points layers
                 driver_start_p2 = int(driver_info.get('start_pause', 0))
                 driver_offset_val2 = int(driver_info.get('offset', 0))
                 pos_delay2 = driver_start_p2 + max(0, driver_offset_val2)
                 neg_lead2 = -min(0, driver_offset_val2)
                 eff_frame = max(0, frame_index - pos_delay2 + neg_lead2)
-                pivot_normalized = driver_info.get('driver_path_normalized', True)
-                driver_offset_x, driver_offset_y = self._calculate_driver_offset(
-                    eff_frame, interpolated_driver, driver_pause_frames,
-                    total_frames, d_scale, frame_width, frame_height,
-                    driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
-                    driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
-                    driver_path_normalized=pivot_normalized
-                )
+                if interpolated_driver and len(interpolated_driver) > 0:
+                    pivot_normalized = driver_info.get('driver_path_normalized', True)
+                    driver_offset_x, driver_offset_y = self._calculate_driver_offset(
+                        eff_frame, interpolated_driver, driver_pause_frames,
+                        total_frames, d_scale, frame_width, frame_height,
+                        driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
+                        driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
+                        driver_path_normalized=pivot_normalized,
+                        apply_scale_to_offset=not is_box_driver
+                    )
                     
                     
                 # Apply per-path scale if scales_list is provided
@@ -402,7 +415,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     path_current_width *= scale
                     path_current_height *= scale
                 
-                driver_type = driver_info.get('driver_type') if driver_info else None
                 driver_pivot = driver_info.get('driver_pivot') if driver_info else None
                 driver_scale = self._get_driver_scale_for_frame(driver_info, eff_frame) if driver_info else 1.0
 
@@ -451,8 +463,13 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 # Apply driver offset for animated paths if driver info is present
                 driver_offset_x = driver_offset_y = 0.0
                 driver_info = None
+                driver_type = None
+                is_box_driver = False
+                eff_frame3 = 0
                 if coords_driver_info_list and path_idx < len(coords_driver_info_list):
                     driver_info = coords_driver_info_list[path_idx]
+                    driver_type = driver_info.get('driver_type') if driver_info else None
+                    is_box_driver = driver_type == 'box'
                     if driver_info and not driver_info.get('is_points_mode', False):
                         interpolated_driver = driver_info.get('interpolated_path')
                         d_scale = driver_info.get('d_scale', 1.0)
@@ -470,13 +487,13 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 total_frames, d_scale, frame_width, frame_height,
                                 driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
                                 driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
-                                driver_path_normalized=driver_path_normalized
+                                driver_path_normalized=driver_path_normalized,
+                                apply_scale_to_offset=not is_box_driver
                             )
 
                 location_x += driver_offset_x
                 location_y += driver_offset_y
 
-                driver_type = driver_info.get('driver_type') if driver_info else None
                 driver_pivot = driver_info.get('driver_pivot') if driver_info else None
                 if driver_type == 'box':
                     driver_scale = self._get_driver_scale_for_frame(driver_info, eff_frame3)
@@ -1552,8 +1569,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                         # Extract x, y and apply driver offset if present
                         coord = path_coords[coord_index]
                         driver_offset_x = driver_offset_y = 0.0
+                        interpolated_driver = None
+                        d_scale = DRIVER_SCALE_FACTOR
+                        driver_info = None
+                        driver_type = None
+                        is_box_driver = False
+                        eff_frame = 0
                         if coords_driver_info_list and path_idx < len(coords_driver_info_list):
                             driver_info = coords_driver_info_list[path_idx]
+                            driver_type = driver_info.get('driver_type') if driver_info else None
+                            is_box_driver = driver_type == 'box'
                             if driver_info and not driver_info.get('is_points_mode', False):
                                 interpolated_driver = driver_info.get('interpolated_path')
                                 d_scale = driver_info.get('d_scale', 1.0)
@@ -1569,12 +1594,13 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 total_frames, d_scale, frame_width, frame_height,
                                 driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
                                 driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
-                                driver_path_normalized=False
+                                driver_path_normalized=False,
+                                apply_scale_to_offset=not is_box_driver
                             )
 
                         location_x = float(coord["x"]) + driver_offset_x
                         location_y = float(coord["y"]) + driver_offset_y
-                        if driver_info and driver_info.get('driver_type') == 'box':
+                        if driver_type == 'box':
                             driver_scale = self._get_driver_scale_for_frame(driver_info, eff_frame)
                             driver_pivot = driver_info.get('driver_pivot')
                             pivot_normalized = driver_info.get('driver_path_normalized', False)
@@ -1703,6 +1729,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             if layer_driver_info and isinstance(layer_driver_info, dict):
                                 interpolated_driver = layer_driver_info.get('path')
                                 driver_d_scale = layer_driver_info.get('d_scale', 1.0)
+                                is_box_driver = layer_driver_info.get('driver_type') == 'box'
                                 if interpolated_driver and len(interpolated_driver) > 0:
                                     driver_start_p = int(layer_driver_info.get('start_pause', 0))
                                     driver_offset_val = int(layer_driver_info.get('offset', 0))
@@ -1714,7 +1741,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                         total_frames, driver_d_scale, frame_width, frame_height,
                                         driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
                                         driver_radius_delta=layer_driver_info.get('driver_radius_delta', 0.0),
-                                        driver_path_normalized=layer_driver_info.get('driver_path_normalized', True)
+                                        driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
+                                        apply_scale_to_offset=not is_box_driver
                                     )
                                     driver_scale = self._get_driver_scale_for_frame(layer_driver_info, eff_static_frame)
                                     driver_pivot = layer_driver_info.get('driver_pivot')
