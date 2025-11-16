@@ -383,6 +383,10 @@ def apply_driver_chain_offsets(
 
         if parent_name and parent_name in resolved_paths:
             parent_world_path = resolved_paths[parent_name]
+
+            if not adjusted_path and parent_world_path:
+                adjusted_path = [{"x": 0.0, "y": 0.0}] * len(parent_world_path)
+
             if names_key == "p":
                 adjusted_path = []
                 for pt in parent_world_path:

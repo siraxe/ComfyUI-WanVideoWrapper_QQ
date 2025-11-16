@@ -150,7 +150,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                static_points_driver_info_list: Optional[List[Optional[Dict[str, Any]]]] = None,
                                static_points_interpolated_drivers: Optional[List[Dict[str, Any]]] = None,
                                resolved_driver_paths: Optional[Dict[str, List[Dict[str, float]]]] = None,
-                               layer_visibility: Optional[List[bool]] = None) -> Image.Image:
+                               layer_visibility: Optional[List[bool]] = None,
+                               static_points_offsets_list: Optional[List[int]] = None,
+                               static_points_visibility_list: Optional[List[bool]] = None) -> Image.Image:
         """
         Draw one frame using PIL.
         This function is thread-safe and used by ThreadPoolExecutor in drawshapemask.
@@ -220,52 +222,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             )
 
         def _accumulate_driver_offsets(driver_info: Optional[Dict[str, Any]], base_frame_index: int) -> Tuple[float, float]:
-            total_x = total_y = 0.0
-            chain: List[Dict[str, Any]] = []
-            current = driver_info
-            last_parent: Optional[str] = None
-            while current and isinstance(current, dict):
-                chain.append(current)
-                # If this path is already chain-resolved (includes ancestors), do not climb further
-                if current.get('_chain_resolved'):
-                    break
-                last_parent = current.get('driver_layer_name')
-                if last_parent:
-                    next_in_cache = driver_cache.get(last_parent)
-                    if next_in_cache is not None:
-                        current = next_in_cache
-                        continue
-                    # Parent missing from cache; try to synthesize from resolved paths (pixel coords)
-                    resolved_parent_path = resolved_driver_paths.get(last_parent) if resolved_driver_paths else None
-                    if isinstance(resolved_parent_path, list) and resolved_parent_path:
-                        synthetic = {
-                            'layer_name': last_parent,
-                            'driver_layer_name': None,
-                            'interpolated_path': resolved_parent_path,
-                            'driver_path_key': 'interpolated_path',
-                            'driver_path_normalized': False,
-                            'd_scale': 1.0,
-                            'driver_scale_factor': 1.0,
-                            'driver_radius_delta': 0.0,
-                            'start_pause': 0,
-                            'end_pause': 0,
-                            'offset': 0,
-                            'driver_type': None,
-                            '_chain_resolved': True,
-                        }
-                        chain.append(synthetic)
-                        print(f"[DriverDebug] synthetic parent appended name={last_parent}")
-                    break
-                else:
-                    break
-
-            chain_names = [c.get('layer_name') for c in chain]
-            print(f"[DriverDebug] accumulating chain={chain_names} frame={base_frame_index}")
-            for current in chain:
-                offset_x, offset_y = _compute_single_driver_offset(current, base_frame_index)
-                total_x += offset_x
-                total_y += offset_y
-            return total_x, total_y
+            if not driver_info:
+                return 0.0, 0.0
+            return _compute_single_driver_offset(driver_info, base_frame_index)
 
         total_static_layers = len(static_point_layers) if static_point_layers else 0
         aligned_static_drivers = bool(static_points_interpolated_drivers) and len(static_points_interpolated_drivers) == total_static_layers
@@ -285,6 +244,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 if not static_points:
                     continue
 
+                # Skip rendering for hidden layers
+                if static_points_visibility_list and layer_idx < len(static_points_visibility_list) and not static_points_visibility_list[layer_idx]:
+                    continue
+
                 # Apply scale to shape dimensions for static points using per-layer scales if available
                 layer_scale = static_points_scale
                 if static_points_scales_list and layer_idx < len(static_points_scales_list):
@@ -301,14 +264,29 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     if layer_driver_info is None and not aligned_static_drivers:
                         layer_driver_info = first_static_driver
 
+                # Get this layer's specific timing
+                layer_start_pause = static_points_pause_frames_list[layer_idx][0] if static_points_pause_frames_list and layer_idx < len(static_points_pause_frames_list) else 0
+                layer_end_pause = static_points_pause_frames_list[layer_idx][1] if static_points_pause_frames_list and layer_idx < len(static_points_pause_frames_list) else 0
+                layer_offset = static_points_offsets_list[layer_idx] if static_points_offsets_list and layer_idx < len(static_points_offsets_list) else 0
+
+                # Calculate the adjusted frame index for the driver based on the points layer's timing
+                driver_eval_frame = frame_index
+                if driver_eval_frame < layer_start_pause:
+                    driver_eval_frame = layer_start_pause
+                if total_frames - layer_end_pause > layer_start_pause:
+                    if driver_eval_frame >= total_frames - layer_end_pause:
+                        driver_eval_frame = total_frames - layer_end_pause - 1
+                
+                driver_eval_frame = driver_eval_frame - layer_start_pause - layer_offset
+
                 # Draw each point in this layer with the layer's driver offset applied
                 for point_idx, point in enumerate(static_points):
                     driver_offset_x = driver_offset_y = 0.0
                     driver_frame_index = 0
 
                     if layer_driver_info and isinstance(layer_driver_info, dict):
-                        driver_offset_x, driver_offset_y = _accumulate_driver_offsets(layer_driver_info, frame_index)
-                        driver_frame_index = _get_effective_frame(layer_driver_info, frame_index)
+                        driver_offset_x, driver_offset_y = _accumulate_driver_offsets(layer_driver_info, driver_eval_frame)
+                        driver_frame_index = _get_effective_frame(layer_driver_info, driver_eval_frame)
 
                     try:
                         location_x = point['x'] + driver_offset_x
@@ -622,6 +600,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                 if isinstance(p, dict) and 'x' in p and 'y' in p:
                                     layer.append({'x': float(p['x']), 'y': float(p['y']), **{k: v for k, v in p.items() if k not in ('x', 'y')}})
                             static_point_layers.append(layer)
+                        elif isinstance(sub, list) and not sub:
+                            static_point_layers.append([])
                         elif isinstance(sub, dict) and 'x' in sub and 'y' in sub:
                             # Single point as a layer
                             static_point_layers.append([{'x': float(sub['x']), 'y': float(sub['y']), **{k: v for k, v in sub.items() if k not in ('x', 'y')}}])
@@ -941,6 +921,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         if len(coord_visibility_list) < len(coords_list_raw):
             coord_visibility_list.extend([True] * (len(coords_list_raw) - len(coord_visibility_list)))
 
+        static_points_visibility_list: List[bool] = []
+        if isinstance(coord_visibility_meta, dict):
+            raw_vis = coord_visibility_meta.get("p")
+            if isinstance(raw_vis, list):
+                static_points_visibility_list = [bool(v) for v in raw_vis[:num_static_point_layers]]
+            elif isinstance(raw_vis, (bool, int)):
+                static_points_visibility_list = [bool(raw_vis)] * num_static_point_layers
+        if len(static_points_visibility_list) < num_static_point_layers:
+            static_points_visibility_list.extend([True] * (num_static_point_layers - len(static_points_visibility_list)))
+
         box_paths_count = 0
 
 
@@ -1122,7 +1112,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         num_static_layers = len(static_point_layers) if static_point_layers else 0
         p_start_meta = meta.get("start_p_frames", 0)
         p_end_meta = meta.get("end_p_frames", 0)
-        def to_list(meta_val, which):
+        p_offsets_meta = meta.get("offsets", 0)
+        def to_list(meta_val):
             if isinstance(meta_val, dict):
                 val = meta_val.get("p", 0)
             else:
@@ -1144,8 +1135,9 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 except (ValueError, TypeError):
                     cleaned.append(0)
             return cleaned
-        p_start_list = to_list(p_start_meta, "start") if num_static_layers else []
-        p_end_list = to_list(p_end_meta, "end") if num_static_layers else []
+        p_start_list = to_list(p_start_meta) if num_static_layers else []
+        p_end_list = to_list(p_end_meta) if num_static_layers else []
+        p_offsets_list = to_list(p_offsets_meta) if num_static_layers else []
         static_points_pause_frames_list = [(p_start_list[i], p_end_list[i]) for i in range(num_static_layers)] if num_static_layers else []
 
         for i in range(batch_size):
@@ -1157,7 +1149,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 static_points_pause_frames_list, coords_driver_info_list, scales_list,
                 static_points_scale, static_points_scales_list,
                 static_points_driver_info_list, static_points_interpolated_drivers,
-                resolved_driver_paths, coord_visibility_list
+                resolved_driver_paths, coord_visibility_list, p_offsets_list, static_points_visibility_list
             ))
 
         try:
@@ -1186,6 +1178,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 fade_start_frame = int(animated_fade_start * total_frames) if animated_fade_start > 0 else 0
                 
                 for path_idx, path_coords in enumerate(processed_coords_list):
+                    # Check layer visibility toggle
+                    if coord_visibility_list and path_idx < len(coord_visibility_list) and not coord_visibility_list[path_idx]:
+                        continue
+
                     path_start_p, path_end_p = path_pause_frames[path_idx]
                     single_path_coords = []
                     for i in range(total_frames):
@@ -1350,6 +1346,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     if not static_points:
                         continue
 
+                    # Get this layer's specific timing
+                    layer_start_pause = p_start_list[layer_idx] if layer_idx < len(p_start_list) else 0
+                    layer_end_pause = p_end_list[layer_idx] if layer_idx < len(p_end_list) else 0
+                    layer_offset = p_offsets_list[layer_idx] if layer_idx < len(p_offsets_list) else 0
+
+                    # Check layer visibility toggle
+                    layer_is_visible = static_points_visibility_list[layer_idx] if static_points_visibility_list and layer_idx < len(static_points_visibility_list) else True
+                    if not layer_is_visible:
+                        continue # Skip this layer if toggled off
+
                     # Get the driver for this layer if available
                     layer_driver_info = None
                     if static_points_use_driver and static_points_interpolated_drivers:
@@ -1362,6 +1368,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     for point_idx, point in enumerate(static_points):
                         single_point_spline = []
                         for i in range(total_frames):
+                            # Calculate the adjusted frame index for the driver based on the points layer's timing
+                            driver_eval_frame = i
+                            if driver_eval_frame < layer_start_pause:
+                                driver_eval_frame = layer_start_pause
+                            if total_frames - layer_end_pause > layer_start_pause:
+                                if driver_eval_frame >= total_frames - layer_end_pause:
+                                    driver_eval_frame = total_frames - layer_end_pause - 1
+                            
+                            driver_eval_frame = driver_eval_frame - layer_start_pause - layer_offset
+                            
                             driver_offset_x = driver_offset_y = 0.0
                             eff_static_frame = 0
                             driver_scale = 1.0
@@ -1377,7 +1393,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                     driver_offset_val = int(layer_driver_info.get('offset', 0))
                                     pos_delay = driver_start_p + max(0, driver_offset_val)
                                     neg_lead = -min(0, driver_offset_val)
-                                    eff_static_frame = max(0, i - pos_delay + neg_lead)
+                                    eff_static_frame = max(0, driver_eval_frame - pos_delay + neg_lead)
                                     driver_offset_x, driver_offset_y = calculate_driver_offset(
                                         eff_static_frame, interpolated_driver, (0, 0),
                                         total_frames, driver_d_scale, frame_width, frame_height,
