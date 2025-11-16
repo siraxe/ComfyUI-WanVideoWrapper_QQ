@@ -226,6 +226,24 @@ class PowerSplineEditor:
             # Default fallback (shouldn't happen with current INPUT_TYPES)
             return points
 
+    def _round_points(self, points, precision=4):
+        """Return a deep copy of points with x/y rounded to desired precision."""
+        rounded = []
+        for pt in points or []:
+            if not isinstance(pt, dict):
+                continue
+            new_pt = dict(pt)
+            try:
+                if 'x' in new_pt:
+                    new_pt['x'] = round(float(new_pt['x']), precision)
+                if 'y' in new_pt:
+                    new_pt['y'] = round(float(new_pt['y']), precision)
+            except (TypeError, ValueError):
+                new_pt['x'] = float(new_pt.get('x', 0.0))
+                new_pt['y'] = float(new_pt.get('y', 0.0))
+            rounded.append(new_pt)
+        return rounded
+
     def _apply_offset_timing(self, points, offset):
         """
         Apply timing offset by removing coordinates and returning pause adjustments.
@@ -390,17 +408,21 @@ class PowerSplineEditor:
         all_p_types: list = []
         all_p_start_frames = list(incoming_p_start_frames)
         all_p_end_frames = list(incoming_p_end_frames)
+        all_p_visibility: list = [True] * len(all_p_paths)
 
         all_coord_paths = list(incoming_coord_paths)  # Copy incoming animated paths
         all_coord_names: list = []
         all_coord_types: list = []
         all_coord_start_frames = list(incoming_coord_start_frames)
         all_coord_end_frames = list(incoming_coord_end_frames)
+        all_coord_visibility: list = [True] * len(all_coord_paths)
+
         all_box_paths = []
         all_box_names: list = []
         all_box_types: list = []
         all_box_start_frames = []
         all_box_end_frames = []
+        all_box_visibility: list = []
 
         all_p_offsets = [] # Initialize list for p_coordinates offsets
         all_coord_offsets = [] # Initialize list for coordinates offsets
@@ -459,7 +481,7 @@ class PowerSplineEditor:
                                 repeated_path.extend(following_loop_segment)
                         layer_coords = repeated_path
 
-                    layer_map[layer_name] = layer_coords
+                    layer_map[layer_name] = self._round_points(layer_coords)
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"Warning: Could not parse layer '{layer_name}' for driver map: {e}")
 
@@ -467,9 +489,7 @@ class PowerSplineEditor:
             if not isinstance(spline_data, dict):
                 continue
 
-            # Skip if spline is toggled off
-            if not spline_data.get('on', True):
-                continue
+            is_on = bool(spline_data.get('on', True))
 
             # Get spline parameters
             control_points_str = spline_data.get('points_store', '[]') # Use 'points_store' for raw control points
@@ -533,6 +553,8 @@ class PowerSplineEditor:
                     
                     spline_coords = repeated_path
                 # --- END REPEAT LOGIC ---
+
+                spline_coords = self._round_points(spline_coords)
 
                 # --- DRIVER LOGIC (Coordinate Driving) ---
                 # Check if this spline is driven by another layer
@@ -624,7 +646,8 @@ class PowerSplineEditor:
                                 "driver_scale_profile": driver_scale_profile,
                                 "driver_scale_factor": driver_scale_factor,
                                 "driver_radius_delta": driver_radius_delta,
-                                "driver_pivot": driver_pivot
+                                "driver_pivot": driver_pivot,
+                                "driver_layer_name": driver_name
                             }
                             print(f"Stored driver '{driver_name}' for layer '{current_spline_name}' (mode={spline_interpolation}, rotate={driver_rotate}°, d_scale={driver_d_scale}, easing={driver_easing_function})")
                         else:
@@ -648,6 +671,7 @@ class PowerSplineEditor:
                     all_coord_accelerations.append(acceleration)
                     all_coord_scales.append(scale)
                     all_coord_drivers.append(driver_info_for_layer)
+                    all_coord_visibility.append(is_on)
                 elif spline_interpolation == 'points':
                     all_p_paths.append(spline_coords)
                     all_p_names.append(spline_data.get('name', ''))
@@ -662,6 +686,7 @@ class PowerSplineEditor:
                     all_p_accelerations.append(acceleration) # Collect acceleration value
                     all_p_scales.append(scale) # Collect scale value
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
+                    all_p_visibility.append(is_on)
                 elif spline_interpolation == 'box':
                     all_box_paths.append(spline_coords)
                     all_box_names.append(spline_data.get('name', ''))
@@ -676,6 +701,7 @@ class PowerSplineEditor:
                     all_box_accelerations.append(acceleration)
                     all_box_scales.append(scale)
                     all_box_drivers.append(driver_info_for_layer)
+                    all_box_visibility.append(is_on)
                 else:
                     all_coord_paths.append(spline_coords)
                     all_coord_names.append(spline_data.get('name', ''))
@@ -690,6 +716,7 @@ class PowerSplineEditor:
                     all_coord_accelerations.append(acceleration) # Collect acceleration value
                     all_coord_scales.append(scale) # Collect scale value
                     all_coord_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
+                    all_coord_visibility.append(is_on)
 
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"Warning: Could not parse spline coordinates: {e}")
@@ -769,6 +796,7 @@ class PowerSplineEditor:
             coord_out_data["drivers"] = []  # Default empty list
             coord_out_data["names"] = {"p": [], "c": [], "b": []}
             coord_out_data["types"] = {"p": [], "c": [], "b": []}
+            coord_out_data["visibility"] = {"p": [], "c": [], "b": []}
             print("Warning: No paths to output")
         else:
             coord_out_data["start_p_frames"] = assemble_meta(has_p, p_start_out, has_c, c_start_out, has_b, b_start_out)
@@ -783,6 +811,7 @@ class PowerSplineEditor:
             coord_out_data["drivers"] = assemble_meta(has_p, all_p_drivers, has_c, all_coord_drivers, has_b, all_box_drivers)
             coord_out_data["names"] = assemble_meta(has_p, all_p_names, has_c, all_coord_names, has_b, all_box_names)
             coord_out_data["types"] = assemble_meta(has_p, all_p_types, has_c, all_coord_types, has_b, all_box_types)
+            coord_out_data["visibility"] = assemble_meta(has_p, all_p_visibility, has_c, all_coord_visibility, has_b, all_box_visibility)
 
         # Include coordinate space dimensions so DrawShapeOnPath can scale if needed
         # Coordinates from the frontend are in normalized 0-1 range
