@@ -56,8 +56,8 @@ class DrawShapeOnPath:
     All helper methods are defined as private methods to keep behavior encapsulated within the class.
     """
 
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "IMAGE",)
-    RETURN_NAMES = ("image", "mask", "output_coordinates", "preview",)
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "IMAGE", "STRING",)
+    RETURN_NAMES = ("image", "mask", "output_coordinates", "preview", "preview_debug_coordinates",)
     FUNCTION = "drawshapemask"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """
@@ -213,6 +213,16 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             apply_scale_to_offset = driver_info.get('apply_scale_to_offset', None)
             if apply_scale_to_offset is None:
                 apply_scale_to_offset = driver_info.get('driver_type') != 'box'
+
+            # For box drivers, make the offset purely translational so that
+            # driven points follow only the box's positional change. Box
+            # scale / radius_delta should not expand or contract the offset
+            # applied to other layers.
+            if driver_info.get('driver_type') == 'box':
+                d_scale = 1.0
+                driver_scale_factor = 1.0
+                driver_radius_delta = 0.0
+
             return calculate_driver_offset(
                 eff_frame, driver_path, (0, 0), total_frames, d_scale,
                 frame_width, frame_height, driver_scale_factor=driver_scale_factor,
@@ -284,27 +294,76 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     driver_offset_x = driver_offset_y = 0.0
                     driver_frame_index = 0
 
+                    driver_type = None
+                    driver_pivot = None
+                    driver_scale_profile = None
+
                     if layer_driver_info and isinstance(layer_driver_info, dict):
                         driver_offset_x, driver_offset_y = _accumulate_driver_offsets(layer_driver_info, driver_eval_frame)
                         driver_frame_index = _get_effective_frame(layer_driver_info, driver_eval_frame)
+                        driver_type = layer_driver_info.get('driver_type')
+                        driver_pivot = layer_driver_info.get('driver_pivot')
+                        driver_scale_profile = layer_driver_info.get('driver_scale_profile')
 
                     try:
-                        location_x = point['x'] + driver_offset_x
-                        location_y = point['y'] + driver_offset_y
-                    except (KeyError, TypeError):
+                        base_x = float(point['x'])
+                        base_y = float(point['y'])
+                    except (KeyError, TypeError, ValueError):
                         continue
-                    driver_type = layer_driver_info.get('driver_type') if isinstance(layer_driver_info, dict) else None
-                    driver_pivot = layer_driver_info.get('driver_pivot') if isinstance(layer_driver_info, dict) else None
-                    if driver_type == 'box':
-                        scale_for_frame = get_driver_scale_for_frame(
-                            layer_driver_info, driver_frame_index, DRIVER_SCALE_FACTOR
-                        )
+
+                    # Per-point scaling factors
+                    try:
+                        point_scale = float(point.get('pointScale', point.get('scale', 1.0)))
+                    except (TypeError, ValueError):
+                        point_scale = 1.0
+                    try:
+                        box_scale_factor = float(point.get('boxScale', 1.0))
+                    except (TypeError, ValueError):
+                        box_scale_factor = 1.0
+
+                    # Default: no positional scaling, just translation
+                    scaled_x = base_x
+                    scaled_y = base_y
+
+                    # Apply independent scale-out when driven by a box
+                    if driver_type == 'box' and driver_pivot is not None and driver_scale_profile:
+                        pivot_x, pivot_y = driver_pivot
                         pivot_normalized = layer_driver_info.get('driver_path_normalized', True)
-                        location_x, location_y = apply_box_pivot_scaling(
-                            location_x, location_y, driver_pivot, driver_offset_x, driver_offset_y, scale_for_frame,
-                            frame_width=frame_width, frame_height=frame_height,
-                            pivot_normalized=pivot_normalized
-                        )
+                        if pivot_normalized:
+                            pivot_x *= frame_width
+                            pivot_y *= frame_height
+
+                        boxScale0 = 1.0
+                        try:
+                            if len(driver_scale_profile) > 0:
+                                boxScale0 = float(driver_scale_profile[0]) or 1.0
+                        except (TypeError, ValueError):
+                            boxScale0 = 1.0
+
+                        try:
+                            if driver_frame_index < len(driver_scale_profile):
+                                boxScale_f = float(driver_scale_profile[driver_frame_index])
+                            else:
+                                boxScale_f = float(driver_scale_profile[-1])
+                        except (TypeError, ValueError):
+                            boxScale_f = boxScale0
+
+                        if boxScale0 != 0.0:
+                            R_box = boxScale_f / boxScale0
+                        else:
+                            R_box = 1.0
+
+                        # Per-point relative scale
+                        R_point = 1.0 + (R_box - 1.0) * point_scale * box_scale_factor
+
+                        dx0 = base_x - pivot_x
+                        dy0 = base_y - pivot_y
+                        scaled_x = pivot_x + dx0 * R_point
+                        scaled_y = pivot_y + dy0 * R_point
+
+                    # Finally, apply pure translation from the driver
+                    location_x = scaled_x + driver_offset_x
+                    location_y = scaled_y + driver_offset_y
 
                     # Draw the shape at the computed location using the helper method
                     self._draw_shape_at_location(draw, location_x, location_y, shape,
@@ -364,15 +423,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     except (KeyError, TypeError):
                         continue
 
-                    driver_type = driver_info.get('driver_type') if driver_info else None
-                    if driver_type == 'box':
-                        pivot_normalized = driver_info.get('driver_path_normalized', True)
-                        location_x, location_y = apply_box_pivot_scaling(
-                            location_x, location_y, driver_pivot, driver_offset_x, driver_offset_y, driver_scale,
-                            frame_width=frame_width, frame_height=frame_height,
-                            pivot_normalized=pivot_normalized
-                        )
-
                     # Draw the shape at the computed location using the helper method
                     self._draw_shape_at_location(draw, location_x, location_y, shape,
                                                path_current_width, path_current_height, shape_color,
@@ -416,16 +466,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 location_x += driver_offset_x
                 location_y += driver_offset_y
 
-                driver_pivot = driver_info.get('driver_pivot') if driver_info else None
-                if driver_type == 'box':
-                    driver_scale = get_driver_scale_for_frame(driver_info, eff_frame3, DRIVER_SCALE_FACTOR)
-                    pivot_normalized = driver_info.get('driver_path_normalized', True)
-                    location_x, location_y = apply_box_pivot_scaling(
-                        location_x, location_y, driver_pivot, driver_offset_x, driver_offset_y, driver_scale,
-                        frame_width=frame_width, frame_height=frame_height,
-                        pivot_normalized=pivot_normalized
-                    )
-
                 # Apply per-path scale if scales_list is provided
                 path_current_width = float(shape_width)
                 path_current_height = float(shape_height)
@@ -464,6 +504,23 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         Works on already scaled (50%) preview tensor in BHWC format.
         Returns modified tensor.
         """
+        # Debug: emit the coordinates actually used for preview so they can be inspected.
+        try:
+            preview_debug = {
+                "paths": processed_coords_list,
+                "static_points": static_point_layers,
+                "path_pause_frames": path_pause_frames,
+                "total_frames": total_frames,
+            }
+            # Limit size a bit: only first two paths and first 16 frames for log
+            trimmed_paths = []
+            for path in (processed_coords_list or [])[:2]:
+                trimmed_paths.append(path[:16])
+            preview_debug["paths"] = trimmed_paths
+            print("[PreviewDebug]", json.dumps(preview_debug))
+        except Exception:
+            pass
+
         batch_size, scaled_height, scaled_width, channels = preview_tensor.shape
         scale_factor = PREVIEW_SCALE_FACTOR  # Preview is scaled to 50%
 
@@ -1169,6 +1226,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         # Follow the same format as WanVideoATITracksVisualize
         # Generate coordinate tracks with visibility in the third component
         output_coords_json = "[]"
+        preview_debug_json = "[]"
         all_coords = []
         
         # Process animated paths (affected by animated_fade_start)
@@ -1184,6 +1242,33 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
                     path_start_p, path_end_p = path_pause_frames[path_idx]
                     single_path_coords = []
+
+                    # Base position for this path: first key as P0
+                    base_coord0 = path_coords[0] if path_coords else {"x": 0.0, "y": 0.0}
+                    P0x = float(base_coord0.get("x", 0.0))
+                    P0y = float(base_coord0.get("y", 0.0))
+
+                    # Box driver path + scale profile, if this layer is driven by a box
+                    box_path = None
+                    box_scale_profile = None
+                    B0x = B0y = 0.0
+                    S0 = 1.0
+                    if coords_driver_info_list and path_idx < len(coords_driver_info_list):
+                        base_driver_info = coords_driver_info_list[path_idx]
+                        if isinstance(base_driver_info, dict) and base_driver_info.get("driver_type") == "box":
+                            box_path = base_driver_info.get("interpolated_path") or base_driver_info.get("path")
+                            box_scale_profile = base_driver_info.get("driver_scale_profile")
+                            if box_path:
+                                try:
+                                    B0x = float(box_path[0].get("x", 0.0))
+                                    B0y = float(box_path[0].get("y", 0.0))
+                                except (TypeError, ValueError):
+                                    B0x = B0y = 0.0
+                            if isinstance(box_scale_profile, list) and box_scale_profile:
+                                try:
+                                    S0 = float(box_scale_profile[0]) or 1.0
+                                except (TypeError, ValueError):
+                                    S0 = 1.0
                     for i in range(total_frames):
                         if i < path_start_p:
                             coord_index = 0
@@ -1216,26 +1301,61 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             pos_delay = driver_start_p + max(0, driver_offset_val)
                             neg_lead = -min(0, driver_offset_val)
                             eff_frame = max(0, i - pos_delay + neg_lead)
-                            driver_offset_x, driver_offset_y = calculate_driver_offset(
-                                eff_frame, interpolated_driver, (0, 0),
-                                total_frames, d_scale, frame_width, frame_height,
-                                driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
-                                driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
-                                driver_path_normalized=False,
-                                apply_scale_to_offset=not is_box_driver
-                            )
 
-                        location_x = float(coord["x"]) + driver_offset_x
-                        location_y = float(coord["y"]) + driver_offset_y
-                        if driver_type == 'box':
-                            driver_scale = get_driver_scale_for_frame(driver_info, eff_frame, DRIVER_SCALE_FACTOR)
-                            driver_pivot = driver_info.get('driver_pivot')
-                            pivot_normalized = driver_info.get('driver_path_normalized', False)
-                            location_x, location_y = apply_box_pivot_scaling(
-                                location_x, location_y, driver_pivot, driver_offset_x, driver_offset_y, driver_scale,
-                                frame_width=frame_width, frame_height=frame_height,
-                                pivot_normalized=pivot_normalized
-                            )
+                            if not is_box_driver:
+                                # Original behavior for non-box drivers: offset relative to driver's first point
+                                driver_offset_x, driver_offset_y = calculate_driver_offset(
+                                    eff_frame, interpolated_driver, (0, 0),
+                                    total_frames, d_scale, frame_width, frame_height,
+                                    driver_scale_factor=driver_info.get('driver_scale_factor', 1.0),
+                                    driver_radius_delta=driver_info.get('driver_radius_delta', 0.0),
+                                    driver_path_normalized=False,
+                                    apply_scale_to_offset=True
+                                )
+                            else:
+                                # Box drivers for animated paths: compute pure relative
+                                # offset and relative scale around the path's own base
+                                # position so points never snap to the box origin.
+                                # We ignore calculate_driver_offset for this case and use
+                                # the raw box path instead.
+                                if box_path:
+                                    box_idx = max(0, min(eff_frame, len(box_path) - 1))
+                                    box_pt = box_path[box_idx]
+                                    try:
+                                        Bfx = float(box_pt.get("x", 0.0))
+                                        Bfy = float(box_pt.get("y", 0.0))
+                                    except (TypeError, ValueError):
+                                        Bfx = B0x
+                                        Bfy = B0y
+
+                                    # Relative box offset from frame 0
+                                    deltaBx = Bfx - B0x
+                                    deltaBy = Bfy - B0y
+
+                                    # Relative scale from frame 0
+                                    if isinstance(box_scale_profile, list) and box_scale_profile and box_idx < len(box_scale_profile):
+                                        try:
+                                            Sf = float(box_scale_profile[box_idx])
+                                        except (TypeError, ValueError):
+                                            Sf = S0
+                                    else:
+                                        Sf = S0
+                                    Rf = Sf / S0 if S0 != 0 else 1.0
+
+                                    # Apply relative scale around P0, then add box offset
+                                    raw_x = float(coord["x"])
+                                    raw_y = float(coord["y"])
+                                    location_x = P0x + (raw_x - P0x) * Rf + deltaBx
+                                    location_y = P0y + (raw_y - P0y) * Rf + deltaBy
+                                else:
+                                    # Fallback: no box path, just use raw coord
+                                    location_x = float(coord["x"])
+                                    location_y = float(coord["y"])
+
+                        # Non-box drivers or no driver: apply offset or use raw coord
+                        if not is_box_driver:
+                            location_x = float(coord["x"]) + driver_offset_x
+                            location_y = float(coord["y"]) + driver_offset_y
 
                         # Determine visibility based on animated_fade_start
                         if animated_fade_start == 0 or i < fade_start_frame:
@@ -1380,43 +1500,100 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                             
                             driver_offset_x = driver_offset_y = 0.0
                             eff_static_frame = 0
-                            driver_scale = 1.0
+                            driver_scale_profile = None
                             driver_pivot = None
-                            pivot_normalized = True
 
+                            is_box_driver = False
                             if layer_driver_info and isinstance(layer_driver_info, dict):
                                 interpolated_driver = _resolve_preview_driver_path(layer_driver_info, 'path')
                                 driver_d_scale = layer_driver_info.get('d_scale', 1.0)
                                 is_box_driver = layer_driver_info.get('driver_type') == 'box'
+                                driver_pivot = layer_driver_info.get('driver_pivot')
+                                driver_scale_profile = layer_driver_info.get('driver_scale_profile')
+
                                 if interpolated_driver and len(interpolated_driver) > 0:
                                     driver_start_p = int(layer_driver_info.get('start_pause', 0))
                                     driver_offset_val = int(layer_driver_info.get('offset', 0))
                                     pos_delay = driver_start_p + max(0, driver_offset_val)
                                     neg_lead = -min(0, driver_offset_val)
                                     eff_static_frame = max(0, driver_eval_frame - pos_delay + neg_lead)
-                                    driver_offset_x, driver_offset_y = calculate_driver_offset(
-                                        eff_static_frame, interpolated_driver, (0, 0),
-                                        total_frames, driver_d_scale, frame_width, frame_height,
-                                        driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
-                                        driver_radius_delta=layer_driver_info.get('driver_radius_delta', 0.0),
-                                        driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
-                                        apply_scale_to_offset=not is_box_driver
-                                    )
-                                    driver_scale = get_driver_scale_for_frame(
-                                        layer_driver_info, eff_static_frame, DRIVER_SCALE_FACTOR
-                                    )
-                                    driver_pivot = layer_driver_info.get('driver_pivot')
-                                    pivot_normalized = layer_driver_info.get('driver_path_normalized', True)
 
-                            location_x = float(point["x"]) + driver_offset_x
-                            location_y = float(point["y"]) + driver_offset_y
+                                    if not is_box_driver:
+                                        # Original behavior for non-box drivers: offset is relative to driver's first point
+                                        driver_offset_x, driver_offset_y = calculate_driver_offset(
+                                            eff_static_frame, interpolated_driver, (0, 0),
+                                            total_frames, driver_d_scale, frame_width, frame_height,
+                                            driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
+                                            driver_radius_delta=layer_driver_info.get('driver_radius_delta', 0.0),
+                                            driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
+                                            apply_scale_to_offset=True
+                                        )
+                                    else:
+                                        # Box drivers: pure translational offset, independent of scale/radius.
+                                        driver_offset_x, driver_offset_y = calculate_driver_offset(
+                                            eff_static_frame, interpolated_driver, (0, 0),
+                                            total_frames, 1.0, frame_width, frame_height,
+                                            driver_scale_factor=1.0,
+                                            driver_radius_delta=0.0,
+                                            driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
+                                            apply_scale_to_offset=False
+                                        )
 
-                            if layer_driver_info and layer_driver_info.get('driver_type') == 'box':
-                                location_x, location_y = apply_box_pivot_scaling(
-                                    location_x, location_y, driver_pivot, driver_offset_x, driver_offset_y, driver_scale,
-                                    frame_width=frame_width, frame_height=frame_height,
-                                    pivot_normalized=pivot_normalized
-                                )
+                            # Base point position
+                            base_x = float(point["x"])
+                            base_y = float(point["y"])
+
+                            # Per-point scaling factors
+                            try:
+                                point_scale = float(point.get("pointScale", point.get("scale", 1.0)))
+                            except (TypeError, ValueError):
+                                point_scale = 1.0
+                            try:
+                                box_scale_factor = float(point.get("boxScale", 1.0))
+                            except (TypeError, ValueError):
+                                box_scale_factor = 1.0
+
+                            # Default: no positional scaling, just translation
+                            scaled_x = base_x
+                            scaled_y = base_y
+
+                            # Apply independent scale-out when driven by a box
+                            if is_box_driver and driver_pivot is not None and driver_scale_profile:
+                                pivot_x, pivot_y = driver_pivot
+                                pivot_normalized = layer_driver_info.get('driver_path_normalized', True)
+                                if pivot_normalized:
+                                    pivot_x *= frame_width
+                                    pivot_y *= frame_height
+
+                                boxScale0 = 1.0
+                                try:
+                                    if len(driver_scale_profile) > 0:
+                                        boxScale0 = float(driver_scale_profile[0]) or 1.0
+                                except (TypeError, ValueError):
+                                    boxScale0 = 1.0
+
+                                try:
+                                    if eff_static_frame < len(driver_scale_profile):
+                                        boxScale_f = float(driver_scale_profile[eff_static_frame])
+                                    else:
+                                        boxScale_f = float(driver_scale_profile[-1])
+                                except (TypeError, ValueError):
+                                    boxScale_f = boxScale0
+
+                                if boxScale0 != 0.0:
+                                    R_box = boxScale_f / boxScale0
+                                else:
+                                    R_box = 1.0
+
+                                R_point = 1.0 + (R_box - 1.0) * point_scale * box_scale_factor
+
+                                dx0 = base_x - pivot_x
+                                dy0 = base_y - pivot_y
+                                scaled_x = pivot_x + dx0 * R_point
+                                scaled_y = pivot_y + dy0 * R_point
+
+                            location_x = scaled_x + driver_offset_x
+                            location_y = scaled_y + driver_offset_y
 
                             if static_fade_start == 0 or i < fade_start_frame:
                                 visibility = 1
@@ -1445,6 +1622,24 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     "v": 1
                 })
             all_coords.append(default_track)
+
+        # Build a debug JSON with the raw per-frame coordinates actually used
+        # to drive shapes / preview logic. This is exposed as a separate STRING
+        # output so it can be inspected directly in the workflow.
+        try:
+            preview_debug_tracks = []
+            for track in all_coords:
+                debug_track = []
+                for point in track:
+                    debug_track.append({
+                        "x": float(point["x"]),
+                        "y": float(point["y"]),
+                        "v": float(point.get("v", 1)),
+                    })
+                preview_debug_tracks.append(debug_track)
+            preview_debug_json = json.dumps(preview_debug_tracks)
+        except Exception:
+            preview_debug_json = "[]"
         
         # Format output as a JSON string that ATI nodes can parse
         # Follow the same format as WanVideoATITracksVisualize
@@ -1534,4 +1729,4 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             # Return minimal 1x1 pixel preview for efficiency when preview is disabled
             preview_output = torch.zeros([batch_size, 1, 1, 3], dtype=torch.float32)
 
-        return (out_images, out_masks, output_coords_json, preview_output)
+        return (out_images, out_masks, output_coords_json, preview_output, preview_debug_json)

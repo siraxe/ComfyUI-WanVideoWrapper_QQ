@@ -388,12 +388,13 @@ def apply_driver_chain_offsets(
                 adjusted_path = [{"x": 0.0, "y": 0.0}] * len(parent_world_path)
 
             if names_key == "p":
-                adjusted_path = []
-                for pt in parent_world_path:
-                    try:
-                        adjusted_path.append({"x": round_coord(pt.get("x", 0.0)), "y": round_coord(pt.get("y", 0.0))})
-                    except Exception:
-                        adjusted_path.append({"x": 0.0, "y": 0.0})
+                # For point (p_) layers, we do NOT overwrite the layer's own
+                # base path with the parent's path anymore. Instead, we let
+                # the layer keep its own per-point positions and later apply
+                # the parent's motion purely as an offset at render time.
+                # So here we leave adjusted_path as-is for 'p', and only
+                # apply full path inheritance for non-point layers.
+                pass
             else:
                 limit = min(len(adjusted_path), len(parent_world_path))
                 parent_ref_x = float(parent_world_path[0].get("x", 0.0)) if parent_world_path else 0.0
@@ -405,6 +406,16 @@ def apply_driver_chain_offsets(
                     adjusted_path[i]["y"] = round_coord(adjusted_path[i]["y"] + parent_delta_y)
 
         driver_info[path_key] = adjusted_path
+        if names_key == "p" and parent_name and parent_name in resolved_paths:
+            driver_info["driver_path_normalized"] = False
+            if adjusted_path:
+                try:
+                    driver_info["driver_pivot"] = (
+                        float(adjusted_path[0].get("x", 0.0)),
+                        float(adjusted_path[0].get("y", 0.0)),
+                    )
+                except (TypeError, ValueError):
+                    pass
         driver_info["_chain_resolved"] = True
 
         base_layer_path = resolved_paths.get(record.name)
