@@ -1,8 +1,14 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 ## Updates
-**Version 1.0.7** - 2025-11-13
-- **Box layer type**: new layer type that can scale "points" type layer points when driving them (only points for now)
+**Version 1.0.8** - 2025-11-17
+- **Refactor + better ATI driver control**: Slight messy refactor + proper ati point output with pause [Example](examples/ATI_buildings_wobble/ATI_buildings_wobble.json)
+
+https://github.com/user-attachments/assets/c945432c-fe58-4783-a1c3-565e61868245
+
+
+**Version 1.0.7** - 2025-11-16
+- **Box layer type**: New layer type that can scale "points" type layer points when driving them (only points for now)
 - Right click drag in inner border of boxes to scale each one individually.
 - If updated spline editor messes up workflow , open it ,delete node , refresh page ,create new.
 
