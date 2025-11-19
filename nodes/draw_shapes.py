@@ -56,8 +56,8 @@ class DrawShapeOnPath:
     All helper methods are defined as private methods to keep behavior encapsulated within the class.
     """
 
-    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "IMAGE", "STRING",)
-    RETURN_NAMES = ("image", "mask", "output_coordinates", "preview", "preview_debug_coordinates",)
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING", "IMAGE",)
+    RETURN_NAMES = ("image", "mask", "output_coordinates", "preview",)
     FUNCTION = "drawshapemask"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """
@@ -504,23 +504,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         Works on already scaled (50%) preview tensor in BHWC format.
         Returns modified tensor.
         """
-        # Debug: emit the coordinates actually used for preview so they can be inspected.
-        try:
-            preview_debug = {
-                "paths": processed_coords_list,
-                "static_points": static_point_layers,
-                "path_pause_frames": path_pause_frames,
-                "total_frames": total_frames,
-            }
-            # Limit size a bit: only first two paths and first 16 frames for log
-            trimmed_paths = []
-            for path in (processed_coords_list or [])[:2]:
-                trimmed_paths.append(path[:16])
-            preview_debug["paths"] = trimmed_paths
-            print("[PreviewDebug]", json.dumps(preview_debug))
-        except Exception:
-            pass
-
         batch_size, scaled_height, scaled_width, channels = preview_tensor.shape
         scale_factor = PREVIEW_SCALE_FACTOR  # Preview is scaled to 50%
 
@@ -531,7 +514,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             pil_img = Image.fromarray(frame_np, mode='RGB')
             preview_pil_list.append(pil_img)
 
-  
         # Return input tensor unchanged, no preview lines drawn
         return preview_tensor
 
@@ -1226,7 +1208,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         # Follow the same format as WanVideoATITracksVisualize
         # Generate coordinate tracks with visibility in the third component
         output_coords_json = "[]"
-        preview_debug_json = "[]"
         all_coords = []
         
         # Process animated paths (affected by animated_fade_start)
@@ -1623,24 +1604,6 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 })
             all_coords.append(default_track)
 
-        # Build a debug JSON with the raw per-frame coordinates actually used
-        # to drive shapes / preview logic. This is exposed as a separate STRING
-        # output so it can be inspected directly in the workflow.
-        try:
-            preview_debug_tracks = []
-            for track in all_coords:
-                debug_track = []
-                for point in track:
-                    debug_track.append({
-                        "x": float(point["x"]),
-                        "y": float(point["y"]),
-                        "v": float(point.get("v", 1)),
-                    })
-                preview_debug_tracks.append(debug_track)
-            preview_debug_json = json.dumps(preview_debug_tracks)
-        except Exception:
-            preview_debug_json = "[]"
-        
         # Format output as a JSON string that ATI nodes can parse
         # Follow the same format as WanVideoATITracksVisualize
         try:
@@ -1729,4 +1692,4 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             # Return minimal 1x1 pixel preview for efficiency when preview is disabled
             preview_output = torch.zeros([batch_size, 1, 1, 3], dtype=torch.float32)
 
-        return (out_images, out_masks, output_coords_json, preview_output, preview_debug_json)
+        return (out_images, out_masks, output_coords_json, preview_output)

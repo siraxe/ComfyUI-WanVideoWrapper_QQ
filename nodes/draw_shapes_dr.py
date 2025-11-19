@@ -354,9 +354,7 @@ def apply_driver_chain_offsets(
         print(f"[DriverChain] error: {exc}")
         return resolved_paths
 
-    print("[DriverChain] Resolving order:")
     for record in driver_records:
-        print(f"  layer={record.name} driver={record.driver_target}")
         idx = record.index
         if idx >= len(driver_info_list):
             continue
@@ -446,7 +444,6 @@ def apply_driver_chain_offsets(
                     world_adjusted.append({"x": 0.0, "y": 0.0})
 
         resolved_paths[record.name] = world_adjusted
-        print(f"[DriverChain] Resolved path for {record.name} len={len(world_adjusted)} (parent={record.driver_target})")
 
     return resolved_paths
 
