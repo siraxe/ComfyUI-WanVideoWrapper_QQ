@@ -3,10 +3,20 @@ import math
 class InterpMath:
     @staticmethod
     def _linear_interp(p0, p1, t):
-        return {
+        result = {
             'x': p0['x'] + (p1['x'] - p0['x']) * t,
             'y': p0['y'] + (p1['y'] - p0['y']) * t
         }
+        # Interpolate box rotation field if present
+        if 'boxR' in p0 or 'boxR' in p1:
+            br0 = p0.get('boxR', 0.0)
+            br1 = p1.get('boxR', 0.0)
+            result['boxR'] = br0 + (br1 - br0) * t
+        # Preserve other fields from p0
+        for key in p0:
+            if key not in result:
+                result[key] = p0[key]
+        return result
 
     @staticmethod
     def _ease_in(t, strength=1.0):

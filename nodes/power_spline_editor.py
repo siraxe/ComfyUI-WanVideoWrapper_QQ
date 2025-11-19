@@ -8,6 +8,7 @@ from torchvision import transforms
 from ..utility.driver_utils import apply_driver_offset
 
 BOX_BASE_RADIUS = 56
+BOX_TIMELINE_MAX_POINTS = 50
 
 class PowerSplineEditor:
     @classmethod
@@ -21,19 +22,19 @@ class PowerSplineEditor:
                 "bg_img": (["None", "A", "B", "C"], {"default": "None", "tooltip": "Select background image to overlay at 60% opacity"}),
             },
             "optional": {
-                "ref_image": ("IMAGE", ),
-                "coord_in": ("STRING", {"forceInput": True}),
+                "bg_image": ("IMAGE", ),
+                "ref_images": ("IMAGE", ),
                 "frames": ("INT", {"forceInput": True}),
             }
         }
 
     RETURN_TYPES = ("IMAGE", "STRING", "INT",)
-    RETURN_NAMES = ("ref_image", "coord_out", "frames",)
+    RETURN_NAMES = ("bg_image", "coord_out", "frames",)
     FUNCTION = "splinedata"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """WIP"""
 
-    def _interpolate_coords(self, coords, target_frames):
+    def _interpolate_coords(self, coords, target_frames, preserve_scale=False, include_frame=False):
         """Linearly interpolates coordinates to match target_frames."""
         n_coords = len(coords)
 
@@ -63,9 +64,21 @@ class PowerSplineEditor:
         interpolated = [None] * target_frames
         # Ensure original coords are floats before interpolating
         float_coords = []
+        has_scale = preserve_scale and any(isinstance(p, dict) and ('scale' in p) for p in coords)
+        has_box_scale = preserve_scale and any(isinstance(p, dict) and ('boxScale' in p) for p in coords)
+        has_point_scale = preserve_scale and any(isinstance(p, dict) and ('pointScale' in p) for p in coords)
+        scale_values = [] if has_scale else None
+        box_scale_values = [] if has_box_scale else None
+        point_scale_values = [] if has_point_scale else None
         try:
             for i, p in enumerate(coords):
                 float_coords.append({'x': float(p['x']), 'y': float(p['y'])})
+                if has_scale:
+                    scale_values.append(float(p.get('scale', 1.0)))
+                if has_box_scale:
+                    box_scale_values.append(float(p.get('boxScale', p.get('scale', 1.0))))
+                if has_point_scale:
+                    point_scale_values.append(float(p.get('pointScale', p.get('scale', 1.0))))
         except (KeyError, ValueError) as e:
             print(f"SplineEditor Error: Invalid coordinate format at index {i} ({p}) - {e}")
             return []
@@ -76,7 +89,14 @@ class PowerSplineEditor:
             idx2 = math.ceil(pos)
 
             if idx1 == idx2:
-                interpolated[i] = float_coords[idx1].copy()
+                new_point = float_coords[idx1].copy()
+                if has_scale:
+                    new_point['scale'] = scale_values[idx1]
+                if has_box_scale:
+                    new_point['boxScale'] = box_scale_values[idx1]
+                if has_point_scale:
+                    new_point['pointScale'] = point_scale_values[idx1]
+                interpolated[i] = new_point
             else:
                 t = pos - idx1
                 p1 = float_coords[idx1]
@@ -84,7 +104,17 @@ class PowerSplineEditor:
 
                 new_x = p1['x'] * (1.0 - t) + p2['x'] * t
                 new_y = p1['y'] * (1.0 - t) + p2['y'] * t
-                interpolated[i] = {'x': new_x, 'y': new_y}
+                new_point = {'x': new_x, 'y': new_y}
+                if has_scale:
+                    new_point['scale'] = scale_values[idx1] * (1.0 - t) + scale_values[idx2] * t
+                if has_box_scale:
+                    new_point['boxScale'] = box_scale_values[idx1] * (1.0 - t) + box_scale_values[idx2] * t
+                if has_point_scale:
+                    new_point['pointScale'] = point_scale_values[idx1] * (1.0 - t) + point_scale_values[idx2] * t
+                interpolated[i] = new_point
+
+            if include_frame:
+                interpolated[i]['frame'] = i + 1
 
         return interpolated
 
@@ -282,8 +312,114 @@ class PowerSplineEditor:
             modified_points = points[:-offset_abs] if offset_abs > 0 else points
             return modified_points, 0, offset_abs
 
+    def _decode_point_list(self, value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    def _normalize_box_keys(self, spline_data):
+        raw_keys = spline_data.get('box_keys') or []
+        normalized = []
+        for entry in raw_keys:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                frame = int(entry.get('frame', 1)) or 1
+                x = float(entry.get('x', 0.5))
+                y = float(entry.get('y', 0.5))
+                scale = float(entry.get('scale', 1.0))
+                # Support both new 'boxR' and legacy 'boxRotation'/'rotation' fields
+                boxR = float(entry.get('boxR', entry.get('boxRotation', entry.get('rotation', 0.0))))
+                normalized.append({'frame': frame, 'x': x, 'y': y, 'scale': scale, 'boxR': boxR})
+            except (TypeError, ValueError):
+                continue
+        normalized.sort(key=lambda k: k['frame'])
+        return normalized
+
+    def _fallback_box_point(self, spline_data):
+        fallback_points = self._decode_point_list(spline_data.get('points_store', '[]'))
+        if isinstance(fallback_points, list) and fallback_points:
+            first = fallback_points[0]
+        else:
+            coords_field = self._decode_point_list(spline_data.get('coordinates', []))
+            first = coords_field[0] if coords_field else {'x': 0.5, 'y': 0.5, 'scale': 1.0}
+        try:
+            return {
+                'frame': 1,
+                'x': float(first.get('x', 0.5)),
+                'y': float(first.get('y', 0.5)),
+                'scale': float(first.get('scale', first.get('boxScale', 1.0))),
+                'boxR': float(first.get('boxR', first.get('boxRotation', first.get('rotation', 0.0))) or 0.0),
+            }
+        except (TypeError, ValueError):
+            return {'frame': 1, 'x': 0.5, 'y': 0.5, 'scale': 1.0, 'boxR': 0}
+
+    def _sample_box_path(self, spline_data, target_frames):
+        keys = self._normalize_box_keys(spline_data)
+        if not keys:
+            keys = [self._fallback_box_point(spline_data)]
+        timeline_frames = int(spline_data.get('box_timeline_frames') or BOX_TIMELINE_MAX_POINTS)
+        timeline_frames = max(1, timeline_frames)
+
+        def sample_at(frame_value):
+            frame_value = max(1.0, min(float(frame_value), float(timeline_frames)))
+            if frame_value <= keys[0]['frame']:
+                return keys[0]
+            if frame_value >= keys[-1]['frame']:
+                return keys[-1]
+            for idx in range(len(keys) - 1):
+                cur_key = keys[idx]
+                next_key = keys[idx + 1]
+                if cur_key['frame'] <= frame_value <= next_key['frame']:
+                    span = next_key['frame'] - cur_key['frame']
+                    t = 0.0 if span <= 0 else (frame_value - cur_key['frame']) / span
+                    return {
+                        'frame': frame_value,
+                        'x': cur_key['x'] * (1 - t) + next_key['x'] * t,
+                        'y': cur_key['y'] * (1 - t) + next_key['y'] * t,
+                        'scale': cur_key['scale'] * (1 - t) + next_key['scale'] * t,
+                        'boxR': cur_key.get('boxR', 0.0) * (1 - t) + next_key.get('boxR', 0.0) * t,
+                    }
+            return keys[-1]
+
+        samples = []
+        total_frames = max(1, int(target_frames) if target_frames else BOX_TIMELINE_MAX_POINTS)
+        if total_frames == 1:
+            snap = sample_at(1)
+            samples.append({
+                'x': round(snap['x'], 4),
+                'y': round(snap['y'], 4),
+                'scale': round(snap['scale'], 4),
+                'boxScale': round(snap['scale'], 4),
+                'pointScale': round(snap['scale'], 4),
+                'frame': 1,
+                'boxR': round(snap.get('boxR', 0.0), 4),
+            })
+            return samples
+
+        for idx in range(total_frames):
+            t = idx / (total_frames - 1)
+            timeline_frame = 1 + t * (timeline_frames - 1)
+            snap = sample_at(timeline_frame)
+            samples.append({
+                'x': round(snap['x'], 4),
+                'y': round(snap['y'], 4),
+                'scale': round(snap['scale'], 4),
+                'boxScale': round(snap['scale'], 4),
+                'pointScale': round(snap['scale'], 4),
+                'frame': idx + 1,
+                'boxR': round(snap.get('boxR', 0.0), 4),
+            })
+        return samples
+
     def splinedata(self, mask_width, mask_height, coordinates, points_store, bg_img,
-                   ref_image=None, coord_in=None, frames=None):
+                   bg_image=None, ref_images=None, frames=None):
 
         # Use default frames value if not provided (from input)
         if frames is None:
@@ -307,99 +443,6 @@ class PowerSplineEditor:
         incoming_p_end_frames = []
         incoming_coord_start_frames = []  # Pause frames for coordinates
         incoming_coord_end_frames = []
-
-        # Only process coord_in if it's actually provided and not None/empty
-        if coord_in is not None and isinstance(coord_in, str) and len(coord_in.strip()) > 0 and coord_in.strip() != '[]':
-            try:
-                coord_in_data = json.loads(coord_in)
-                # Check if it's the new metadata format (supports both "coordinates" and "p_coordinates")
-                if isinstance(coord_in_data, dict) and ("coordinates" in coord_in_data or "p_coordinates" in coord_in_data):
-
-                    # Process p_coordinates separately (static points)
-                    if "p_coordinates" in coord_in_data:
-                        incoming_p_coords = coord_in_data["p_coordinates"]
-                        # Normalize to list of paths
-                        if isinstance(incoming_p_coords, list) and len(incoming_p_coords) > 0:
-                            if isinstance(incoming_p_coords[0], dict):
-                                # Single path - wrap it in a list
-                                incoming_p_paths = [incoming_p_coords]
-                            elif isinstance(incoming_p_coords[0], list):
-                                # Already multi-path
-                                incoming_p_paths = incoming_p_coords
-
-                    # Process coordinates separately (animated paths)
-                    if "coordinates" in coord_in_data:
-                        incoming_coords = coord_in_data["coordinates"]
-                        # Normalize to list of paths
-                        if isinstance(incoming_coords, list) and len(incoming_coords) > 0:
-                            if isinstance(incoming_coords[0], dict):
-                                # Single path - wrap it in a list
-                                incoming_coord_paths = [incoming_coords]
-                            elif isinstance(incoming_coords[0], list):
-                                # Already multi-path
-                                incoming_coord_paths = incoming_coords
-
-                    # Extract metadata - could be single values or arrays or objects
-                    incoming_start_p = coord_in_data.get("start_p_frames", 0)
-                    incoming_end_p = coord_in_data.get("end_p_frames", 0)
-
-                    # Handle different pause frame formats
-                    # New format: {"p": [...], "c": [...]} or old format: single value/list
-                    if isinstance(incoming_start_p, dict):
-                        # New format with separate pause frames
-                        p_start = incoming_start_p.get("p", [])
-                        c_start = incoming_start_p.get("c", [])
-                        p_end = incoming_end_p.get("p", [])
-                        c_end = incoming_end_p.get("c", [])
-
-                        # Normalize to lists
-                        incoming_p_start_frames = p_start if isinstance(p_start, list) else [p_start] * len(incoming_p_paths)
-                        incoming_coord_start_frames = c_start if isinstance(c_start, list) else [c_start] * len(incoming_coord_paths)
-                        incoming_p_end_frames = p_end if isinstance(p_end, list) else [p_end] * len(incoming_p_paths)
-                        incoming_coord_end_frames = c_end if isinstance(c_end, list) else [c_end] * len(incoming_coord_paths)
-                    else:
-                        # Old format - apply to whichever type exists
-                        if incoming_p_paths and not incoming_coord_paths:
-                            # Only p_coordinates
-                            if isinstance(incoming_start_p, int):
-                                incoming_p_start_frames = [incoming_start_p] * len(incoming_p_paths)
-                                incoming_p_end_frames = [incoming_end_p] * len(incoming_p_paths)
-                            elif isinstance(incoming_start_p, list):
-                                incoming_p_start_frames = incoming_start_p + [0] * (len(incoming_p_paths) - len(incoming_start_p))
-                                incoming_p_end_frames = incoming_end_p + [0] * (len(incoming_p_paths) - len(incoming_end_p))
-                        elif incoming_coord_paths and not incoming_p_paths:
-                            # Only coordinates
-                            if isinstance(incoming_start_p, int):
-                                incoming_coord_start_frames = [incoming_start_p] * len(incoming_coord_paths)
-                                incoming_coord_end_frames = [incoming_end_p] * len(incoming_coord_paths)
-                            elif isinstance(incoming_start_p, list):
-                                incoming_coord_start_frames = incoming_start_p + [0] * (len(incoming_coord_paths) - len(incoming_start_p))
-                                incoming_coord_end_frames = incoming_end_p + [0] * (len(incoming_coord_paths) - len(incoming_end_p))
-                        else:
-                            # Both exist - apply to both (backward compatibility)
-                            if isinstance(incoming_start_p, int):
-                                incoming_p_start_frames = [incoming_start_p] * len(incoming_p_paths)
-                                incoming_p_end_frames = [incoming_end_p] * len(incoming_p_paths)
-                                incoming_coord_start_frames = [incoming_start_p] * len(incoming_coord_paths)
-                                incoming_coord_end_frames = [incoming_end_p] * len(incoming_coord_paths)
-                            elif isinstance(incoming_start_p, list):
-                                incoming_p_start_frames = incoming_start_p[:len(incoming_p_paths)] + [0] * max(0, len(incoming_p_paths) - len(incoming_start_p))
-                                incoming_p_end_frames = incoming_end_p[:len(incoming_p_paths)] + [0] * max(0, len(incoming_p_paths) - len(incoming_end_p))
-                                incoming_coord_start_frames = incoming_start_p[len(incoming_p_paths):] + [0] * max(0, len(incoming_coord_paths) - (len(incoming_start_p) - len(incoming_p_paths)))
-                                incoming_coord_end_frames = incoming_end_p[len(incoming_p_paths):] + [0] * max(0, len(incoming_coord_paths) - (len(incoming_end_p) - len(incoming_p_paths)))
-                else:
-                    # Old format - just coordinates array (single path), no metadata - treat as animated
-                    if isinstance(coord_in_data, list) and len(coord_in_data) > 0:
-                        if isinstance(coord_in_data[0], dict):
-                            incoming_coord_paths = [coord_in_data]
-                            incoming_coord_start_frames = [0]
-                            incoming_coord_end_frames = [0]
-                        elif isinstance(coord_in_data[0], list):
-                            incoming_coord_paths = coord_in_data
-                            incoming_coord_start_frames = [0] * len(coord_in_data)
-                            incoming_coord_end_frames = [0] * len(coord_in_data)
-            except (json.JSONDecodeError, TypeError, AttributeError) as e:
-                print(f"Warning: Could not parse coord_in: {e}. Will only use local coordinates.")
 
         # For PowerSplineEditor, process each spline widget's data
         # Each widget contains: {on, name, interpolation, repeat, points_store, coordinates}
@@ -458,30 +501,43 @@ class PowerSplineEditor:
 
             layer_name = spline_data.get('name', '')
             control_points_str = spline_data.get('points_store', '[]')
+            coordinates_field = spline_data.get('coordinates', [])
+            spline_type = spline_data.get('type', 'spline')
 
             try:
-                layer_coords = json.loads(control_points_str) if isinstance(control_points_str, str) else control_points_str
-                if (not isinstance(layer_coords, list) or len(layer_coords) == 0):
-                    alt_coords = spline_data.get('coordinates', [])
-                    layer_coords = alt_coords if isinstance(alt_coords, list) else []
-                if isinstance(layer_coords, list) and len(layer_coords) > 0:
-                    # Apply repeat logic to driver coords too (same as driven)
-                    repeat_count = int(spline_data.get('repeat', 1))
-                    if repeat_count > 1 and len(layer_coords) > 1:
-                        original_path = list(layer_coords)
-                        is_closed = (original_path[0]['x'] == original_path[-1]['x'] and
-                                     original_path[0]['y'] == original_path[-1]['y'])
-                        loop_segment = list(original_path)
-                        if not is_closed:
-                            loop_segment.append(original_path[0])
-                        repeated_path = list(loop_segment)
-                        following_loop_segment = loop_segment[1:]
-                        if following_loop_segment:
-                            for i in range(repeat_count - 1):
-                                repeated_path.extend(following_loop_segment)
-                        layer_coords = repeated_path
+                points_store_data = self._decode_point_list(control_points_str)
+                coordinates_data = self._decode_point_list(coordinates_field)
+                prefer_coordinates = (spline_type == 'box_layer')
 
-                    layer_map[layer_name] = self._round_points(layer_coords)
+                if spline_type == 'box_layer':
+                    layer_coords = self._sample_box_path(spline_data, frames)
+                else:
+                    if prefer_coordinates and coordinates_data:
+                        layer_coords = coordinates_data
+                    else:
+                        layer_coords = points_store_data
+                        if (not isinstance(layer_coords, list) or len(layer_coords) == 0):
+                            layer_coords = coordinates_data if isinstance(coordinates_data, list) else []
+
+                if not isinstance(layer_coords, list) or len(layer_coords) == 0:
+                    continue
+
+                repeat_count = int(spline_data.get('repeat', 1))
+                if repeat_count > 1 and len(layer_coords) > 1:
+                    original_path = list(layer_coords)
+                    is_closed = (original_path[0]['x'] == original_path[-1]['x'] and
+                                 original_path[0]['y'] == original_path[-1]['y'])
+                    loop_segment = list(original_path)
+                    if not is_closed:
+                        loop_segment.append(original_path[0])
+                    repeated_path = list(loop_segment)
+                    following_loop_segment = loop_segment[1:]
+                    if following_loop_segment:
+                        for i in range(repeat_count - 1):
+                            repeated_path.extend(following_loop_segment)
+                    layer_coords = repeated_path
+
+                layer_map[layer_name] = self._round_points(layer_coords)
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"Warning: Could not parse layer '{layer_name}' for driver map: {e}")
 
@@ -493,6 +549,7 @@ class PowerSplineEditor:
 
             # Get spline parameters
             control_points_str = spline_data.get('points_store', '[]') # Use 'points_store' for raw control points
+            coordinates_field = spline_data.get('coordinates', [])
             # Get interpolation type; handdraw is always treated as linear coordinates
             spline_type = spline_data.get('type', 'spline')
             spline_interpolation = spline_data.get('interpolation', 'linear')
@@ -515,18 +572,24 @@ class PowerSplineEditor:
 
             # Parse control points
             try:
-                # control_points_str contains the raw control points (normalized) from the UI
-                # If it's already a list, use as-is; otherwise parse JSON string
-                spline_coords = json.loads(control_points_str) if isinstance(control_points_str, str) else control_points_str
-                if (not isinstance(spline_coords, list) or len(spline_coords) == 0):
-                    # Fallback: use coordinates field if present in the incoming object
-                    alt_coords = spline_data.get('coordinates', [])
-                    spline_coords = alt_coords if isinstance(alt_coords, list) else []
+                points_store_data = self._decode_point_list(control_points_str)
+                coordinates_data = self._decode_point_list(coordinates_field)
+                prefer_coordinates = (spline_type == 'box_layer')
+
+                if spline_type == 'box_layer':
+                    spline_coords = self._sample_box_path(spline_data, frames)
+                else:
+                    if prefer_coordinates and coordinates_data:
+                        spline_coords = coordinates_data
+                    else:
+                        spline_coords = points_store_data
+                        if (not isinstance(spline_coords, list) or len(spline_coords) == 0):
+                            spline_coords = coordinates_data if isinstance(coordinates_data, list) else []
                 
                 if not isinstance(spline_coords, list) or len(spline_coords) == 0:
-                    print(f"[PowerSplineEditor] Skipping layer '{spline_data.get('name','')}' — no control points parsed")
+                    print(f"[PowerSplineEditor] Skipping layer '{spline_data.get('name','')}' – no control points parsed")
                     continue
-
+                
                 # --- REPEAT LOGIC (Looping Effect) ---
                 # This logic now applies to the raw control points.
                 if repeat_count > 1 and len(spline_coords) > 1:
@@ -632,6 +695,8 @@ class PowerSplineEditor:
 
                             driver_info_for_layer = {
                                 "path": driver_coords,
+                                "driver_path_key": "path",
+                                "driver_path_normalized": True,
                                 "rotate": driver_rotate,
                                 "d_scale": driver_d_scale,
                                 "easing_function": driver_easing_function,
@@ -724,9 +789,30 @@ class PowerSplineEditor:
         # Determine background image dimensions first (needed for coord_width/coord_height)
         bg_h = float(mask_height)
         bg_w = float(mask_width)
-        if ref_image is not None and ref_image.dim() == 4 and ref_image.shape[0] > 0:
-             bg_h = float(ref_image.shape[1])
-             bg_w = float(ref_image.shape[2])
+        if bg_image is not None and bg_image.dim() == 4 and bg_image.shape[0] > 0:
+             bg_h = float(bg_image.shape[1])
+             bg_w = float(bg_image.shape[2])
+        elif ref_images is not None and ref_images.dim() == 4 and ref_images.shape[0] > 0:
+             bg_h = float(ref_images.shape[1])
+             bg_w = float(ref_images.shape[2])
+
+        # Merge box paths into coordinate paths so downstream nodes can consume them directly
+        if all_box_paths:
+            box_count = len(all_box_paths)
+            all_coord_paths = list(all_box_paths) + all_coord_paths
+            all_coord_names = list(all_box_names) + all_coord_names
+            all_coord_types = list(all_box_types) + all_coord_types
+            all_coord_start_frames = list(all_box_start_frames) + all_coord_start_frames
+            all_coord_end_frames = list(all_box_end_frames) + all_coord_end_frames
+            all_coord_offsets = list(all_box_offsets) + all_coord_offsets
+            all_coord_interpolations = list(all_box_interpolations) + all_coord_interpolations
+            all_coord_easing_functions = list(all_box_easing_functions) + all_coord_easing_functions
+            all_coord_easing_paths = list(all_box_easing_paths) + all_coord_easing_paths
+            all_coord_easing_strengths = list(all_box_easing_strengths) + all_coord_easing_strengths
+            all_coord_accelerations = list(all_box_accelerations) + all_coord_accelerations
+            all_coord_scales = list(all_box_scales) + all_coord_scales
+            all_coord_drivers = list(all_box_drivers) + all_coord_drivers
+            all_coord_visibility = list(all_box_visibility) + all_coord_visibility
 
         # Build output data structure
         coord_out_data = {}
@@ -825,29 +911,52 @@ class PowerSplineEditor:
         # Determine background image dimensions if present
         bg_h = float(mask_height)
         bg_w = float(mask_width)
-        if ref_image is not None and ref_image.dim() == 4 and ref_image.shape[0] > 0:
-             bg_h = float(ref_image.shape[1])
-             bg_w = float(ref_image.shape[2])
+        if bg_image is not None and bg_image.dim() == 4 and bg_image.shape[0] > 0:
+             bg_h = float(bg_image.shape[1])
+             bg_w = float(bg_image.shape[2])
 
 
         # Prepare the UI output dictionary for background image preview
         ui_out = {}
 
-        if coord_in is not None:
-            ui_out["coord_in"] = coord_in
-
         # Always send dimensions to UI so canvas can initialize properly
-        ui_out["ref_image_dims"] = [{"width": bg_w, "height": bg_h}]
+        ui_out["bg_image_dims"] = [{"width": bg_w, "height": bg_h}]
 
-        if ref_image is not None:
-            # Ensure ref_image is on CPU before converting
-            if ref_image.device != torch.device('cpu'):
-                ref_image = ref_image.cpu()
+        if ref_images is not None:
+            # Ensure ref_images are on CPU and build lightweight previews for UI
+            if ref_images.device != torch.device('cpu'):
+                ref_images = ref_images.cpu()
+            transform = transforms.ToPILImage()
+            ref_previews = []
+            max_preview = min(4, ref_images.shape[0])
+            for idx in range(max_preview):
+                img_tensor = ref_images[idx]
+                if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
+                    img_tensor = img_tensor.permute(2, 0, 1)
+                elif img_tensor.dim() == 2:
+                    img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
+                if torch.is_floating_point(img_tensor):
+                    img_tensor = torch.clamp(img_tensor, 0, 1)
+                try:
+                    image = transform(img_tensor)
+                    buffered = io.BytesIO()
+                    image.save(buffered, format="PNG")
+                    ref_previews.append(base64.b64encode(buffered.getvalue()).decode('utf-8'))
+                except Exception as e:
+                    print(f"Error processing ref_images preview at index {idx}: {e}")
+                    break
+            if ref_previews:
+                ui_out["ref_images"] = ref_previews
+
+        if bg_image is not None:
+            # Ensure bg_image is on CPU before converting
+            if bg_image.device != torch.device('cpu'):
+                bg_image = bg_image.cpu()
 
             transform = transforms.ToPILImage()
             # Use the first image in the batch for the preview
             # Ensure tensor is in CHW format (channels, height, width)
-            img_tensor = ref_image[0]
+            img_tensor = bg_image[0]
             if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
                  img_tensor = img_tensor.permute(2, 0, 1) # HWC to CHW if needed
             elif img_tensor.dim() == 2: # Grayscale HW -> 1HW -> CHW (repeat channel)
@@ -860,22 +969,24 @@ class PowerSplineEditor:
             try:
                 image = transform(img_tensor)
                 
-                # Save the image directly to the bg folder as ref_image.jpg
-                self._save_ref_image_to_bg_folder(image)
+                # Save the image directly to the bg folder as bg_image.png
+                self._save_bg_image_to_bg_folder(image)
                 
                 # Also provide the base64 version for the UI (as before)
                 buffered = io.BytesIO()
                 image.save(buffered, format="PNG") # Use PNG to preserve quality for display
                 img_bytes = buffered.getvalue()
                 img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-                ui_out["ref_image"] = [img_base64]
+                ui_out["bg_image"] = [img_base64]
             except Exception as e:
                 print(f"Error processing background image for UI preview: {e}")
 
         # Return results
-        # Create proper blank tensor if no ref_image provided (ComfyUI expects BHWC format)
-        if ref_image is not None:
-            result_image = ref_image
+        # Create proper blank tensor if no bg_image provided (ComfyUI expects BHWC format)
+        if bg_image is not None:
+            result_image = bg_image
+        elif ref_images is not None:
+            result_image = ref_images
         else:
             # Create blank image tensor in BHWC format (Batch, Height, Width, Channels)
             result_image = torch.zeros((1, int(bg_h), int(bg_w), 3), dtype=torch.float32)
@@ -888,7 +999,7 @@ class PowerSplineEditor:
         # Always return UI data with at least dimensions for proper canvas initialization
         return {"ui": ui_out, "result": result}
 
-    def _save_ref_image_to_bg_folder(self, image):
+    def _save_bg_image_to_bg_folder(self, image):
         """Save the reference image directly to the bg folder"""
         import os
         from pathlib import Path
@@ -896,13 +1007,13 @@ class PowerSplineEditor:
         # Get the bg folder path (relative to this file)
         bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
         bg_folder.mkdir(parents=True, exist_ok=True)
-        ref_image_path = bg_folder / "ref_image.jpg"
+        bg_image_path = bg_folder / "bg_image.png"
         
         # Convert image to RGB if it's not already
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
         # Save as JPEG with good quality
-        image.save(str(ref_image_path), format="JPEG", quality=95)
+        image.save(str(bg_image_path), format="JPEG", quality=95)
         
-        print(f"Reference image saved to: {ref_image_path}")
+        print(f"Reference image saved to: {bg_image_path}")

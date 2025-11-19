@@ -1,0 +1,1 @@
+export const BOX_TIMELINE_MAX_POINTS = 50;

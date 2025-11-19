@@ -94,36 +94,102 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
         }
 
     # ----------------------------
+    # Rotation helper
+    # ----------------------------
+    def _rotate_positions_around_bbox(self, positions, rotation_rad):
+        """
+        Rotate a list of (x, y) positions around their bounding box center.
+        Returns list of rotated (x, y) tuples.
+        """
+        if abs(rotation_rad) < 1e-4 or not positions:
+            return positions
+
+        try:
+            # Calculate bounding box center from transformed positions
+            xs = [pos[0] for pos in positions]
+            ys = [pos[1] for pos in positions]
+            bbox_center_x = (min(xs) + max(xs)) * 0.5
+            bbox_center_y = (min(ys) + max(ys)) * 0.5
+
+            # Rotate each position around the bbox center
+            cos_r = math.cos(rotation_rad)
+            sin_r = math.sin(rotation_rad)
+            rotated = []
+            for x, y in positions:
+                rel_x = x - bbox_center_x
+                rel_y = y - bbox_center_y
+                new_x = bbox_center_x + rel_x * cos_r - rel_y * sin_r
+                new_y = bbox_center_y + rel_x * sin_r + rel_y * cos_r
+                rotated.append((new_x, new_y))
+            return rotated
+        except Exception:
+            return positions
+
+    # ----------------------------
     # Low-level drawing helper
     # ----------------------------
     def _draw_shape_at_location(self, draw: ImageDraw.ImageDraw, location_x: float, location_y: float,
                                shape: str, shape_width: float, shape_height: float,
-                               shape_color: str, border_width: int, border_color: str) -> None:
+                               shape_color: str, border_width: int, border_color: str,
+                               rotation_radians: float = 0.0) -> None:
         """
-        Draw a single shape at the specified location.
+        Draw a single shape at the specified location with optional rotation.
         This consolidates the repeated shape drawing logic.
         """
+        def rotate_point(px, py, cx, cy, angle):
+            """Rotate point (px,py) around center (cx,cy) by angle in radians"""
+            if abs(angle) < 1e-6:
+                return px, py
+            cos_a = math.cos(angle)
+            sin_a = math.sin(angle)
+            dx = px - cx
+            dy = py - cy
+            return (cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a)
+
         if shape in ('circle', 'square'):
+            # Define corners
             left_up_point = (location_x - shape_width / 2.0, location_y - shape_height / 2.0)
             right_down_point = (location_x + shape_width / 2.0, location_y + shape_height / 2.0)
-            two_points = [left_up_point, right_down_point]
 
             if shape == 'circle':
+                # For circles, rotation doesn't matter visually, just draw normally
+                two_points = [left_up_point, right_down_point]
                 if border_width > 0:
                     draw.ellipse(two_points, fill=shape_color, outline=border_color, width=border_width)
                 else:
                     draw.ellipse(two_points, fill=shape_color)
-            else:  # square
-                if border_width > 0:
-                    draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
+            else:  # square - rotate as polygon
+                if abs(rotation_radians) > 1e-6:
+                    # Draw square as rotated polygon
+                    left_down = (location_x - shape_width / 2.0, location_y + shape_height / 2.0)
+                    right_up = (location_x + shape_width / 2.0, location_y - shape_height / 2.0)
+                    corners = [left_up_point, right_up, right_down_point, left_down]
+                    rotated_corners = [rotate_point(px, py, location_x, location_y, rotation_radians) for px, py in corners]
+                    if border_width > 0:
+                        try:
+                            draw.polygon(rotated_corners, fill=shape_color, outline=border_color, width=border_width)
+                        except TypeError:
+                            draw.polygon(rotated_corners, fill=shape_color)
+                    else:
+                        draw.polygon(rotated_corners, fill=shape_color)
                 else:
-                    draw.rectangle(two_points, fill=shape_color)
+                    # No rotation, use fast rectangle
+                    two_points = [left_up_point, right_down_point]
+                    if border_width > 0:
+                        draw.rectangle(two_points, fill=shape_color, outline=border_color, width=border_width)
+                    else:
+                        draw.rectangle(two_points, fill=shape_color)
 
         elif shape == 'triangle':
             left = (location_x - shape_width / 2.0, location_y + shape_height / 2.0)
             right = (location_x + shape_width / 2.0, location_y + shape_height / 2.0)
             top = (location_x, location_y - shape_height / 2.0)
             poly_points = [top, left, right]
+
+            # Apply rotation if specified
+            if abs(rotation_radians) > 1e-6:
+                poly_points = [rotate_point(px, py, location_x, location_y, rotation_radians) for px, py in poly_points]
+
             if border_width > 0:
                 try:
                     draw.polygon(poly_points, fill=shape_color, outline=border_color)
@@ -302,22 +368,36 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                 
                 driver_eval_frame = driver_eval_frame - layer_start_pause - layer_offset
 
-                # Draw each point in this layer with the layer's driver offset applied
-                for point_idx, point in enumerate(static_points):
-                    driver_offset_x = driver_offset_y = 0.0
-                    driver_frame_index = 0
+                # Get driver info once for the entire layer
+                driver_offset_x = driver_offset_y = 0.0
+                driver_frame_index = 0
+                driver_type = None
+                driver_pivot = None
+                driver_scale_profile = None
+                rotation_rad = 0.0
 
-                    driver_type = None
-                    driver_pivot = None
-                    driver_scale_profile = None
+                if layer_driver_info and isinstance(layer_driver_info, dict):
+                    driver_offset_x, driver_offset_y = _accumulate_driver_offsets(layer_driver_info, driver_eval_frame)
+                    driver_frame_index = _get_effective_frame(layer_driver_info, driver_eval_frame)
+                    driver_type = layer_driver_info.get('driver_type')
+                    driver_pivot = layer_driver_info.get('driver_pivot')
+                    driver_scale_profile = layer_driver_info.get('driver_scale_profile')
 
-                    if layer_driver_info and isinstance(layer_driver_info, dict):
-                        driver_offset_x, driver_offset_y = _accumulate_driver_offsets(layer_driver_info, driver_eval_frame)
-                        driver_frame_index = _get_effective_frame(layer_driver_info, driver_eval_frame)
-                        driver_type = layer_driver_info.get('driver_type')
-                        driver_pivot = layer_driver_info.get('driver_pivot')
-                        driver_scale_profile = layer_driver_info.get('driver_scale_profile')
+                    # Extract rotation from box driver if present
+                    if driver_type == 'box':
+                        driver_path = layer_driver_info.get('interpolated_path') or layer_driver_info.get('path')
+                        if driver_path and len(driver_path) > 0:
+                            try:
+                                eff_idx = min(driver_frame_index, len(driver_path) - 1)
+                                base_rot = float(driver_path[0].get("boxR", 0.0) or 0.0)
+                                cur_rot = float(driver_path[eff_idx].get("boxR", 0.0) or 0.0)
+                                rotation_rad = cur_rot - base_rot
+                            except (TypeError, ValueError, IndexError):
+                                rotation_rad = 0.0
 
+                # First pass: calculate all transformed positions (offset + scale)
+                transformed_positions = []
+                for point in static_points:
                     try:
                         base_x = float(point['x'])
                         base_y = float(point['y'])
@@ -374,14 +454,19 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                         scaled_x = pivot_x + dx0 * R_point
                         scaled_y = pivot_y + dy0 * R_point
 
-                    # Finally, apply pure translation from the driver
+                    # Apply pure translation from the driver
                     location_x = scaled_x + driver_offset_x
                     location_y = scaled_y + driver_offset_y
+                    transformed_positions.append((location_x, location_y))
 
-                    # Draw the shape at the computed location using the helper method
+                # Second pass: rotate all positions around their collective bounding box
+                rotated_positions = self._rotate_positions_around_bbox(transformed_positions, rotation_rad)
+
+                # Third pass: draw each shape at the final rotated position
+                for (location_x, location_y) in rotated_positions:
                     self._draw_shape_at_location(draw, location_x, location_y, shape,
                                                static_width, static_height, shape_color,
-                                               border_width, border_color)
+                                               border_width, border_color, rotation_rad)
 
         # Draw animated paths
         # Animated paths contain sequences of coordinates that change over time
@@ -428,18 +513,37 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     else 1.0
                 )
 
-                # Draw all points with the same driver offset
+                # Extract rotation from box driver if present
+                rotation_rad = 0.0
+                if driver_info and driver_info.get('driver_type') == 'box':
+                    interpolated_driver = driver_info.get('interpolated_path') or driver_info.get('path')
+                    if interpolated_driver and len(interpolated_driver) > 0:
+                        try:
+                            eff_idx = min(eff_frame, len(interpolated_driver) - 1)
+                            base_rot = float(interpolated_driver[0].get("boxR", 0.0) or 0.0)
+                            cur_rot = float(interpolated_driver[eff_idx].get("boxR", 0.0) or 0.0)
+                            rotation_rad = cur_rot - base_rot
+                        except (TypeError, ValueError, IndexError):
+                            rotation_rad = 0.0
+
+                # First pass: calculate all transformed positions (offset only for points mode)
+                transformed_positions = []
                 for point in coords:
                     try:
                         location_x = point['x'] + driver_offset_x
                         location_y = point['y'] + driver_offset_y
+                        transformed_positions.append((location_x, location_y))
                     except (KeyError, TypeError):
                         continue
 
-                    # Draw the shape at the computed location using the helper method
+                # Second pass: rotate all positions around their collective bounding box
+                rotated_positions = self._rotate_positions_around_bbox(transformed_positions, rotation_rad)
+
+                # Third pass: draw each shape at the final rotated position
+                for (location_x, location_y) in rotated_positions:
                     self._draw_shape_at_location(draw, location_x, location_y, shape,
                                                path_current_width, path_current_height, shape_color,
-                                               border_width, border_color)
+                                               border_width, border_color, rotation_rad)
             else:
                 # Regular path drawing (non-points or points without driver)
                 # Determine which coordinate from the path should be used for this frame
@@ -1244,12 +1348,24 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     base_coord0 = path_coords[0] if path_coords else {"x": 0.0, "y": 0.0}
                     P0x = float(base_coord0.get("x", 0.0))
                     P0y = float(base_coord0.get("y", 0.0))
+                    # Precompute driven-layer bounding center to use as rotation pivot
+                    try:
+                        min_px = min(float(pt.get("x", 0.0)) for pt in path_coords)
+                        max_px = max(float(pt.get("x", 0.0)) for pt in path_coords)
+                        min_py = min(float(pt.get("y", 0.0)) for pt in path_coords)
+                        max_py = max(float(pt.get("y", 0.0)) for pt in path_coords)
+                        Pcx = (min_px + max_px) * 0.5
+                        Pcy = (min_py + max_py) * 0.5
+                    except Exception:
+                        Pcx = P0x
+                        Pcy = P0y
 
                     # Box driver path + scale profile, if this layer is driven by a box
                     box_path = None
                     box_scale_profile = None
                     B0x = B0y = 0.0
                     S0 = 1.0
+                    R0 = 0.0
                     if coords_driver_info_list and path_idx < len(coords_driver_info_list):
                         base_driver_info = coords_driver_info_list[path_idx]
                         if isinstance(base_driver_info, dict) and base_driver_info.get("driver_type") == "box":
@@ -1261,6 +1377,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                     B0y = float(box_path[0].get("y", 0.0))
                                 except (TypeError, ValueError):
                                     B0x = B0y = 0.0
+                                try:
+                                    R0 = float(box_path[0].get("boxR", 0.0) or 0.0)
+                                except (TypeError, ValueError):
+                                    R0 = 0.0
                             if isinstance(box_scale_profile, list) and box_scale_profile:
                                 try:
                                     S0 = float(box_scale_profile[0]) or 1.0
@@ -1324,6 +1444,10 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                     except (TypeError, ValueError):
                                         Bfx = B0x
                                         Bfy = B0y
+                                    try:
+                                        Rf = float(box_pt.get("boxR", 0.0) or 0.0)
+                                    except (TypeError, ValueError):
+                                        Rf = R0
 
                                     # Relative box offset from frame 0
                                     deltaBx = Bfx - B0x
@@ -1337,13 +1461,29 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                                             Sf = S0
                                     else:
                                         Sf = S0
-                                    Rf = Sf / S0 if S0 != 0 else 1.0
+                                    scale_rel = Sf / S0 if S0 != 0 else 1.0
+                                    try:
+                                        rot_f = float(box_pt.get("boxR", 0.0) or 0.0)
+                                    except (TypeError, ValueError):
+                                        rot_f = R0
 
                                     # Apply relative scale around P0, then add box offset
                                     raw_x = float(coord["x"])
                                     raw_y = float(coord["y"])
-                                    location_x = P0x + (raw_x - P0x) * Rf + deltaBx
-                                    location_y = P0y + (raw_y - P0y) * Rf + deltaBy
+                                    location_x = P0x + (raw_x - P0x) * scale_rel + deltaBx
+                                    location_y = P0y + (raw_y - P0y) * scale_rel + deltaBy
+
+                                    # Apply relative rotation around driven-layer bounding center transformed with same scale/offset
+                                    pivot_x = P0x + (Pcx - P0x) * scale_rel + deltaBx
+                                    pivot_y = P0y + (Pcy - P0y) * scale_rel + deltaBy
+                                    deltaRot = rot_f - R0
+                                    if abs(deltaRot) > 1e-4:
+                                        cos_r = math.cos(deltaRot)
+                                        sin_r = math.sin(deltaRot)
+                                        rel_x = location_x - pivot_x
+                                        rel_y = location_y - pivot_y
+                                        location_x = pivot_x + rel_x * cos_r - rel_y * sin_r
+                                        location_y = pivot_y + rel_x * sin_r + rel_y * cos_r
                                 else:
                                     # Fallback: no box path, just use raw coord
                                     location_x = float(coord["x"])
@@ -1481,61 +1621,73 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                         if layer_driver_info is None and not aligned_preview_static_drivers:
                             layer_driver_info = first_preview_static_driver
 
-                    # Process each point in this layer
-                    for point_idx, point in enumerate(static_points):
-                        single_point_spline = []
-                        for i in range(total_frames):
-                            # Calculate the adjusted frame index for the driver based on the points layer's timing
-                            driver_eval_frame = i
-                            if driver_eval_frame < layer_start_pause:
-                                driver_eval_frame = layer_start_pause
-                            if total_frames - layer_end_pause > layer_start_pause:
-                                if driver_eval_frame >= total_frames - layer_end_pause:
-                                    driver_eval_frame = total_frames - layer_end_pause - 1
-                            
-                            driver_eval_frame = driver_eval_frame - layer_start_pause - layer_offset
-                            
-                            driver_offset_x = driver_offset_y = 0.0
-                            eff_static_frame = 0
-                            driver_scale_profile = None
-                            driver_pivot = None
+                    # Process all points in this layer frame-by-frame
+                    # We need to process per-frame so we can rotate all points together around their bbox
+                    layer_splines = [[] for _ in static_points]  # One spline per point
 
-                            is_box_driver = False
-                            if layer_driver_info and isinstance(layer_driver_info, dict):
-                                interpolated_driver = _resolve_preview_driver_path(layer_driver_info, 'path')
-                                driver_d_scale = layer_driver_info.get('d_scale', 1.0)
-                                is_box_driver = layer_driver_info.get('driver_type') == 'box'
-                                driver_pivot = layer_driver_info.get('driver_pivot')
-                                driver_scale_profile = layer_driver_info.get('driver_scale_profile')
+                    for i in range(total_frames):
+                        # Calculate the adjusted frame index for the driver based on the points layer's timing
+                        driver_eval_frame = i
+                        if driver_eval_frame < layer_start_pause:
+                            driver_eval_frame = layer_start_pause
+                        if total_frames - layer_end_pause > layer_start_pause:
+                            if driver_eval_frame >= total_frames - layer_end_pause:
+                                driver_eval_frame = total_frames - layer_end_pause - 1
 
-                                if interpolated_driver and len(interpolated_driver) > 0:
-                                    driver_start_p = int(layer_driver_info.get('start_pause', 0))
-                                    driver_offset_val = int(layer_driver_info.get('offset', 0))
-                                    pos_delay = driver_start_p + max(0, driver_offset_val)
-                                    neg_lead = -min(0, driver_offset_val)
-                                    eff_static_frame = max(0, driver_eval_frame - pos_delay + neg_lead)
+                        driver_eval_frame = driver_eval_frame - layer_start_pause - layer_offset
 
-                                    if not is_box_driver:
-                                        # Original behavior for non-box drivers: offset is relative to driver's first point
-                                        driver_offset_x, driver_offset_y = calculate_driver_offset(
-                                            eff_static_frame, interpolated_driver, (0, 0),
-                                            total_frames, driver_d_scale, frame_width, frame_height,
-                                            driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
-                                            driver_radius_delta=layer_driver_info.get('driver_radius_delta', 0.0),
-                                            driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
-                                            apply_scale_to_offset=True
-                                        )
-                                    else:
-                                        # Box drivers: pure translational offset, independent of scale/radius.
-                                        driver_offset_x, driver_offset_y = calculate_driver_offset(
-                                            eff_static_frame, interpolated_driver, (0, 0),
-                                            total_frames, 1.0, frame_width, frame_height,
-                                            driver_scale_factor=1.0,
-                                            driver_radius_delta=0.0,
-                                            driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
-                                            apply_scale_to_offset=False
-                                        )
+                        driver_offset_x = driver_offset_y = 0.0
+                        eff_static_frame = 0
+                        driver_scale_profile = None
+                        driver_pivot = None
+                        rotation_rad = 0.0
 
+                        is_box_driver = False
+                        if layer_driver_info and isinstance(layer_driver_info, dict):
+                            interpolated_driver = _resolve_preview_driver_path(layer_driver_info, 'path')
+                            driver_d_scale = layer_driver_info.get('d_scale', 1.0)
+                            is_box_driver = layer_driver_info.get('driver_type') == 'box'
+                            driver_pivot = layer_driver_info.get('driver_pivot')
+                            driver_scale_profile = layer_driver_info.get('driver_scale_profile')
+
+                            if interpolated_driver and len(interpolated_driver) > 0:
+                                driver_start_p = int(layer_driver_info.get('start_pause', 0))
+                                driver_offset_val = int(layer_driver_info.get('offset', 0))
+                                pos_delay = driver_start_p + max(0, driver_offset_val)
+                                neg_lead = -min(0, driver_offset_val)
+                                eff_static_frame = max(0, driver_eval_frame - pos_delay + neg_lead)
+
+                                if not is_box_driver:
+                                    # Original behavior for non-box drivers: offset is relative to driver's first point
+                                    driver_offset_x, driver_offset_y = calculate_driver_offset(
+                                        eff_static_frame, interpolated_driver, (0, 0),
+                                        total_frames, driver_d_scale, frame_width, frame_height,
+                                        driver_scale_factor=layer_driver_info.get('driver_scale_factor', 1.0),
+                                        driver_radius_delta=layer_driver_info.get('driver_radius_delta', 0.0),
+                                        driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
+                                        apply_scale_to_offset=True
+                                    )
+                                else:
+                                    # Box drivers: pure translational offset, independent of scale/radius.
+                                    driver_offset_x, driver_offset_y = calculate_driver_offset(
+                                        eff_static_frame, interpolated_driver, (0, 0),
+                                        total_frames, 1.0, frame_width, frame_height,
+                                        driver_scale_factor=1.0,
+                                        driver_radius_delta=0.0,
+                                        driver_path_normalized=layer_driver_info.get('driver_path_normalized', True),
+                                        apply_scale_to_offset=False
+                                    )
+                                    # Extract rotation for this frame
+                                    try:
+                                        base_rot = float(interpolated_driver[0].get("boxR", 0.0) or 0.0)
+                                        cur_rot = float(interpolated_driver[min(eff_static_frame, len(interpolated_driver) - 1)].get("boxR", 0.0) or 0.0)
+                                        rotation_rad = cur_rot - base_rot
+                                    except (TypeError, ValueError):
+                                        rotation_rad = 0.0
+
+                        # First pass: calculate all transformed positions for this frame
+                        frame_transformed_positions = []
+                        for point in static_points:
                             # Base point position
                             base_x = float(point["x"])
                             base_y = float(point["y"])
@@ -1591,18 +1743,26 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
                             location_x = scaled_x + driver_offset_x
                             location_y = scaled_y + driver_offset_y
+                            frame_transformed_positions.append((location_x, location_y))
 
+                        # Second pass: rotate all positions around their collective bounding box
+                        frame_rotated_positions = self._rotate_positions_around_bbox(frame_transformed_positions, rotation_rad)
+
+                        # Third pass: assign rotated positions to each point's spline
+                        for point_idx, (location_x, location_y) in enumerate(frame_rotated_positions):
                             if static_fade_start == 0 or i < fade_start_frame:
                                 visibility = 1
                             else:
                                 visibility = 0
 
-                            single_point_spline.append({
+                            layer_splines[point_idx].append({
                                 "x": int(location_x),
                                 "y": int(location_y),
                                 "v": visibility
                             })
 
+                    # Append all point splines from this layer to all_coords
+                    for single_point_spline in layer_splines:
                         all_coords.append(single_point_spline)
             except Exception as e:
                 print(f"Error processing static points: {e}")

@@ -1,12 +1,13 @@
 import { app } from '../../../scripts/app.js';
 import { makeUUID, loadScript, create_documentation_stylesheet, RgthreeBaseWidget, DimensionsWidget, TopRowWidget, PowerSplineWidget, PowerSplineHeaderWidget, NodeSizeManager, drawWidgetButton } from './spline_utils.js';
 import { HandDrawLayerWidget, commitHanddrawPath } from './handdraw_layer.js';
+import { BoxLayerWidget } from './box_layer.js';
 import { chainCallback, hideWidgetForGood } from './widget_utils.js';
-import SplineEditor2 from './spline_canvas.js';
+import SplineEditor2 from './canvas/canvas_main.js';
 import { getSlotInPosition, getSlotMenuOptions, showCustomDrivenToggleMenu } from './context_menu.js';
 import { drawDriverLines } from './driver_line_renderer.js';
 import { darkenImage, scaleImageToRefDimensions, processBgImage, createImageOverlayForConfigure } from './image_overlay.js';
-import { getReferenceImageFromConnectedNode } from './graph_query.js';
+import { getReferenceImageFromConnectedNode, getReferenceImagesFromConnectedNode } from './graph_query.js';
 
 loadScript('/kjweb_async/svg-path-properties.min.js').catch((e) => {
     console.log(e)
@@ -64,8 +65,8 @@ async function loadImageAsBase64(url) {
     }
 }
 
-// Function to save ref_image to bg folder as ref_image.jpg
-async function saveRefImageToCache(base64Data) {
+// Function to save ref_image to bg folder as bg_image.png
+async function saveRefImageToCache(base64Data, name = 'bg_image.png') {
     try {
         // Create a cache key to track the current ref_image
         const currentHash = await simpleHash(base64Data);
@@ -75,6 +76,7 @@ async function saveRefImageToCache(base64Data) {
         try {
             const formData = new FormData();
             formData.append('image', `data:image/png;base64,${base64Data}`);
+            formData.append('name', name);
             
             const response = await fetch('/wanvideowrapper_qq/save_ref_image', {
                 method: 'POST',
@@ -89,7 +91,7 @@ async function saveRefImageToCache(base64Data) {
                     safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                         base64: base64Data,
                         type: 'image/png',
-                        name: 'ref_image.jpg',
+                        name,
                         hash: currentHash,
                         timestamp: Date.now()
                     }));
@@ -101,7 +103,7 @@ async function saveRefImageToCache(base64Data) {
                     safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                         base64: base64Data,
                         type: 'image/png',
-                        name: 'ref_image.jpg',
+                        name,
                         hash: currentHash,
                         timestamp: Date.now()
                     }));
@@ -113,7 +115,7 @@ async function saveRefImageToCache(base64Data) {
                 safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                     base64: base64Data,
                     type: 'image/png',
-                    name: 'ref_image.jpg',
+                    name: 'bg_image.png',
                     hash: currentHash,
                     timestamp: Date.now()
                 }));
@@ -126,7 +128,7 @@ async function saveRefImageToCache(base64Data) {
             safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                 base64: base64Data,
                 type: 'image/png',
-                name: 'ref_image.jpg',
+                name,
                 hash: currentHash,
                 timestamp: Date.now()
             }));
@@ -190,7 +192,7 @@ async function loadCachedRefImageAsBase64() {
     try {
         // First try to load from actual file in bg folder
         const timestamp = Date.now();
-        const refImageUrl = new URL(`bg/ref_image.jpg?t=${timestamp}`, import.meta.url).href;
+        const refImageUrl = new URL(`bg/bg_image.png?t=${timestamp}`, import.meta.url).href;
         const response = await fetch(refImageUrl);
         if (response.ok) {
             const blob = await response.blob();
@@ -282,7 +284,11 @@ class SplineLayerManager {
     }
 
     getSplineWidgets() {
-        return this.node.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+        return this.node.widgets.filter(w =>
+            (w instanceof PowerSplineWidget) ||
+            (w instanceof HandDrawLayerWidget) ||
+            (w instanceof BoxLayerWidget)
+        );
     }
 
     addNewSpline(name) {
@@ -317,14 +323,14 @@ class SplineLayerManager {
         widget.value.points_store = JSON.stringify(newPoints);
 
         // Insert spline widgets AFTER the header (not before button_bar)
-        // This ensures order: canvas → button_bar → header → splines
+        // This ensures order: canvas ? button_bar ? header ? splines
         const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
         if (headerIndex !== -1) {
             // Find the last layer widget (spline or handdraw) after the header
             let insertIndex = headerIndex + 1;
             for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
                 const wi = this.node.widgets[i];
-                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
+                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget || wi instanceof BoxLayerWidget) {
                     insertIndex = i + 1;
                 } else {
                     break;
@@ -359,7 +365,56 @@ class SplineLayerManager {
             let insertIndex = headerIndex + 1;
             for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
                 const wi = this.node.widgets[i];
-                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
+                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget || wi instanceof BoxLayerWidget) {
+                    insertIndex = i + 1;
+                } else {
+                    break;
+                }
+            }
+            this.node.widgets.splice(insertIndex, 0, widget);
+            widget.parent = this.node;
+        } else {
+            this.node.addCustomWidget(widget);
+        }
+
+        this.node.updateNodeHeight();
+        if (activate) {
+            this.setActiveWidget(widget);
+            if (this.node.editor && this.node.editor.vis) {
+                this.node.editor.vis.render();
+            }
+            this.node.setDirtyCanvas(true, true);
+        }
+        return widget;
+    }
+
+    addNewBox(name, activate = true) {
+        this.node.splineWidgetsCounter++;
+        const widget = new BoxLayerWidget("box_" + this.node.splineWidgetsCounter);
+
+        const baseName = name || `Box ${this.node.splineWidgetsCounter}`;
+        const existingNames = this.getSplineWidgets().map(w => w.value.name);
+        widget.value.name = this.node.generateUniqueName(baseName, existingNames);
+        widget.value.points_store = JSON.stringify([{
+            x: 0.5,
+            y: 0.5,
+            highlighted: false,
+            boxScale: 1,
+            pointScale: 1,
+            scale: 1,
+            rotation: 0,
+            boxRotation: 0,
+        }]);
+        widget.value.box_keys = [];
+        widget.value.box_timeline_point = 1;
+        widget.value.interpolation = 'box';
+
+        const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
+        if (headerIndex !== -1) {
+            let insertIndex = headerIndex + 1;
+            for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
+                const wi = this.node.widgets[i];
+                if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget || wi instanceof BoxLayerWidget) {
                     insertIndex = i + 1;
                 } else {
                     break;
@@ -489,7 +544,11 @@ class SplineLayerManager {
             this.node?.editor?.exitHanddrawMode?.(false);
         } catch {}
         this.node.splineWidgetsCounter++;
-        const newWidget = new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
+        const isHand = sourceWidget instanceof HandDrawLayerWidget;
+        const isBox = sourceWidget instanceof BoxLayerWidget;
+        const WidgetClass = isHand ? HandDrawLayerWidget : (isBox ? BoxLayerWidget : PowerSplineWidget);
+        const widgetIdPrefix = isBox ? "box_" : "spline_";
+        const newWidget = new WidgetClass(widgetIdPrefix + this.node.splineWidgetsCounter);
 
         // Deep copy of value.
         const sourceValue = sourceWidget.value;
@@ -514,7 +573,7 @@ class SplineLayerManager {
                 let insertIndex = headerIndex + 1;
                 for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
                     const wi = this.node.widgets[i];
-                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
+                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget || wi instanceof BoxLayerWidget) {
                         insertIndex = i + 1;
                     } else {
                         break;
@@ -566,7 +625,10 @@ class SplineLayerManager {
     }
 
     recreateSplinesFromData(widgets_values) {
-        this.node.widgets = this.node.widgets.filter(w => !(w instanceof PowerSplineWidget));
+        this.node.widgets = this.node.widgets.filter(w =>
+            !(w instanceof PowerSplineWidget) &&
+            !(w instanceof HandDrawLayerWidget) &&
+            !(w instanceof BoxLayerWidget));
 
         // Create a map of widget data by name for safe, unambiguous lookup
         // This prevents any cross-contamination between widget values
@@ -581,14 +643,19 @@ class SplineLayerManager {
         for (const [name, widgetValue] of widgetDataByName.entries()) {
             this.node.splineWidgetsCounter++;
             const isHand = widgetValue.type === 'handdraw';
-            const widget = isHand ? new HandDrawLayerWidget("spline_" + this.node.splineWidgetsCounter) : new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter);
+            const isBox = widgetValue.type === 'box_layer';
+            const widgetIdPrefix = isBox ? "box_" : "spline_";
+            const widget = isHand
+                ? new HandDrawLayerWidget("spline_" + this.node.splineWidgetsCounter)
+                : (isBox ? new BoxLayerWidget(widgetIdPrefix + this.node.splineWidgetsCounter)
+                         : new PowerSplineWidget("spline_" + this.node.splineWidgetsCounter));
 
             // Explicitly assign each field to ensure complete isolation
             // No spread operators that might share references
             widget.value = {
                 on: widgetValue.on !== undefined ? widgetValue.on : true,
                 name: widgetValue.name,
-                type: isHand ? 'handdraw' : 'spline',
+                type: isBox ? 'box_layer' : (isHand ? 'handdraw' : 'spline'),
                 interpolation: widgetValue.interpolation,
                 repeat: widgetValue.repeat || 1,
                 offset: widgetValue.offset || 0,
@@ -602,6 +669,11 @@ class SplineLayerManager {
                 points_store: widgetValue.points_store || "[]",
                 coordinates: widgetValue.coordinates || "[]"
             };
+            if (isBox) {
+                widget.value.box_keys = widgetValue.box_keys || [];
+                widget.value.box_timeline_point = widgetValue.box_timeline_point || 1;
+                widget.value.box_interpolation = widgetValue.box_interpolation || 'linear'; // Restore box interpolation
+            }
 
             // Insert spline widgets AFTER the header (same as addNewSpline logic)
             const headerIndex = this.node.widgets.findIndex(w => w.name === "spline_header");
@@ -610,7 +682,7 @@ class SplineLayerManager {
                 let insertIndex = headerIndex + 1;
                 for (let i = headerIndex + 1; i < this.node.widgets.length; i++) {
                     const wi = this.node.widgets[i];
-                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget) {
+                    if (wi instanceof PowerSplineWidget || wi instanceof HandDrawLayerWidget || wi instanceof BoxLayerWidget) {
                         insertIndex = i + 1;
                     } else {
                         break;
@@ -853,17 +925,20 @@ app.registerExtension({
             }
 
             this.hasSplineWidgets = function() {
-              return this.widgets && this.widgets.some(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+              return this.widgets && this.widgets.some(w =>
+                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
             };
 
             this.allSplinesState = function() {
-              const layerWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+              const layerWidgets = this.widgets.filter(w =>
+                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
               if (!layerWidgets.length) return false;
               return layerWidgets.every(w => w.value.on);
             };
 
             this.toggleAllSplines = function() {
-              const layerWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+              const layerWidgets = this.widgets.filter(w =>
+                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
               const newState = !this.allSplinesState();
               layerWidgets.forEach(w => w.value.on = newState);
               this.setDirtyCanvas(true, true);
@@ -874,7 +949,7 @@ app.registerExtension({
               this.sizeManager.updateSize(true);
             };
 
-            // Silent auto-refresh overlay on init (mimics 👀 Refresh without alerts)
+            // Silent auto-refresh overlay on init (mimics ? Refresh without alerts)
             this.initOverlayRefresh = async function() {
                 try {
                     const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
@@ -960,7 +1035,8 @@ app.registerExtension({
                                     }
                                     
                                     // Normalize the spline points to the new dimensions if there are any splines
-                                    const splineWidgets = this.widgets.filter(w => w instanceof PowerSplineWidget);
+                                    const splineWidgets = this.widgets.filter(w =>
+                                        (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
                                     splineWidgets.forEach(widget => {
                                         if (widget.value.points_store) {
                                             try {
@@ -1049,7 +1125,7 @@ app.registerExtension({
                             // Convert the darkened image to data URL
                             const darkenedDataUrl = canvas.toDataURL('image/jpeg');
                             this.imgData = {
-                                name: 'ref_image.jpg',
+                                name: 'bg_image.png',
                                 base64: darkenedDataUrl.split(',')[1],
                                 type: 'image/jpeg'
                             };
@@ -1072,7 +1148,7 @@ app.registerExtension({
 
                                         const darkenedDataUrl = canvas.toDataURL('image/jpeg');
                                         this.imgData = {
-                                            name: 'ref_image.jpg',
+                                            name: 'bg_image.png',
                                             base64: darkenedDataUrl.split(',')[1],
                                             type: 'image/jpeg'
                                         };
@@ -1129,7 +1205,7 @@ app.registerExtension({
                                     // Convert the darkened image to data URL
                                     const darkenedDataUrl = canvas.toDataURL('image/jpeg');
                                     this.imgData = {
-                                        name: 'ref_image.jpg',
+                                        name: 'bg_image.png',
                                         base64: darkenedDataUrl.split(',')[1],
                                         type: 'image/jpeg'
                                     };
@@ -1211,12 +1287,12 @@ app.registerExtension({
                 console.log('Attempting to update reference image from connected node...');
                 
                 try {
-                    // Get reference image from connected node
-                    const base64Image = await getReferenceImageFromConnectedNode(this);
+                    // Get reference image from connected bg_image input
+                    const base64Image = await getReferenceImageFromConnectedNode(this, 'bg_image');
                     if (!base64Image) {
                         console.warn('Could not retrieve reference image from connected node');
                         // Optionally show a message to the user
-                        alert('Could not retrieve reference image from connected node. Make sure an image node is connected to the ref_image input.');
+                        alert('Could not retrieve reference image from connected node. Make sure an image node is connected to the bg_image input.');
                         return;
                     }
                     
@@ -1251,6 +1327,222 @@ app.registerExtension({
                     console.error('Error updating reference image from connected node:', error);
                     alert('Error updating reference image: ' + error.message);
                 }
+            }.bind(this);
+
+            // Attach ref_images input to the active box layer (Ref -> Del behavior)
+            this.attachRefImageToActiveBoxLayer = async function() {
+                const activeWidget = this.layerManager?.getActiveWidget?.();
+                if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
+                    alert('Activate a box layer first to attach a ref image.');
+                    return;
+                }
+
+                // Fetch images from ref_images input (first frame used)
+                const images = await getReferenceImagesFromConnectedNode(this);
+                if (!images || images.length === 0) {
+                    alert('No ref_images input found. Connect an IMAGE or IMAGE batch to ref_images.');
+                    return;
+                }
+
+                const chosen = images[0];
+                const base64Data = chosen.startsWith('data:')
+                    ? chosen.split(',')[1]
+                    : chosen;
+                const dataUrl = chosen.startsWith('data:')
+                    ? chosen
+                    : `data:image/png;base64,${base64Data}`;
+
+                // Load dimensions to fit the box without stretching
+                const dims = await new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => resolve({ width: img.width, height: img.height });
+                    img.onerror = () => resolve({ width: 1, height: 1 });
+                    img.src = dataUrl;
+                });
+
+                activeWidget.value.ref_attachment = {
+                    base64: base64Data,
+                    type: 'image/png',
+                    width: dims.width,
+                    height: dims.height,
+                    name: 'ref_image_0.png'
+                };
+
+                // Persist per-layer in sessionStorage for reloads
+                try {
+                    const keyId = this.id ?? this.uuid;
+                    const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
+                    if (key) {
+                        sessionStorage.setItem(key, JSON.stringify(activeWidget.value.ref_attachment));
+                    }
+                } catch (e) {
+                    console.warn('Failed to persist box ref attachment to session:', e);
+                }
+
+                // Save all frames (first + any extras) to disk as numbered PNGs
+                for (let i = 0; i < images.length; i++) {
+                    const imgData = images[i];
+                    const b64 = imgData.startsWith('data:') ? imgData.split(',')[1] : imgData;
+                    await saveRefImageToCache(b64, `ref_image_${i}.png`);
+                }
+
+                // Refresh canvas
+                this.setDirtyCanvas(true, true);
+                this.editor?.refreshBackgroundImage?.();
+            }.bind(this);
+
+            // Clear ref attachment from active box layer
+            this.clearRefImageFromActiveBoxLayer = function() {
+                const activeWidget = this.layerManager?.getActiveWidget?.();
+                if (activeWidget && activeWidget.value?.type === 'box_layer') {
+                    activeWidget.value.ref_attachment = null;
+                    try {
+                        const keyId = this.id ?? this.uuid;
+                        const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
+                        if (key) sessionStorage.removeItem(key);
+                    } catch {}
+                    this.setDirtyCanvas(true, true);
+                }
+            }.bind(this);
+
+            // Add method to handle frames input refresh and box layer keyframe scaling
+            this.handleFramesRefresh = function() {
+                console.log('Handling frames refresh...');
+
+                try {
+                    // Step 1: Check if we have a "frames" input connected
+                    const framesInputValue = this.getInputOrProperty('frames');
+                    if (!framesInputValue || typeof framesInputValue !== 'number') {
+                        console.log('No frames input connected or invalid value');
+                        return;
+                    }
+
+                    console.log('Frames input value:', framesInputValue);
+
+                    // Step 2: Find all box type layers in the layer manager
+                    const boxLayers = [];
+                    if (this.widgets) {
+                        for (const widget of this.widgets) {
+                            if (widget.value && widget.value.type === 'box_layer') {
+                                boxLayers.push(widget);
+                            }
+                        }
+                    }
+
+                    if (boxLayers.length === 0) {
+                        console.log('No box type layers found');
+                        return;
+                    }
+
+                    console.log(`Found ${boxLayers.length} box layer(s)`);
+
+                    // Step 3: Check which box layers have keyframes set
+                    const boxLayersWithKeys = boxLayers.filter(layer => {
+                        return layer.value.box_keys && Array.isArray(layer.value.box_keys) && layer.value.box_keys.length > 0;
+                    });
+
+                    if (boxLayersWithKeys.length === 0) {
+                        console.log('No box layers with keyframes found');
+                        return;
+                    }
+
+                    console.log(`Found ${boxLayersWithKeys.length} box layer(s) with keyframes`);
+
+                    // Step 4: Get current max frames from timeline (import from canvas_constants.js)
+                    // We need to dynamically import or access the constant
+                    import('./canvas/canvas_constants.js').then(module => {
+                        const currentMaxFrames = module.BOX_TIMELINE_MAX_POINTS || 50;
+                        console.log(`Current max frames: ${currentMaxFrames}, Target frames: ${framesInputValue}`);
+
+                        if (currentMaxFrames === framesInputValue) {
+                            console.log('Frames already match, no scaling needed');
+                            return;
+                        }
+
+                        // Step 5: Update BOX_TIMELINE_MAX_POINTS
+                        // Note: We can't directly modify the imported constant, but we can update it in the module
+                        // For now, we'll scale the keyframes based on the ratio
+                        const scaleRatio = framesInputValue / currentMaxFrames;
+                        console.log(`Scale ratio: ${scaleRatio}`);
+
+                        // Step 6: Scale/spread the keyframes for each box layer
+                        for (const layer of boxLayersWithKeys) {
+                            const originalKeys = layer.value.box_keys;
+                            const scaledKeys = originalKeys.map(key => {
+                                const newFrame = Math.max(1, Math.min(framesInputValue, Math.round(key.frame * scaleRatio)));
+                                return {
+                                    ...key,
+                                    frame: newFrame
+                                };
+                            });
+
+                            // Remove duplicate frames (keep last one for each frame)
+                            const keysByFrame = new Map();
+                            for (const key of scaledKeys) {
+                                keysByFrame.set(key.frame, key);
+                            }
+                            layer.value.box_keys = Array.from(keysByFrame.values()).sort((a, b) => a.frame - b.frame);
+
+                            console.log(`Scaled ${originalKeys.length} keys for layer "${layer.value.name}"`);
+                        }
+
+                        // Step 7: Update the constant dynamically in the editor
+                        if (this.editor) {
+                            this.editor._maxFrames = framesInputValue;
+                        }
+
+                        // Step 8: Force refresh the editor to show the changes
+                        if (this.editor && this.editor.redraw) {
+                            this.editor.redraw();
+                        }
+
+                        this.setDirtyCanvas(true, true);
+
+                        console.log('Frames refresh completed successfully');
+                    }).catch(err => {
+                        console.error('Error importing canvas_constants:', err);
+                    });
+
+                } catch (error) {
+                    console.error('Error handling frames refresh:', error);
+                }
+            }.bind(this);
+
+            // Helper method to get input value or property
+            this.getInputOrProperty = function(name) {
+                // First try to get from connected input
+                if (this.inputs) {
+                    const inputIndex = this.inputs.findIndex(i => i.name === name);
+                    if (inputIndex >= 0 && this.inputs[inputIndex].link != null) {
+                        // Get the link
+                        const link = app.graph.links.get(this.inputs[inputIndex].link);
+                        if (link) {
+                            // Get the source node
+                            const sourceNode = app.graph._nodes.find(n => n.id === link.origin_id);
+                            if (sourceNode && sourceNode.outputs && sourceNode.outputs[link.origin_slot]) {
+                                // Try to get the value from the source node's widget
+                                const outputName = sourceNode.outputs[link.origin_slot].name;
+                                const widget = sourceNode.widgets?.find(w => w.name === outputName || w.name === name);
+                                if (widget) {
+                                    return widget.value;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fallback to property
+                if (this.properties && this.properties[name] !== undefined) {
+                    return this.properties[name];
+                }
+
+                // Fallback to widget
+                const widget = this.widgets?.find(w => w.name === name);
+                if (widget) {
+                    return widget.value;
+                }
+
+                return null;
             }.bind(this);
 
             // Add method to create scaled overlay for immediate background updates
@@ -1468,7 +1760,7 @@ app.registerExtension({
                 // Try to load cached ref_image first
                 loadCachedRefImageAsBase64().then(cachedImageUrl => {
                     if (cachedImageUrl) {
-                        this.loadBackgroundImageFromUrl(cachedImageUrl, 'ref_image.jpg', targetWidth, targetHeight);
+                        this.loadBackgroundImageFromUrl(cachedImageUrl, 'bg_image.png', targetWidth, targetHeight);
                     } else {
                         // Fallback to default A.jpg
                         const timestamp = Date.now();
@@ -1485,6 +1777,8 @@ app.registerExtension({
 
             // Track mouse state for button hover effects
             buttonBarWidget.addSplineMouseDown = false;
+            buttonBarWidget.addBoxMouseDown = false;
+            buttonBarWidget.drawMouseDown = false;
             buttonBarWidget.duplicateMouseDown = false;
 
             buttonBarWidget.computeSize = function(width) {
@@ -1494,22 +1788,45 @@ app.registerExtension({
             buttonBarWidget.draw = function(ctx, node, width, posY, height) {
                 const margin = 15;
                 const gap = 5;
-                const addSplineWidth = (width - margin * 2 - gap) * 0.70;
-                const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+                const totalWidth = width - margin * 2 - gap * 3;
+                const addSplineWidth = totalWidth * 0.30;
+                const addBoxWidth = totalWidth * 0.30;
+                const drawWidth = totalWidth * 0.20;
+                const duplicateWidth = totalWidth * 0.20;
+                const addSplineX = margin;
+                const addBoxX = addSplineX + addSplineWidth + gap;
+                const drawX = addBoxX + addBoxWidth + gap;
+                const duplicateX = drawX + drawWidth + gap;
 
-                // Draw Add Spline button (70% width)
+                // Draw Add Spline button (30% width)
                 drawWidgetButton(
                     ctx,
-                    { size: [addSplineWidth, height], pos: [margin, posY] },
+                    { size: [addSplineWidth, height], pos: [addSplineX, posY] },
                     "➕ Add Spline",
                     this.addSplineMouseDown
                 );
 
-                // Draw Duplicate button (30% width)
+                // Draw Add Box button (30% width)
                 drawWidgetButton(
                     ctx,
-                    { size: [duplicateWidth, height], pos: [margin + addSplineWidth + gap, posY] },
-                    "Duplicate",
+                    { size: [addBoxWidth, height], pos: [addBoxX, posY] },
+                    "🎥 Add Keyframes",
+                    this.addBoxMouseDown
+                );
+
+                // Draw button (20% width)
+                drawWidgetButton(
+                    ctx,
+                    { size: [drawWidth, height], pos: [drawX, posY] },
+                    "✏️ Draw",
+                    this.drawMouseDown || (node?.editor?._handdrawMode === 'create')
+                );
+
+                // Draw Duplicate button (20% width)
+                drawWidgetButton(
+                    ctx,
+                    { size: [duplicateWidth, height], pos: [duplicateX, posY] },
+                    "🧬 Duplicate",
                     this.duplicateMouseDown
                 );
             };
@@ -1519,18 +1836,37 @@ app.registerExtension({
                     const margin = 15;
                     const gap = 5;
                     const width = node.size[0];
-                    const addSplineWidth = (width - margin * 2 - gap) * 0.70;
-                    const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+                    const totalWidth = width - margin * 2 - gap * 3;
+                    const addSplineWidth = totalWidth * 0.30;
+                    const addBoxWidth = totalWidth * 0.30;
+                    const drawWidth = totalWidth * 0.20;
+                    const duplicateWidth = totalWidth * 0.20;
+                    const addSplineLeft = margin;
+                    const addSplineRight = addSplineLeft + addSplineWidth;
+                    const addBoxLeft = addSplineRight + gap;
+                    const addBoxRight = addBoxLeft + addBoxWidth;
+                    const drawLeft = addBoxRight + gap;
+                    const drawRight = drawLeft + drawWidth;
+                    const duplicateLeft = drawRight + gap;
+                    const duplicateRight = duplicateLeft + duplicateWidth;
 
-                    // Check if click is on Add Spline button
-                    if (pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
+                    if (pos[0] >= addSplineLeft && pos[0] <= addSplineRight) {
                         this.addSplineMouseDown = true;
                         node.setDirtyCanvas(true, false);
                         return true;
                     }
-                    // Check if click is on Duplicate button
-                    else if (pos[0] >= margin + addSplineWidth + gap &&
-                             pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
+                    else if (pos[0] >= addBoxLeft && pos[0] <= addBoxRight) {
+                        this.addBoxMouseDown = true;
+                        node.setDirtyCanvas(true, false);
+                        return true;
+                    }
+                    else if (pos[0] >= drawLeft && pos[0] <= drawRight) {
+                        this.drawMouseDown = true;
+                        node.setDirtyCanvas(true, false);
+                        return true;
+                    }
+                    else if (pos[0] >= duplicateLeft &&
+                             pos[0] <= duplicateRight) {
                         this.duplicateMouseDown = true;
                         node.setDirtyCanvas(true, false);
                         return true;
@@ -1540,30 +1876,61 @@ app.registerExtension({
                     const margin = 15;
                     const gap = 5;
                     const width = node.size[0];
-                    const addSplineWidth = (width - margin * 2 - gap) * 0.70;
-                    const duplicateWidth = (width - margin * 2 - gap) * 0.30;
+                    const totalWidth = width - margin * 2 - gap * 3;
+                    const addSplineWidth = totalWidth * 0.30;
+                    const addBoxWidth = totalWidth * 0.30;
+                    const drawWidth = totalWidth * 0.20;
+                    const duplicateWidth = totalWidth * 0.20;
+                    const addSplineLeft = margin;
+                    const addSplineRight = addSplineLeft + addSplineWidth;
+                    const addBoxLeft = addSplineRight + gap;
+                    const addBoxRight = addBoxLeft + addBoxWidth;
+                    const drawLeft = addBoxRight + gap;
+                    const drawRight = drawLeft + drawWidth;
+                    const duplicateLeft = drawRight + gap;
+                    const duplicateRight = duplicateLeft + duplicateWidth;
 
-                // Handle Add Spline button click
-                if (this.addSplineMouseDown && pos[0] >= margin && pos[0] <= margin + addSplineWidth) {
-                    if (node?.editor && node.editor._handdrawMode === 'create') {
-                        node.editor.exitHanddrawMode?.(false);
+                    if (this.addSplineMouseDown &&
+                        pos[0] >= addSplineLeft && pos[0] <= addSplineRight) {
+                        if (node?.editor && node.editor._handdrawMode === 'create') {
+                            node.editor.exitHanddrawMode?.(false);
+                        }
+                        node.layerManager.addNewSpline();
                     }
-                    node.layerManager.addNewSpline();
-                }
-                // Handle Duplicate button click
-                else if (this.duplicateMouseDown &&
-                         pos[0] >= margin + addSplineWidth + gap &&
-                         pos[0] <= margin + addSplineWidth + gap + duplicateWidth) {
-                    if (node?.editor && node.editor._handdrawMode === 'create') {
-                        node.editor.exitHanddrawMode?.(false);
+                    else if (this.addBoxMouseDown &&
+                        pos[0] >= addBoxLeft && pos[0] <= addBoxRight) {
+                        if (node?.editor && node.editor._handdrawMode === 'create') {
+                            node.editor.exitHanddrawMode?.(false);
+                        }
+                        if (node.layerManager?.addNewBox) {
+                            node.layerManager.addNewBox();
+                        }
                     }
-                    const activeWidget = node.layerManager.getActiveWidget();
-                    if (activeWidget) {
-                        node.layerManager.duplicateSpline(activeWidget);
+                    else if (this.drawMouseDown &&
+                        pos[0] >= drawLeft && pos[0] <= drawRight) {
+                        if (node?.editor) {
+                            if (node.editor._handdrawMode === 'create') {
+                                node.editor.exitHanddrawMode?.(false);
+                            } else {
+                                node.editor.enterHanddrawMode?.('create');
+                            }
+                            node.setDirtyCanvas(true, true);
+                        }
+                    }
+                    else if (this.duplicateMouseDown &&
+                        pos[0] >= duplicateLeft && pos[0] <= duplicateRight) {
+                        if (node?.editor && node.editor._handdrawMode === 'create') {
+                            node.editor.exitHanddrawMode?.(false);
+                        }
+                        const activeWidget = node.layerManager.getActiveWidget();
+                        if (activeWidget) {
+                            node.layerManager.duplicateSpline(activeWidget);
                         }
                     }
 
                     this.addSplineMouseDown = false;
+                    this.addBoxMouseDown = false;
+                    this.drawMouseDown = false;
                     this.duplicateMouseDown = false;
                     node.setDirtyCanvas(true, false);
                     return true;
@@ -1764,7 +2131,7 @@ app.registerExtension({
                                 // Convert the darkened image to data URL
                                 const darkenedDataUrl = canvas.toDataURL('image/jpeg');
                                 this.imgData = {
-                                    name: 'ref_image.jpg',
+                                    name: 'bg_image.png',
                                     base64: darkenedDataUrl.split(',')[1],
                                     type: 'image/jpeg'
                                 };
@@ -1962,7 +2329,8 @@ app.registerExtension({
           nodeType.prototype.onSerialize = function(o) {
             const coordinatesWidget = this.widgets.find(w => w.name === "coordinates");
             if (coordinatesWidget) {
-                const splineWidgets = this.widgets.filter(w => (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget));
+                const splineWidgets = this.widgets.filter(w =>
+                    (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
                 const values = splineWidgets.map(w => w.value);
                 coordinatesWidget.value = JSON.stringify(values);
             }

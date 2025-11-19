@@ -15,7 +15,7 @@ import folder_paths
 from datetime import datetime
 
 def get_bg_folder_path():
-    """Get the path to the bg folder where A.jpg and ref_image.jpg are stored"""
+    """Get the path to the bg folder where A.jpg and bg_image.png are stored"""
     # Look for the bg folder relative to this file
     import pathlib
     current_dir = pathlib.Path(__file__).parent
@@ -32,9 +32,15 @@ async def save_ref_image(request):
     try:
         post = await request.post()
         image_data = post.get("image")
+        image_name = post.get("name", "bg_image.png")
         
         if not image_data:
             return web.json_response({"error": "No image data provided"}, status=400)
+        
+        # Derive filename safely
+        safe_name = os.path.basename(image_name) or "bg_image.png"
+        if "." not in safe_name:
+            safe_name += ".png"
         
         # Decode base64 image data
         if image_data.startswith('data:image'):
@@ -43,7 +49,7 @@ async def save_ref_image(request):
             image_format = header.split('/')[1].split(';')[0]  # Extract format like 'png' or 'jpeg'
         else:
             encoded = image_data
-            image_format = 'png'  # Default to PNG
+            image_format = safe_name.split(".")[-1]
         
         # Decode the base64 string
         image_bytes = base64.b64decode(encoded)
@@ -58,11 +64,22 @@ async def save_ref_image(request):
         
         # Get the bg folder path
         bg_folder = get_bg_folder_path()
-        ref_image_path = os.path.join(bg_folder, "ref_image.jpg")
+        ref_image_path = os.path.join(bg_folder, safe_name)
         
-        # Save the image as JPEG
-        rgb_img = img.convert('RGB')
-        rgb_img.save(ref_image_path, format='JPEG', quality=95)
+        # Decide format (prefer PNG to preserve alpha)
+        fmt = (image_format or "png").upper()
+        save_kwargs = {}
+        if fmt in ("JPG", "JPEG"):
+            img = img.convert('RGB')
+            fmt = "JPEG"
+            save_kwargs["quality"] = 95
+        else:
+            # Preserve alpha if present
+            if img.mode not in ("RGBA", "LA"):
+                img = img.convert("RGBA")
+            fmt = "PNG"
+        
+        img.save(ref_image_path, format=fmt, **save_kwargs)
         
         return web.json_response({"success": True, "path": ref_image_path, "message": "Reference image saved successfully"})
 

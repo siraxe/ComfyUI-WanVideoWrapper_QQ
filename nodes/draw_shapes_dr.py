@@ -375,7 +375,11 @@ def apply_driver_chain_offsets(
         adjusted_path: List[Dict[str, float]] = []
         for pt in path:
             try:
-                adjusted_path.append({"x": round_coord(pt.get("x", 0.0)), "y": round_coord(pt.get("y", 0.0))})
+                # Preserve all fields from original point, update x and y with rounded values
+                new_pt = dict(pt) if isinstance(pt, dict) else {}
+                new_pt["x"] = round_coord(pt.get("x", 0.0))
+                new_pt["y"] = round_coord(pt.get("y", 0.0))
+                adjusted_path.append(new_pt)
             except (AttributeError, TypeError, ValueError):
                 adjusted_path.append({"x": 0.0, "y": 0.0})
 
@@ -429,17 +433,27 @@ def apply_driver_chain_offsets(
                     by = float(base_layer_path[i].get("y", 0.0))
                     dx = float(parent_world[i].get("x", 0.0)) - ref_px
                     dy = float(parent_world[i].get("y", 0.0)) - ref_py
-                    world_adjusted.append({"x": round_coord(bx + dx), "y": round_coord(by + dy)})
+                    # Preserve all fields from base_layer_path
+                    new_pt = dict(base_layer_path[i]) if isinstance(base_layer_path[i], dict) else {}
+                    new_pt["x"] = round_coord(bx + dx)
+                    new_pt["y"] = round_coord(by + dy)
+                    world_adjusted.append(new_pt)
             else:
                 for pt in base_layer_path:
                     try:
-                        world_adjusted.append({"x": round_coord(pt.get("x", 0.0)), "y": round_coord(pt.get("y", 0.0))})
+                        new_pt = dict(pt) if isinstance(pt, dict) else {}
+                        new_pt["x"] = round_coord(pt.get("x", 0.0))
+                        new_pt["y"] = round_coord(pt.get("y", 0.0))
+                        world_adjusted.append(new_pt)
                     except Exception:
                         world_adjusted.append({"x": 0.0, "y": 0.0})
         else:
             for pt in adjusted_path:
                 try:
-                    world_adjusted.append({"x": round_coord(pt.get("x", 0.0)), "y": round_coord(pt.get("y", 0.0))})
+                    new_pt = dict(pt) if isinstance(pt, dict) else {}
+                    new_pt["x"] = round_coord(pt.get("x", 0.0))
+                    new_pt["y"] = round_coord(pt.get("y", 0.0))
+                    world_adjusted.append(new_pt)
                 except Exception:
                     world_adjusted.append({"x": 0.0, "y": 0.0})
 
@@ -460,7 +474,11 @@ def build_layer_path_map(layer_names: List[str], processed_coords_list: List[Lis
         if isinstance(path, list):
             for pt in path:
                 if isinstance(pt, dict):
-                    sanitized_path.append({"x": round_coord(pt.get("x", 0.0)), "y": round_coord(pt.get("y", 0.0))})
+                    # Preserve all fields from original point
+                    new_pt = dict(pt)
+                    new_pt["x"] = round_coord(pt.get("x", 0.0))
+                    new_pt["y"] = round_coord(pt.get("y", 0.0))
+                    sanitized_path.append(new_pt)
         layer_map[layer_name] = sanitized_path
     return layer_map
 
@@ -566,7 +584,11 @@ def process_driver_path(
                     + neighbor_weight * float(prev["y"])
                     + neighbor_weight * float(nxt["y"])
                 )
-                smoothed.append({"x": sx, "y": sy})
+                # Preserve all fields from curr, then update x and y with smoothed values
+                smoothed_pt = dict(curr)
+                smoothed_pt["x"] = sx
+                smoothed_pt["y"] = sy
+                smoothed.append(smoothed_pt)
             smoothed.append(processed[-1].copy())
             processed = smoothed
         return processed

@@ -151,22 +151,20 @@ export class TopRowWidget extends RgthreeBaseWidget {
         const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
         
         // Calculate available width for components (excluding margins and spacing)
-        const availableWidth = node.size[0] - margin * 2 - spacing * 2; // Account for spacing between elements
+        const availableWidth = node.size[0] - margin * 2 - spacing * 3; // Account for spacing between elements
         
         // Calculate component widths based on percentages (now totaling 100% of available width)
         const refreshButtonWidth = availableWidth * 0.15;
         const bgImgDropdownWidth = availableWidth * 0.15;
-        const drawButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
-        // Account for both the pencil button and the animation toggle button
+        const iconButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
         const dimensionsAreaWidth = availableWidth - (
             refreshButtonWidth + spacing +
             bgImgDropdownWidth + spacing +
-            drawButtonWidth + spacing + // ✏️
-            drawButtonWidth + spacing   // 〰
+            iconButtonWidth
         );
         
         // Calculate total width and starting position to center everything
-        const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + dimensionsAreaWidth;
+        const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + iconButtonWidth + spacing + dimensionsAreaWidth;
         const startX = margin; // Start from left margin instead of centering
         let posX = startX;
         
@@ -174,7 +172,7 @@ export class TopRowWidget extends RgthreeBaseWidget {
         drawWidgetButton(
             ctx,
             { size: [refreshButtonWidth, height], pos: [posX, posY] },
-            "👀 Refresh",
+            "Refresh",
             this.buttonMouseDown
         );
         this.hitAreas.refreshButton.bounds = [posX, refreshButtonWidth];
@@ -193,7 +191,7 @@ export class TopRowWidget extends RgthreeBaseWidget {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.fillText("◀", posX + arrowWidth / 2, midY);
+        ctx.fillText("<", posX + arrowWidth / 2, midY);
         this.hitAreas.bgImgLeftArrow.bounds = [posX, arrowWidth];
         
         // Draw text value (centered in the control)
@@ -201,55 +199,19 @@ export class TopRowWidget extends RgthreeBaseWidget {
         this.hitAreas.bgImgVal.bounds = [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)];
         
         // Draw right arrow (positioned at the very right edge)
-        ctx.fillText("▶", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
+        ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
         this.hitAreas.bgImgRightArrow.bounds = [posX + bgImgDropdownWidth - arrowWidth, arrowWidth];
         
         // Combined bounds for the entire control
         this.hitAreas.bgImgAny.bounds = [posX, bgImgDropdownWidth];
         posX += bgImgDropdownWidth + spacing;
 
-        // Small Draw icon button between overlay picker and dimensions
-        // Armed when in create-new-stroke mode (separate from per-layer edit)
-        const isArmed = (node?.editor?._handdrawMode === 'create');
+        // Animation toggle icon for inactive flow animation (default OFF)
+        const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? false);
         drawWidgetButton(
             ctx,
-            { size: [drawButtonWidth, height], pos: [posX, posY] },
-            "✏️",
-            isArmed // render as pressed/armed
-        );
-        // Add blue outline when armed to match active layer style
-        if (isArmed) {
-            // Slightly inset outline to overlay nicely; match thickness with layer edit button (2px)
-            const pad = 0.5;
-            ctx.save();
-            ctx.strokeStyle = '#2cc6ff';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(posX + pad, posY + pad, drawButtonWidth - pad * 2, height - pad * 2, [4]);
-            ctx.stroke();
-            ctx.restore();
-        }
-        this.hitAreas.drawButton = { bounds: [posX, drawButtonWidth], onClick: (e, p, n) => {
-            // Toggle draw mode on the editor; canvas will handle capture on mousedown
-            if (n?.editor) {
-                if (n.editor._handdrawMode === 'create') {
-                    n.editor.exitHanddrawMode?.(false);
-                } else {
-                    // enter create-new-stroke mode (each stroke creates a new handdraw layer)
-                    n.editor.enterHanddrawMode?.('create');
-                }
-                n.setDirtyCanvas(true, true);
-            }
-            return true;
-        }};
-        posX += drawButtonWidth + spacing;
-
-        // Animation toggle icon for inactive flow animation (default ON)
-        const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? true);
-        drawWidgetButton(
-            ctx,
-            { size: [drawButtonWidth, height], pos: [posX, posY] },
-            "〰", // wavy line icon
+            { size: [iconButtonWidth, height], pos: [posX, posY] },
+            "~", // wavy line icon
             isAnimOn
         );
         if (isAnimOn) {
@@ -258,11 +220,11 @@ export class TopRowWidget extends RgthreeBaseWidget {
             ctx.strokeStyle = '#2cc6ff';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.roundRect(posX + pad, posY + pad, drawButtonWidth - pad * 2, height - pad * 2, [4]);
+            ctx.roundRect(posX + pad, posY + pad, iconButtonWidth - pad * 2, height - pad * 2, [4]);
             ctx.stroke();
             ctx.restore();
         }
-        this.hitAreas.animToggleButton = { bounds: [posX, drawButtonWidth], onClick: (e, p, n) => {
+        this.hitAreas.animToggleButton = { bounds: [posX, iconButtonWidth], onClick: (e, p, n) => {
             if (n?.editor) {
                 n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
                 try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
@@ -270,7 +232,7 @@ export class TopRowWidget extends RgthreeBaseWidget {
             }
             return true;
         }};
-        posX += drawButtonWidth + spacing;
+        posX += iconButtonWidth + spacing;
         
         // Draw rounded area for width/height controls
         const roundedAreaX = posX;
@@ -354,6 +316,11 @@ export class TopRowWidget extends RgthreeBaseWidget {
         this.hitAreas.refreshButton.onClick = () => {
             if (node.updateReferenceImageFromConnectedNode) {
                 node.updateReferenceImageFromConnectedNode();
+            }
+
+            // Check for frames input and handle box layer keyframe scaling
+            if (node.handleFramesRefresh) {
+                node.handleFramesRefresh();
             }
         };
         
@@ -641,8 +608,8 @@ export class InterpolationWidget extends RgthreeBaseWidget {
         const interpValue = interpWidget ? interpWidget.value : "linear";
 
         // Interpolation modes - display abbreviated versions
-        const interpModes = ['linear', 'cardinal', 'basis', 'points', 'box'];
-        const interpShortNames = ['linear', 'cardinal', 'basis', 'points', 'box'];
+        const interpModes = ['linear', 'cardinal', 'basis', 'points'];
+        const interpShortNames = ['linear', 'cardinal', 'basis', 'points'];
         const interpIndex = interpModes.indexOf(interpValue);
         const interpDisplayText = interpIndex >= 0 ? interpShortNames[interpIndex] : 'linear';
 
@@ -660,8 +627,7 @@ export class InterpolationWidget extends RgthreeBaseWidget {
             ctx.measureText("cardinal").width,
             ctx.measureText("linear").width,
             ctx.measureText("basis").width,
-            ctx.measureText("points").width,
-            ctx.measureText("box").width
+            ctx.measureText("points").width
         ) + 20; // Add padding
 
         const arrowWidth = 9;
@@ -679,7 +645,7 @@ export class InterpolationWidget extends RgthreeBaseWidget {
         // Left arrow bounds
         this.hitAreas.interpDec.bounds = [posX, arrowWidth];
         ctx.textAlign = "center";
-        ctx.fillText("◀", posX + arrowWidth / 2, midY);
+        ctx.fillText("?", posX + arrowWidth / 2, midY);
         posX += arrowWidth + innerMargin2;
 
         // Text bounds
@@ -689,7 +655,7 @@ export class InterpolationWidget extends RgthreeBaseWidget {
 
         // Right arrow bounds
         this.hitAreas.interpInc.bounds = [posX, arrowWidth];
-        ctx.fillText("▶", posX + arrowWidth / 2, midY);
+        ctx.fillText("?", posX + arrowWidth / 2, midY);
 
         // Combined bounds for all interp controls
         this.hitAreas.interpAny.bounds = [this.hitAreas.interpDec.bounds[0], arrowWidth + innerMargin2 + interpTextWidth + innerMargin2 + arrowWidth];
@@ -703,7 +669,7 @@ export class InterpolationWidget extends RgthreeBaseWidget {
     stepInterp(node, step) {
         const widget = node.widgets?.find(w => w.name === "interpolation");
         if (widget) {
-            const modes = ['linear', 'cardinal', 'basis', 'points', 'box'];
+            const modes = ['linear', 'cardinal', 'basis', 'points'];
             const currentIndex = modes.indexOf(widget.value);
             const newIndex = (currentIndex + step + modes.length) % modes.length;
             widget.value = modes[newIndex];
@@ -791,14 +757,14 @@ export class DriverRotationDScaleWidget extends RgthreeBaseWidget {
         ctx.fillText(rotationLabel, posX + maxLeftLabelWidth, midY);
         posX += maxLeftLabelWidth + innerMargin;
 
-        // Draw rotation control (with ° suffix)
+        // Draw rotation control (with ? suffix)
         const [rLeftArrow, rText, rRightArrow] = drawNumberWidgetPart(ctx, {
             posX: posX,
             posY,
             height,
             value: rotationValue,
             direction: 1,
-            suffix: "°"
+            suffix: "?"
         });
 
         this.hitAreas.rotationDec.bounds = rLeftArrow;

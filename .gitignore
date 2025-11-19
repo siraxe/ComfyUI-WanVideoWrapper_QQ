@@ -2,13 +2,18 @@ __pycache__/
 nodes/__pycache__/
 
 .claude
+.claude2
 .claude-code-router
 .env
 .env2
 opencode.json
 wanvideo_cached_samples.pt
+bg_image.png
 ref_image.jpg
 QWEN.md
 rgthree-comfy-main/
 utility/userdata/info/
 text_embed_cache/
+/web/power_spline_editor/bg
+web/power_spline_editor/bg/ref_image_0.png
+*.png

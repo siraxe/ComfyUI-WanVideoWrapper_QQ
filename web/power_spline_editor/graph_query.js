@@ -450,15 +450,15 @@ async function loadImageAsBase64(imageUrl) {
  * @param {Object} currentNode - The Power Spline Editor node
  * @returns {Promise<string|null>} Promise that resolves to base64 image data or null
  */
-async function getReferenceImageFromConnectedNode(currentNode) {
+async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_image') {
     console.log('Starting reference image query for node:', currentNode);
 
     // Step 1: Find the connected source node for ref_image input
-    let sourceNodeObj = findConnectedSourceNode(currentNode, 'ref_image');
+    let sourceNodeObj = findConnectedSourceNode(currentNode, inputName);
     if (!sourceNodeObj) {
-        console.log('No source node found for ref_image input, trying deep search...');
+        console.log(`No source node found for ${inputName} input, trying deep search...`);
         // Try deep search as fallback
-        sourceNodeObj = findDeepSourceNode(currentNode, 'ref_image');
+        sourceNodeObj = findDeepSourceNode(currentNode, inputName);
         if (sourceNodeObj) {
             console.log('Deep search found a potential image source node:', {
                 sourceNodeId: sourceNodeObj.node.id,
@@ -468,7 +468,7 @@ async function getReferenceImageFromConnectedNode(currentNode) {
     }
     
     if (!sourceNodeObj) {
-        console.log('No source node found for ref_image input after deep search');
+        console.log(`No source node found for ${inputName} input after deep search`);
         return null;
     }
 
@@ -477,7 +477,7 @@ async function getReferenceImageFromConnectedNode(currentNode) {
     if (!imageDataUrl) {
         console.log('No image data found in source node, trying deep search for original image source...');
         // If we couldn't extract image from the found source node, try to find the original image source via deep search
-        const deepSourceNodeObj = findDeepSourceNode(currentNode, 'ref_image');
+        const deepSourceNodeObj = findDeepSourceNode(currentNode, inputName);
         if (deepSourceNodeObj && deepSourceNodeObj.node.id !== sourceNodeObj.node.id) {
             console.log('Deep search found alternative source node:', {
                 sourceNodeId: deepSourceNodeObj.node.id,
@@ -504,6 +504,18 @@ async function getReferenceImageFromConnectedNode(currentNode) {
 
     console.log('Successfully retrieved reference image from connected node');
     return base64Image;
+}
+
+/**
+ * Wrapper to fetch one or more reference images (first frame chosen) from the ref_images input.
+ * Currently returns at most one image because ComfyUI previews expose only a single frame.
+ * @param {Object} currentNode
+ * @returns {Promise<string[]>} array of base64 data URLs (may be empty)
+ */
+async function getReferenceImagesFromConnectedNode(currentNode) {
+    const first = await getReferenceImageFromConnectedNode(currentNode, 'ref_images');
+    if (!first) return [];
+    return [first];
 }
 
 /**
@@ -627,4 +639,4 @@ function isImageNode(node) {
 }
 
 // Export functions for use in other modules
-export { findConnectedSourceNode, findDeepSourceNode, extractImageFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode };
+export { findConnectedSourceNode, findDeepSourceNode, extractImageFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode, getReferenceImagesFromConnectedNode };

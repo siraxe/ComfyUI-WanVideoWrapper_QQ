@@ -1,5 +1,7 @@
 import { app } from '../../../scripts/app.js';
 import { PowerSplineWidget } from './spline_utils.js';
+import { HandDrawLayerWidget } from './handdraw_layer.js';
+import { BoxLayerWidget } from './box_layer.js';
 import { updateDrivenConfigValue, updateEasingConfigValue } from './persistence.js';
 
 // Helper to create interactive number input with arrows and drag support
@@ -496,8 +498,10 @@ export function showInterpolationMenu(event, widget, position) {
         transform: translateX(-40%) !important;
     `;
 
-    const options = ['linear', 'cardinal', 'basis', 'points', 'box'];
-    const current = widget.value.interpolation || 'linear';
+    // Check if this is a box layer
+    const isBoxLayer = widget.value && widget.value.type === 'box_layer';
+    const options = isBoxLayer ? ['linear', 'basis'] : ['linear', 'cardinal', 'basis', 'points'];
+    const current = isBoxLayer ? (widget.value.box_interpolation || 'linear') : (widget.value.interpolation || 'linear');
 
     const list = document.createElement('div');
     list.style.cssText = `
@@ -521,7 +525,12 @@ export function showInterpolationMenu(event, widget, position) {
         item.onclick = (e) => {
             e.stopPropagation();
             const w = widget;
-            w.value.interpolation = opt;
+            // Check if this is a box layer to update the correct value field
+            if (w.value && w.value.type === 'box_layer') {
+                w.value.box_interpolation = opt;
+            } else {
+                w.value.interpolation = opt;
+            }
             const node = w.parent;
             if (node?.layerManager?.getActiveWidget() === w && node.editor?.layerRenderer) {
                 node.editor.layerRenderer.render();
@@ -684,7 +693,13 @@ export function getSlotInPosition(canvasX, canvasY) {
 
             if (canvasY >= widgetTop && canvasY <= widgetBottom) {
                 // Found the widget at this position
-                if (widget.name?.startsWith("spline_")) {
+                const isSplineLike =
+                    (widget instanceof PowerSplineWidget) ||
+                    (widget instanceof HandDrawLayerWidget) ||
+                    (widget instanceof BoxLayerWidget) ||
+                    widget.name?.startsWith("spline_") ||
+                    widget.name?.startsWith("box_");
+                if (isSplineLike) {
                     // Use the actual hitAreas.drivenToggle.bounds from the widget
                     if (widget.hitAreas && widget.hitAreas.drivenToggle) {
                         const drivenToggleBounds = widget.hitAreas.drivenToggle.bounds;
@@ -756,8 +771,15 @@ export function showCustomLayerMenu(event, widget, node, position) {
         font-size: 11px !important;
     `;
 
-    const splineWidgets = node.widgets.filter(w => w.name?.startsWith("spline_"));
+    const splineWidgets = node.widgets.filter(w =>
+        (w instanceof PowerSplineWidget) ||
+        (w instanceof HandDrawLayerWidget) ||
+        (w instanceof BoxLayerWidget) ||
+        w.name?.startsWith("spline_") ||
+        w.name?.startsWith("box_")
+    );
     const splineIndex = splineWidgets.indexOf(widget);
+    const isBoxLayerWidget = (widget instanceof BoxLayerWidget) || widget.name?.startsWith("box_");
     const canMoveUp = splineIndex > 0;
     const canMoveDown = splineIndex < splineWidgets.length - 1;
 
@@ -897,13 +919,18 @@ export function showCustomLayerMenu(event, widget, node, position) {
         node.setDirtyCanvas(true, true);
     }, !canMoveDown));
 
-    menu.appendChild(createMenuItem('🗑️', 'Remove', () => {
-        if (node.widgets.filter(w => w instanceof PowerSplineWidget).length > 1) {
-            node.layerManager.removeSpline(widget);
-        } else {
-            console.log("Cannot remove the last spline layer.");
-        }
+    if (isBoxLayerWidget) {
+        const hasPoints = Array.isArray(widget.value?.box_keys) && widget.value.box_keys.length > 0;
+        menu.appendChild(createMenuItem('[]', 'Clear All Points', () => {
+            widget.onClearAllClick?.(event ?? null, null, node);
+            node?.setDirtyCanvas?.(true, true);
+        }, !hasPoints));
+    }
+
+    menu.appendChild(createMenuItem('???', 'Remove', () => {
+        node.layerManager.removeSpline(widget);
     }));
+
 
     document.body.appendChild(menu);
     console.log("Layer menu appended to body, position:", position);
@@ -1041,7 +1068,15 @@ export function getSlotMenuOptions(slot, event) {
     }
 
     // Check if the slot is for a spline widget (layer right-click)
-    if (slot?.widget?.name?.startsWith("spline_")) {
+    const widget = slot?.widget;
+    const isLayerWidget = widget &&
+        ((widget instanceof PowerSplineWidget) ||
+            (widget instanceof HandDrawLayerWidget) ||
+            (widget instanceof BoxLayerWidget) ||
+            widget.name?.startsWith("spline_") ||
+            widget.name?.startsWith("box_"));
+
+    if (isLayerWidget) {
         const canvas = app.canvas;
 
         // Try multiple ways to get the screen position
@@ -1075,7 +1110,7 @@ export function getSlotMenuOptions(slot, event) {
 
         // Use a slight delay to ensure the menu shows after the event completes
         setTimeout(() => {
-            showCustomLayerMenu(event, slot.widget, this, { x, y });
+            showCustomLayerMenu(event, widget, this, { x, y });
         }, 10);
 
         // Return false to prevent LiteGraph from showing its default menu
