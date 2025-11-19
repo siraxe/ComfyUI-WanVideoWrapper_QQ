@@ -214,22 +214,35 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             if apply_scale_to_offset is None:
                 apply_scale_to_offset = driver_info.get('driver_type') != 'box'
 
-            # For box drivers, make the offset purely translational so that
-            # driven points follow only the box's positional change. Box
-            # scale / radius_delta should not expand or contract the offset
-            # applied to other layers.
+            # For box drivers, keep the offset purely translational in terms of
+            # box radius/scale, but still allow d_scale (D_scale) to scale how
+            # much of the box motion is applied to driven layers.
             if driver_info.get('driver_type') == 'box':
-                d_scale = 1.0
-                driver_scale_factor = 1.0
-                driver_radius_delta = 0.0
+                driver_scale_factor = 1.0  # ignore box scale for offsets
+                driver_radius_delta = 0.0  # no radial push from box radius
+                apply_scale_to_offset = True  # ensure d_scale affects offset
 
-            return calculate_driver_offset(
+            offset_x, offset_y = calculate_driver_offset(
                 eff_frame, driver_path, (0, 0), total_frames, d_scale,
                 frame_width, frame_height, driver_scale_factor=driver_scale_factor,
                 driver_radius_delta=driver_radius_delta,
                 driver_path_normalized=driver_path_normalized,
                 apply_scale_to_offset=apply_scale_to_offset
             )
+
+            rotate_degrees = driver_info.get('rotate', 0.0)
+            if rotate_degrees and rotate_degrees != 0.0:
+                try:
+                    angle_rad = math.radians(float(rotate_degrees))
+                    cos_a = math.cos(angle_rad)
+                    sin_a = math.sin(angle_rad)
+                    rx = offset_x * cos_a - offset_y * sin_a
+                    ry = offset_x * sin_a + offset_y * cos_a
+                    offset_x, offset_y = rx, ry
+                except Exception:
+                    pass
+
+            return offset_x, offset_y
 
         def _accumulate_driver_offsets(driver_info: Optional[Dict[str, Any]], base_frame_index: int) -> Tuple[float, float]:
             if not driver_info:
@@ -824,6 +837,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
             for idx, driver_info in enumerate(static_points_driver_info_list):
                 if driver_info and isinstance(driver_info, dict):
                     driver_path = driver_info.get('path')
+                    driver_rotate = driver_info.get('rotate', 0.0)
                     driver_d_scale = driver_info.get('d_scale', DRIVER_SCALE_FACTOR)
 
                     # Use driver's own interpolation parameters if available, otherwise fall back to defaults
@@ -834,7 +848,8 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
                     if driver_path and len(driver_path) > 0:
                         interpolated = process_driver_path(
                             driver_path, total_frames, static_points_driver_smooth,
-                            driver_easing_function, driver_easing_path, driver_easing_strength, TRAILING_WEIGHT_FACTOR
+                            driver_easing_function, driver_easing_path, driver_easing_strength,
+                            TRAILING_WEIGHT_FACTOR, rotate_degrees=driver_rotate
                         )
                         if interpolated:
                             scale_profile = driver_info.get('driver_scale_profile', [])
@@ -855,6 +870,7 @@ Locations are center locations. Allows coordinates outside the frame for 'fly-in
 
                             static_points_interpolated_drivers[idx] = {
                                 'path': interpolated,
+                                'rotate': driver_rotate,
                                 'd_scale': driver_d_scale,
                                 'easing_function': driver_easing_function,
                                 'easing_path': driver_easing_path,

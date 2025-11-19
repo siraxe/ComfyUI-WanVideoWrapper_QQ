@@ -524,13 +524,21 @@ def process_driver_path(
     easing_path: str,
     easing_strength: float,
     trailing_weight_factor: float = 0.5,
+    rotate_degrees: float = 0.0,
 ) -> Optional[List[Dict[str, Any]]]:
     if not raw_path:
         return None
     try:
-        if len(raw_path) != total_frames:
+        source_path = raw_path
+        if rotate_degrees and rotate_degrees != 0.0:
+            try:
+                source_path = draw_utils.rotate_path(source_path, rotate_degrees)
+            except Exception:
+                source_path = raw_path
+
+        if len(source_path) != total_frames:
             processed = draw_utils.InterpMath.interpolate_or_downsample_path(
-                raw_path,
+                source_path,
                 total_frames,
                 easing_function,
                 easing_path,
@@ -538,7 +546,7 @@ def process_driver_path(
                 easing_strength=easing_strength,
             )
         else:
-            processed = [dict(p) for p in raw_path]
+            processed = [dict(p) for p in source_path]
 
         if smooth_strength and smooth_strength > 0.0 and len(processed) > 2:
             smoothed = [processed[0].copy()]
