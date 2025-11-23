@@ -1,7 +1,6 @@
 import io
 import json
 import torch
-import base64
 import math
 
 from torchvision import transforms
@@ -22,8 +21,8 @@ class PowerSplineEditor:
                 "bg_img": (["None", "A", "B", "C"], {"default": "None", "tooltip": "Select background image to overlay at 60% opacity"}),
             },
             "optional": {
-                "bg_image": ("IMAGE", ),
-                "ref_images": ("IMAGE", ),
+                "bg_image": ("IMAGE", {"forceInput": True} ),
+                "ref_images": ("IMAGE", {"forceInput": True}),
                 "frames": ("INT", {"forceInput": True}),
             }
         }
@@ -379,12 +378,16 @@ class PowerSplineEditor:
                 if cur_key['frame'] <= frame_value <= next_key['frame']:
                     span = next_key['frame'] - cur_key['frame']
                     t = 0.0 if span <= 0 else (frame_value - cur_key['frame']) / span
+                    # Interpolate rotation without wrapping - this allows unlimited rotation
+                    cur_rot = cur_key.get('boxR', 0.0)
+                    next_rot = next_key.get('boxR', 0.0)
+                    interpolated_rot = cur_rot + (next_rot - cur_rot) * t
                     return {
                         'frame': frame_value,
                         'x': cur_key['x'] * (1 - t) + next_key['x'] * t,
                         'y': cur_key['y'] * (1 - t) + next_key['y'] * t,
                         'scale': cur_key['scale'] * (1 - t) + next_key['scale'] * t,
-                        'boxR': cur_key.get('boxR', 0.0) * (1 - t) + next_key.get('boxR', 0.0) * t,
+                        'boxR': interpolated_rot,
                     }
             return keys[-1]
 
@@ -491,6 +494,9 @@ class PowerSplineEditor:
         all_p_drivers = []  # Driver info for p_coordinates
         all_coord_drivers = []  # Driver info for coordinates
         all_box_drivers = []  # Driver info for box coordinates
+        all_p_ref_selections = []  # Ref selections for p_coordinates
+        all_coord_ref_selections = []  # Ref selections for coordinates
+        all_box_ref_selections = []  # Ref selections for box coordinates
 
         # Build layer lookup map for driver processing
         # Map layer names to their processed coordinates for driving
@@ -569,6 +575,9 @@ class PowerSplineEditor:
             # Get scale parameter
             scale = spline_data.get('scale', 1.00) # Get scale value
             offset = int(spline_data.get('offset', 0)) # Get offset value
+
+            # Get ref_selection parameter (for box layers)
+            ref_selection = spline_data.get('ref_selection', 'no_ref')
 
             # Parse control points
             try:
@@ -737,6 +746,7 @@ class PowerSplineEditor:
                     all_coord_scales.append(scale)
                     all_coord_drivers.append(driver_info_for_layer)
                     all_coord_visibility.append(is_on)
+                    all_coord_ref_selections.append(ref_selection)
                 elif spline_interpolation == 'points':
                     all_p_paths.append(spline_coords)
                     all_p_names.append(spline_data.get('name', ''))
@@ -752,6 +762,7 @@ class PowerSplineEditor:
                     all_p_scales.append(scale) # Collect scale value
                     all_p_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
                     all_p_visibility.append(is_on)
+                    all_p_ref_selections.append(ref_selection)
                 elif spline_interpolation == 'box':
                     all_box_paths.append(spline_coords)
                     all_box_names.append(spline_data.get('name', ''))
@@ -767,6 +778,7 @@ class PowerSplineEditor:
                     all_box_scales.append(scale)
                     all_box_drivers.append(driver_info_for_layer)
                     all_box_visibility.append(is_on)
+                    all_box_ref_selections.append(ref_selection)
                 else:
                     all_coord_paths.append(spline_coords)
                     all_coord_names.append(spline_data.get('name', ''))
@@ -782,6 +794,7 @@ class PowerSplineEditor:
                     all_coord_scales.append(scale) # Collect scale value
                     all_coord_drivers.append(driver_info_for_layer)  # Collect driver info (None if no driver)
                     all_coord_visibility.append(is_on)
+                    all_coord_ref_selections.append(ref_selection)
 
             except (json.JSONDecodeError, TypeError) as e:
                 print(f"Warning: Could not parse spline coordinates: {e}")
@@ -813,6 +826,7 @@ class PowerSplineEditor:
             all_coord_scales = list(all_box_scales) + all_coord_scales
             all_coord_drivers = list(all_box_drivers) + all_coord_drivers
             all_coord_visibility = list(all_box_visibility) + all_coord_visibility
+            all_coord_ref_selections = list(all_box_ref_selections) + all_coord_ref_selections
 
         # Build output data structure
         coord_out_data = {}
@@ -831,6 +845,7 @@ class PowerSplineEditor:
                 p_end_out = all_p_end_frames[0] if all_p_end_frames else 0
 
         # Add coordinates if present
+        # Note: box coordinates have been merged into all_coord_paths above
         c_start_out = []
         c_end_out = []
         if all_coord_paths:
@@ -843,18 +858,10 @@ class PowerSplineEditor:
                 c_start_out = all_coord_start_frames[0] if all_coord_start_frames else 0
                 c_end_out = all_coord_end_frames[0] if all_coord_end_frames else 0
 
-        # Add box coordinates if present
-        b_start_out = []
-        b_end_out = []
-        if all_box_paths:
-            if len(all_box_paths) > 1:
-                coord_out_data["box_coordinates"] = all_box_paths
-                b_start_out = all_box_start_frames
-                b_end_out = all_box_end_frames
-            else:
-                coord_out_data["box_coordinates"] = all_box_paths[0]
-                b_start_out = all_box_start_frames[0] if all_box_start_frames else 0
-                b_end_out = all_box_end_frames[0] if all_box_end_frames else 0
+        # Note: We don't output box_coordinates separately anymore since they're merged into coordinates
+        # This preserves the original b_start_out and b_end_out for metadata
+        b_start_out = all_box_start_frames if all_box_paths else []
+        b_end_out = all_box_end_frames if all_box_paths else []
 
         def assemble_meta(p_has, p_val, c_has, c_val, b_has, b_val):
             if not (p_has or c_has or b_has):
@@ -883,6 +890,7 @@ class PowerSplineEditor:
             coord_out_data["names"] = {"p": [], "c": [], "b": []}
             coord_out_data["types"] = {"p": [], "c": [], "b": []}
             coord_out_data["visibility"] = {"p": [], "c": [], "b": []}
+            coord_out_data["ref_selections"] = {"p": [], "c": [], "b": []}
             print("Warning: No paths to output")
         else:
             coord_out_data["start_p_frames"] = assemble_meta(has_p, p_start_out, has_c, c_start_out, has_b, b_start_out)
@@ -898,6 +906,7 @@ class PowerSplineEditor:
             coord_out_data["names"] = assemble_meta(has_p, all_p_names, has_c, all_coord_names, has_b, all_box_names)
             coord_out_data["types"] = assemble_meta(has_p, all_p_types, has_c, all_coord_types, has_b, all_box_types)
             coord_out_data["visibility"] = assemble_meta(has_p, all_p_visibility, has_c, all_coord_visibility, has_b, all_box_visibility)
+            coord_out_data["ref_selections"] = assemble_meta(has_p, all_p_ref_selections, has_c, all_coord_ref_selections, has_b, all_box_ref_selections)
 
         # Include coordinate space dimensions so DrawShapeOnPath can scale if needed
         # Coordinates from the frontend are in normalized 0-1 range
@@ -923,11 +932,11 @@ class PowerSplineEditor:
         ui_out["bg_image_dims"] = [{"width": bg_w, "height": bg_h}]
 
         if ref_images is not None:
-            # Ensure ref_images are on CPU and build lightweight previews for UI
+            # Save ref_images to disk and send paths instead of base64
             if ref_images.device != torch.device('cpu'):
                 ref_images = ref_images.cpu()
             transform = transforms.ToPILImage()
-            ref_previews = []
+            ref_paths = []
             max_preview = min(4, ref_images.shape[0])
             for idx in range(max_preview):
                 img_tensor = ref_images[idx]
@@ -939,14 +948,15 @@ class PowerSplineEditor:
                     img_tensor = torch.clamp(img_tensor, 0, 1)
                 try:
                     image = transform(img_tensor)
-                    buffered = io.BytesIO()
-                    image.save(buffered, format="PNG")
-                    ref_previews.append(base64.b64encode(buffered.getvalue()).decode('utf-8'))
+                    # Save to disk and get relative path
+                    rel_path = self._save_ref_image_to_bg_folder(image, idx)
+                    if rel_path:
+                        ref_paths.append(rel_path)
                 except Exception as e:
                     print(f"Error processing ref_images preview at index {idx}: {e}")
                     break
-            if ref_previews:
-                ui_out["ref_images"] = ref_previews
+            if ref_paths:
+                ui_out["ref_images_paths"] = ref_paths
 
         if bg_image is not None:
             # Ensure bg_image is on CPU before converting
@@ -972,12 +982,9 @@ class PowerSplineEditor:
                 # Save the image directly to the bg folder as bg_image.png
                 self._save_bg_image_to_bg_folder(image)
                 
-                # Also provide the base64 version for the UI (as before)
-                buffered = io.BytesIO()
-                image.save(buffered, format="PNG") # Use PNG to preserve quality for display
-                img_bytes = buffered.getvalue()
-                img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-                ui_out["bg_image"] = [img_base64]
+                # Send file path instead of base64 to avoid bloating workflow
+                # The UI can load the image from the saved path
+                ui_out["bg_image_path"] = ["bg/bg_image.png"]
             except Exception as e:
                 print(f"Error processing background image for UI preview: {e}")
 
@@ -1000,20 +1007,44 @@ class PowerSplineEditor:
         return {"ui": ui_out, "result": result}
 
     def _save_bg_image_to_bg_folder(self, image):
-        """Save the reference image directly to the bg folder"""
+        """Save the background image directly to the bg folder"""
         import os
         from pathlib import Path
-        
+
         # Get the bg folder path (relative to this file)
         bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
         bg_folder.mkdir(parents=True, exist_ok=True)
         bg_image_path = bg_folder / "bg_image.png"
-        
+
         # Convert image to RGB if it's not already
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
+
         # Save as JPEG with good quality
         image.save(str(bg_image_path), format="JPEG", quality=95)
-        
-        print(f"Reference image saved to: {bg_image_path}")
+
+        print(f"Background image saved to: {bg_image_path}")
+
+    def _save_ref_image_to_bg_folder(self, image, idx):
+        """Save a reference image to the bg folder and return relative path"""
+        import os
+        from pathlib import Path
+
+        # Get the bg folder path (relative to this file)
+        bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
+        bg_folder.mkdir(parents=True, exist_ok=True)
+
+        # Create unique filename for each ref image
+        ref_image_path = bg_folder / f"ref_image_{idx}.png"
+
+        # Convert image to RGB if it's not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        # Save as JPEG with good quality
+        image.save(str(ref_image_path), format="JPEG", quality=95)
+
+        print(f"Reference image {idx} saved to: {ref_image_path}")
+
+        # Return relative path for UI
+        return f"bg/ref_image_{idx}.png"

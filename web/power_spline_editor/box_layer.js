@@ -1,6 +1,6 @@
 import { RgthreeBaseWidget, drawRoundedRectangle, drawTogglePart, drawNumberWidgetPart, fitString } from './drawing_utils.js';
 import { initializeDrivenConfig, initializeEasingConfig, initializeScaleConfig, toggleDrivenState, prepareDrivenMenu } from './persistence.js';
-import { showCustomEasingMenu, showCustomDrivenToggleMenu, showInterpolationMenu } from './context_menu.js';
+import { showCustomEasingMenu, showCustomDrivenToggleMenu, showInterpolationMenu, showRefSelectionMenu } from './context_menu.js';
 import { app } from '../../../scripts/app.js';
 
 const BOX_TIMELINE_MAX_POINTS = 50;
@@ -16,7 +16,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             toggle: { bounds: [0, 0, 0, 0], onDown: this.onToggleDown },
             name: { bounds: [0, 0, 0, 0] },
             keyButton: { bounds: [0, 0, 0, 0], onClick: this.onKeyClick },
-            playButton: { bounds: [0, 0, 0, 0], onClick: this.onPlayClick },
+            refSelect: { bounds: [0, 0, 0, 0], onClick: this.onRefSelectClick },
             timelinePlay: { bounds: [0, 0, 0, 0], onClick: this.onTimelinePlayClick, onRightDown: this.onTimelinePlayRightDown },
             deleteButton: { bounds: [0, 0, 0, 0], onClick: this.onDeleteClick },
             interpVal: { bounds: [0, 0, 0, 0], onClick: this.onInterpClick },
@@ -48,6 +48,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             _drivenConfig: { driver: '', rotate: 0, d_scale: 1.0 },
             scale: 1.00,
             ref_attachment: null,
+            ref_selection: 'no_ref',
         };
         if (!Array.isArray(this.value.box_keys)) {
             this.value.box_keys = [];
@@ -55,6 +56,9 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         initializeDrivenConfig(this.value, this.value);
         initializeEasingConfig(this.value, this.value);
         initializeScaleConfig(this.value, this.value);
+        if (!this.value.ref_selection) {
+            this.value.ref_selection = 'no_ref';
+        }
         this._timelineBounds = null;
         this._timelineDragging = false;
         this._timelinePreviewMode = false;
@@ -82,7 +86,14 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
                 const cached = sessionStorage.getItem(key);
                 if (cached) {
                     const parsed = JSON.parse(cached);
-                    if (parsed && parsed.base64) {
+                    // New format stores { attachment, selection }
+                    if (parsed && parsed.attachment) {
+                        this.value.ref_attachment = parsed.attachment;
+                        if (parsed.selection) {
+                            this.value.ref_selection = parsed.selection;
+                        }
+                    } else if (parsed && (parsed.base64 || parsed.path || Array.isArray(parsed.entries))) {
+                        // Legacy direct attachment cache (supports both base64 and path formats)
                         this.value.ref_attachment = parsed;
                     }
                 }
@@ -176,12 +187,14 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         this.hitAreas.deleteButton.bounds = [deleteX, actionY, actionWidth, actionHeight];
         rposX -= actionWidth + 10;
 
-        const playX = rposX - actionWidth;
-        const playPressed = this._isButtonPressed('play');
-        const playLabel = this.value.ref_attachment ? 'Del' : 'Ref';
-        this._drawTextButton(ctx, playX, actionY, actionWidth, actionHeight, playLabel, playPressed);
-        this.hitAreas.playButton.bounds = [playX, actionY, actionWidth, actionHeight];
-        rposX -= actionWidth + 10;
+        const refOptions = this._getRefOptions();
+        const refWidth = 70;
+        const currentRef = this.value.ref_selection || 'no_ref';
+        const refDisplay = refOptions.includes(currentRef) ? currentRef : 'no_ref';
+        ctx.textAlign = 'center';
+        ctx.fillText(refDisplay, rposX - refWidth / 2, posY + mainRowHeight / 2);
+        this.hitAreas.refSelect.bounds = [rposX - refWidth, posY, refWidth, mainRowHeight];
+        rposX -= refWidth + 10;
 
         const easingWidth = 70;
         ctx.textAlign = 'center';
@@ -223,6 +236,25 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         this._drawTimelineRow(ctx, node, margin, detailY, node.size[0] - margin * 2, detailRowHeight);
         this._drawLayerReorderIndicator(ctx, node, posY, widgetHeight);
         ctx.restore();
+    }
+
+    _getRefOptions() {
+        return ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
+    }
+
+    _getSelectedRefAttachmentForWidget(widget, selectionOverride = null) {
+        const ref = widget?.value?.ref_attachment;
+        const selection = selectionOverride || widget?.value?.ref_selection || 'no_ref';
+        if (!ref || selection === 'no_ref') return null;
+        if (Array.isArray(ref.entries)) {
+            const parts = selection.split('_');
+            const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+            const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
+            return ref.entries[arrayIndex] || null;
+        }
+        // Support both base64 (legacy) and path (new) formats
+        if (ref.base64 || ref.path) return ref;
+        return null;
     }
 
     _drawLayerReorderIndicator(ctx, node, posY, widgetHeight) {
@@ -550,17 +582,37 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         return true;
     }
 
-    onPlayClick(event, pos, node) {
-        this._triggerButtonPress('play', node || this.parent);
+    onRefSelectClick(event, pos, node) {
         const host = node || this.parent;
         if (!host) return true;
-        if (this.value.ref_attachment) {
-            host.clearRefImageFromActiveBoxLayer?.();
-            this.value.ref_attachment = null;
-        } else {
-            host.attachRefImageToActiveBoxLayer?.();
-        }
-        host.setDirtyCanvas?.(true, true);
+        const x = event?.clientX ?? 100;
+        const y = event?.clientY ?? 100;
+        showRefSelectionMenu(event, this, { x, y }, async (selection) => {
+            const next = selection || 'no_ref';
+            this.value.ref_selection = next;
+
+            // Clear ref image cache to force reload with new data
+            host.editor?.layerRenderer?.clearRefImageCache?.();
+
+            if (next === 'no_ref') {
+                host.clearRefImageFromActiveBoxLayer?.();
+            } else {
+                // Always refresh images from connected node to pick up any changes
+                await host.attachRefImageToActiveBoxLayer?.(next);
+            }
+            try {
+                const keyId = host.id ?? host.uuid;
+                const key = keyId ? `spline-editor-boxref-${keyId}-${this.value.name || this.name || 'box'}` : null;
+                if (key) {
+                    sessionStorage.setItem(key, JSON.stringify({
+                        attachment: this.value.ref_attachment,
+                        selection: this.value.ref_selection,
+                    }));
+                }
+            } catch {}
+            host.editor?.layerRenderer?.render?.();
+            host.setDirtyCanvas?.(true, true);
+        });
         return true;
     }
     onTimelinePlayClick(event, pos, node) {

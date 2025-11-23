@@ -13,28 +13,17 @@ import { app } from '../../../scripts/app.js';
  */
 function findConnectedSourceNode(currentNode, inputName) {
     try {
-        console.log('Looking for connections for node:', {
-            id: currentNode.id,
-            type: currentNode.type,
-            inputs: currentNode.inputs
-        });
-
         // Look for connections where this node is the target
         const graph = app.graph;
         if (!graph || !graph.links) {
-            console.error('ComfyUI graph or links not available');
             return null;
         }
-
-        // Debug: log all links in the graph
-        console.log('All graph links:', graph.links);
 
         // Find input index for the given input name
         let inputIndex = -1;
         let allInputNames = [];
-        
+
         if (currentNode.inputs) {
-            console.log('Node inputs found:', currentNode.inputs);
             for (let i = 0; i < currentNode.inputs.length; i++) {
                 const input = currentNode.inputs[i];
                 if (input && input.name) {
@@ -46,7 +35,6 @@ function findConnectedSourceNode(currentNode, inputName) {
                 }
             }
         } else {
-            console.log('No inputs property found on current node');
             // Try to get inputs from the node configuration
             if (currentNode.constructor?.nodeData?.input) {
                 const allInputs = {
@@ -67,13 +55,11 @@ function findConnectedSourceNode(currentNode, inputName) {
             }
         }
         
-        console.log(`All input names:`, allInputNames);
-        console.log(`Looking for input "${inputName}", found index:`, inputIndex);
-
-        console.log(`Input "${inputName}" index:`, inputIndex);
+        // DO NOT fallback from ref_image to ref_images - they serve different purposes
+        // ref_image is for background canvas, ref_images is for box layer references
+        // Fallback removed to prevent ref_images[0] from overwriting bg_image.png
 
         if (inputIndex === -1) {
-            console.log(`Input "${inputName}" not found on node ${currentNode.type}`);
             return null;
         }
 
@@ -82,15 +68,7 @@ function findConnectedSourceNode(currentNode, inputName) {
         if (graph.links && graph.links instanceof Map) {
             for (const [linkId, linkObj] of graph.links) {
                 if (!linkObj) continue;
-                
-                console.log('Checking link:', {
-                    id: linkId,
-                    origin_id: linkObj.origin_id,
-                    origin_slot: linkObj.origin_slot,
-                    target_id: linkObj.target_id,
-                    target_slot: linkObj.target_slot
-                });
-                
+
                 if (linkObj.target_id === currentNode.id && linkObj.target_slot === inputIndex) {
                     link = linkObj;
                     break;
@@ -100,24 +78,14 @@ function findConnectedSourceNode(currentNode, inputName) {
             // Fallback if links is an array (older format)
             link = graph.links.find(linkObj => {
                 if (!linkObj) return false;
-                
-                console.log('Checking link:', {
-                    origin_id: linkObj.origin_id,
-                    origin_slot: linkObj.origin_slot,
-                    target_id: linkObj.target_id,
-                    target_slot: linkObj.target_slot
-                });
-                
                 return linkObj.target_id === currentNode.id && linkObj.target_slot === inputIndex;
             });
         } else {
-            console.error('Graph links is not a Map or Array:', typeof graph.links);
             return null;
         }
 
         if (!link) {
-            console.log(`No direct connection found for input "${inputName}" (index: ${inputIndex}) on node ${currentNode.id}`);
-            // Debug: Check what inputs are connected - iterate through the Map
+            // Check what inputs are connected - iterate through the Map
             const connectedLinks = [];
             if (graph.links instanceof Map) {
                 for (const [linkId, linkObj] of graph.links) {
@@ -133,12 +101,9 @@ function findConnectedSourceNode(currentNode, inputName) {
                     }
                 }
             }
-            
-            console.log(`All connected links to this node:`, connectedLinks);
-            
+
             // Alternative approach: try to find any connection that might be the ref_image
             if (connectedLinks.length > 0) {
-                console.log('Found connected links, attempting to match by type or position...');
                 // If we find connected links, try to match based on common patterns
                 // ref_image is typically an IMAGE type input
                 for (const connectedLink of connectedLinks) {
@@ -147,7 +112,6 @@ function findConnectedSourceNode(currentNode, inputName) {
                         // Check if this is likely an image source by checking the source's output type
                         const sourceOutput = sourceNode.outputs?.[connectedLink.origin_slot];
                         if (sourceOutput && (sourceOutput.type === 'IMAGE' || (sourceOutput.name && sourceOutput.name.includes('image')))) {
-                            console.log(`Found possible image source at slot ${connectedLink.target_slot} from node ${sourceNode.type}`);
                             // Return this connection as a possibility
                             return {
                                 node: sourceNode,
@@ -157,13 +121,12 @@ function findConnectedSourceNode(currentNode, inputName) {
                         }
                     }
                 }
-                
+
                 // If we still can't find it by output type, just return the first connection as a fallback
                 // as it might be connected but the type matching isn't working
                 const firstConnectedLink = connectedLinks[0];
                 const firstSourceNode = graph._nodes?.find(node => node.id === firstConnectedLink.origin_id);
                 if (firstSourceNode) {
-                    console.log(`Using fallback: found connection from node ${firstSourceNode.type} at slot ${firstConnectedLink.target_slot}`);
                     return {
                         node: firstSourceNode,
                         origin_slot: firstConnectedLink.origin_slot,
@@ -176,29 +139,15 @@ function findConnectedSourceNode(currentNode, inputName) {
             // The direct match was successful
             // Find the source node based on the link
             const sourceNode = graph._nodes?.find(node => node.id === link.origin_id);
-            
+
             if (!sourceNode) {
-                console.error(`Source node with id ${link.origin_id} not found`);
                 return null;
             }
 
-            console.log(`Found connected source node:`, {
-                sourceNodeId: sourceNode.id,
-                sourceNodeType: sourceNode.type,
-                sourceNodeWidgetValues: sourceNode.widgets ? sourceNode.widgets.map(w => ({name: w.name, type: w.type, value: w.value})) : [],
-                origin_slot: link.origin_slot,
-                target_slot: link.target_slot
-            });
-
             // If the directly connected source node is not an image node, try the deep search approach
             if (!isImageNode(sourceNode)) {
-                console.log('Direct source node is not an image node, trying deep search...');
                 const deepResult = findDeepSourceNode(currentNode, inputName);
                 if (deepResult) {
-                    console.log('Deep search found an image node:', {
-                        sourceNodeId: deepResult.node.id,
-                        sourceNodeType: deepResult.node.type
-                    });
                     return deepResult;
                 }
             }
@@ -239,167 +188,166 @@ function findConnectedSourceNode(currentNode, inputName) {
 }
 
 /**
- * Extract image data from a source node that may contain image previews
+ * Normalize a widget value into a URL/data URL we can fetch.
+ */
+function normalizeImageValue(value, fallbackType = 'temp') {
+    if (!value) return null;
+    if (typeof value === 'string') {
+        if (value.startsWith('data:') || value.startsWith('http')) return value;
+        return `/view?filename=${encodeURIComponent(value)}&type=${fallbackType}`;
+    }
+    if (typeof value === 'object') {
+        if (value.filename) return `/view?filename=${encodeURIComponent(value.filename)}&type=${fallbackType}`;
+        if (value.file) return `/view?filename=${encodeURIComponent(value.file)}&type=${fallbackType}`;
+        if (value.url) return value.url;
+    }
+    return null;
+}
+
+/**
+ * Extract image data from a source node that may contain image previews (single best-effort).
  * @param {Object} sourceNodeObj - Object containing the source node and connection info
  * @returns {string|null} Base64 image data or URL, or null if no image found
  */
 async function extractImageFromSourceNode(sourceNodeObj) {
+    const images = await extractImagesFromSourceNode(sourceNodeObj, true);
+    return images && images.length ? images[0] : null;
+}
+
+/**
+ * Extract one or many image data URLs/base64 strings from a source node.
+ * @param {Object} sourceNodeObj
+ * @param {boolean} includeDomFallback whether to also scan DOM for a single preview
+ * @returns {Promise<string[]>}
+ */
+async function extractImagesFromSourceNode(sourceNodeObj, includeDomFallback = false) {
     if (!sourceNodeObj || !sourceNodeObj.node) {
         console.error('Invalid source node object');
-        return null;
+        return [];
     }
 
     const sourceNode = sourceNodeObj.node;
+    const collected = [];
+    const graph = app.graph;
+
+    const collectFromWidgets = async (widgets, fallbackType = 'temp') => {
+        if (!widgets) return;
+        for (const widget of widgets) {
+            if ((widget.type === 'image' || widget.name?.toLowerCase?.().includes('image')) && widget.value) {
+                // If widget value is an array (batch), gather all
+                if (Array.isArray(widget.value)) {
+                    for (const v of widget.value) {
+                        const normalized = normalizeImageValue(v, fallbackType);
+                        if (normalized) {
+                            const data = await loadImageAsBase64(normalized);
+                            if (data) collected.push(data);
+                        }
+                    }
+                } else {
+                    const normalized = normalizeImageValue(widget.value, fallbackType);
+                    if (normalized) {
+                        const data = await loadImageAsBase64(normalized);
+                        if (data) collected.push(data);
+                    }
+                }
+            }
+        }
+    };
+
+    const collectFromUpstream = async (node, visited = new Set()) => {
+        if (!graph || !graph.links || !node || visited.has(node.id)) return;
+        visited.add(node.id);
+        const inputs = node.inputs || [];
+        for (let i = 0; i < inputs.length; i++) {
+            const linkId = node.inputs[i]?.link;
+            if (!linkId) continue;
+            const link = graph.links.get ? graph.links.get(linkId) : graph.links?.[linkId];
+            if (!link) continue;
+            const upstream = graph._nodes?.find((n) => n.id === link.origin_id);
+            if (upstream) {
+                const nested = await extractImagesFromSourceNode({ node: upstream, origin_slot: link.origin_slot, target_slot: link.target_slot }, false);
+                nested.forEach((img) => collected.push(img));
+                await collectFromUpstream(upstream, visited);
+            }
+        }
+    };
+
     try {
         // Different node types store image data differently
         switch (sourceNode.type) {
             case 'LoadImage':
-            case 'LoadImageUpload':
-                // These nodes typically store image info in widgets or properties
-                if (sourceNode.widgets) {
-                    for (const widget of sourceNode.widgets) {
-                        if (widget.name === 'image' && widget.value) {
-                            console.log('Found image in LoadImage widget:', widget.value);
-                            // Handle different formats that LoadImage might use
-                            if (typeof widget.value === 'string') {
-                                // If it's already a URL or data URL, return it
-                                if (widget.value.startsWith('data:') || widget.value.startsWith('http')) {
-                                    return widget.value;
-                                }
-                                // If it's a filename, try to construct a full URL
-                                return `/view?filename=${encodeURIComponent(widget.value)}&type=input`;
-                            } else if (typeof widget.value === 'object' && widget.value.filename) {
-                                // Object format with filename property
-                                return `/view?filename=${encodeURIComponent(widget.value.filename)}&type=input`;
-                            }
-                        }
-                    }
-                }
-                
-                // Check properties as fallback
+            case 'LoadImageUpload': {
+                await collectFromWidgets(sourceNode.widgets, 'input');
+                if (collected.length) break;
                 if (sourceNode.properties?.value) {
-                    const propValue = sourceNode.properties.value;
-                    if (typeof propValue === 'string') {
-                        if (propValue.startsWith('data:') || propValue.startsWith('http')) {
-                            return propValue;
-                        }
-                        return `/view?filename=${encodeURIComponent(propValue)}&type=input`;
+                    const normalized = normalizeImageValue(sourceNode.properties.value, 'input');
+                    if (normalized) {
+                        const data = await loadImageAsBase64(normalized);
+                        if (data) collected.push(data);
                     }
                 }
                 break;
+            }
 
             case 'VAEDecode':
             case 'PreviewImage':
-            case 'SaveImage':
-                // These nodes display images on the canvas as image widgets
-                if (sourceNode.widgets) {
-                    for (const widget of sourceNode.widgets) {
-                        // Look for image widgets that contain image data
-                        if (widget.type === 'image') {
-                            if (widget.value) {
-                                if (typeof widget.value === 'string') {
-                                    if (widget.value.startsWith('data:') || widget.value.startsWith('http')) {
-                                        console.log('Found image in PreviewImage widget:', widget.value);
-                                        return widget.value;
-                                    }
-                                    return `/view?filename=${encodeURIComponent(widget.value)}&type=temp`;
-                                } else if (typeof widget.value === 'object' && widget.value.filename) {
-                                    console.log('Found image object in PreviewImage widget:', widget.value);
-                                    return `/view?filename=${encodeURIComponent(widget.value.filename)}&type=temp`;
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Look for DOM elements that might contain image data
-                // Find image elements in the node's DOM representation
-                const nodeElements = document.querySelectorAll(`.graphcanvas .node[data-node-id="${sourceNode.id}"] img`);
-                if (nodeElements.length > 0) {
-                    const imgElement = nodeElements[0];
-                    const src = imgElement.src;
-                    if (src && (src.startsWith('data:') || src.startsWith('http'))) {
-                        console.log('Found image in DOM element:', src);
-                        return src;
-                    }
-                }
+            case 'SaveImage': {
+                await collectFromWidgets(sourceNode.widgets, 'temp');
                 break;
+            }
 
             case 'ImageResizeKJv2':  // Handle image processing nodes
             case 'ImageScale':
             case 'ImageScaleBy':
             case 'ImageUpscale':
-            case 'ImageCrop':
-                // These nodes might pass through image data from their inputs
-                // Look for image widgets that might contain processed image data
-                if (sourceNode.widgets) {
-                    for (const widget of sourceNode.widgets) {
-                        if ((widget.type === 'image' || widget.name?.includes('image')) && widget.value) {
-                            console.log(`Found image in ${sourceNode.type} widget:`, widget.value);
-                            
-                            if (typeof widget.value === 'string') {
-                                if (widget.value.startsWith('data:') || widget.value.startsWith('http')) {
-                                    return widget.value;
-                                }
-                                return `/view?filename=${encodeURIComponent(widget.value)}&type=temp`;
-                            } else if (typeof widget.value === 'object') {
-                                if (widget.value.filename) {
-                                    return `/view?filename=${encodeURIComponent(widget.value.filename)}&type=temp`;
-                                }
-                            }
-                        }
-                    }
-                }
-                // Even if no direct image found in widgets, the node might still be connected 
-                // to image data that can be accessed through other means
+            case 'ImageCrop': {
+                await collectFromWidgets(sourceNode.widgets, 'temp');
                 break;
+            }
 
-            default:
-                // For other node types, try to find image-related widgets or properties
-                if (sourceNode.widgets) {
-                    for (const widget of sourceNode.widgets) {
-                        if ((widget.type === 'image' || widget.name?.includes('image') || 
-                             widget.type === 'img' || widget.type === 'file') && widget.value) {
-                            console.log(`Found potential image in ${sourceNode.type} widget:`, widget.value);
-                            
-                            if (typeof widget.value === 'string') {
-                                if (widget.value.startsWith('data:') || widget.value.startsWith('http')) {
-                                    return widget.value;
-                                }
-                                // Try to construct a URL for ComfyUI image endpoints
-                                return `/view?filename=${encodeURIComponent(widget.value)}&type=temp`;
-                            } else if (typeof widget.value === 'object') {
-                                if (widget.value.filename) {
-                                    return `/view?filename=${encodeURIComponent(widget.value.filename)}&type=temp`;
-                                }
-                            }
-                        }
-                    }
+            // Batching/list helpers: expect widgets to hold arrays of images
+            case 'ImageBatch':
+            case 'ImpactMakeImageList':
+            case 'ImpactMakeAnyList': {
+                await collectFromWidgets(sourceNode.widgets, 'temp');
+                // If widgets didn't yield images, try upstream inputs (they may carry batches)
+                if (!collected.length) {
+                    await collectFromUpstream(sourceNode);
                 }
                 break;
+            }
+
+            default: {
+                await collectFromWidgets(sourceNode.widgets, 'temp');
+                break;
+            }
         }
 
-        // If no image found in widgets, try to look for image elements in the DOM
-        // This is a more general approach for nodes that display images directly
-        const canvasContainer = document.querySelector('.graphcanvas') || document.querySelector('#graph-canvas') || document.querySelector('.comfyui-body');
-        if (canvasContainer) {
-            // Look for any image associated with the source node
-            const nodeElement = canvasContainer.querySelector(`[data-node-id="${sourceNode.id}"]`);
-            if (nodeElement) {
-                const imgElements = nodeElement.querySelectorAll('img');
-                for (const img of imgElements) {
-                    if (img.src && (img.src.startsWith('data:') || img.src.startsWith('http'))) {
-                        console.log('Found image in node DOM element:', img.src);
-                        return img.src;
+        if (collected.length) return collected;
+
+        if (includeDomFallback) {
+            // If no image found in widgets, try to look for image elements in the DOM
+            const canvasContainer = document.querySelector('.graphcanvas') || document.querySelector('#graph-canvas') || document.querySelector('.comfyui-body');
+            if (canvasContainer) {
+                // Look for any image associated with the source node
+                const nodeElement = canvasContainer.querySelector(`[data-node-id="${sourceNode.id}"]`);
+                if (nodeElement) {
+                    const imgElements = nodeElement.querySelectorAll('img');
+                    for (const img of imgElements) {
+                        if (img.src && (img.src.startsWith('data:') || img.src.startsWith('http'))) {
+                            console.log('Found image in node DOM element:', img.src);
+                            collected.push(img.src);
+                            break;
+                        }
                     }
                 }
             }
         }
 
-        return null;
+        return collected;
     } catch (error) {
-        console.error(`Error extracting image from source node ${sourceNode.type}:`, error);
-        return null;
+        console.error(`Error extracting image(s) from source node ${sourceNode.type}:`, error);
+        return collected;
     }
 }
 
@@ -513,9 +461,31 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
  * @returns {Promise<string[]>} array of base64 data URLs (may be empty)
  */
 async function getReferenceImagesFromConnectedNode(currentNode) {
-    const first = await getReferenceImageFromConnectedNode(currentNode, 'ref_images');
-    if (!first) return [];
-    return [first];
+    let sourceNodeObj = findConnectedSourceNode(currentNode, 'ref_images');
+    if (!sourceNodeObj) {
+        sourceNodeObj = findDeepSourceNode(currentNode, 'ref_images');
+    }
+
+    let images = [];
+    if (sourceNodeObj) {
+        images = await extractImagesFromSourceNode(sourceNodeObj, true);
+    }
+
+    if ((!images || images.length === 0) && sourceNodeObj) {
+        const deep = findDeepSourceNode(currentNode, 'ref_images');
+        if (deep && deep.node.id !== sourceNodeObj.node.id) {
+            images = await extractImagesFromSourceNode(deep, true);
+        }
+    }
+
+    // Fallback to single-image path
+    if (!images || images.length === 0) {
+        const single = await getReferenceImageFromConnectedNode(currentNode, 'ref_images');
+        if (single) return [single];
+        return [];
+    }
+
+    return images;
 }
 
 /**
@@ -609,9 +579,11 @@ function isImageNode(node) {
     // Check node type for common image-related nodes
     const imageNodeTypes = [
         'LoadImage', 'LoadImageUpload', 'VAEDecode', 'PreviewImage', 'SaveImage',
-        'ImageScale', 'ImageScaleBy', 'ImageResizeKJv2', 'ImageUpscale', 'ImageCrop', 
+        'ImageScale', 'ImageScaleBy', 'ImageResizeKJv2', 'ImageUpscale', 'ImageCrop',
         'ImagePadForOutpaint', 'ImageBatch', 'ImageBlend', 'ImageBlur', 'ImageColorToBW',
-        'ImageFlip', 'ImageOnlyCheckpointLoader', 'ImageApplyProcessing'
+        'ImageFlip', 'ImageOnlyCheckpointLoader', 'ImageApplyProcessing',
+        // Additional list/batch helpers that produce image lists
+        'ImpactMakeImageList', 'ImpactMakeAnyList'
     ];
     if (imageNodeTypes.some(type => node.type && node.type.includes(type))) {
         return true;

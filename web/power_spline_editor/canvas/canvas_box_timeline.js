@@ -139,6 +139,7 @@ export function attachBoxTimelineHelpers(editor) {
       if (clampedFrame > current.frame && clampedFrame < next.frame) {
         const span = next.frame - current.frame;
         const t = span > 0 ? (clampedFrame - current.frame) / span : 0;
+        // Linear interpolation without wrapping - allows unlimited rotation (360+)
         const rotCurrent = resolveRotation(current);
         const rotNext = resolveRotation(next);
         const rotation = rotCurrent + (rotNext - rotCurrent) * t;

@@ -65,12 +65,15 @@ async function loadImageAsBase64(url) {
     }
 }
 
-// Function to save ref_image to bg folder as bg_image.png
-async function saveRefImageToCache(base64Data, name = 'bg_image.png') {
+// Function to save ref_image to cache; default name is ref_image.png (background saves pass an explicit name)
+// options.skipSessionCache avoids writing to the shared session key used for bg overlays
+async function saveRefImageToCache(base64Data, name = 'ref_image.png', options = {}) {
     try {
         // Create a cache key to track the current ref_image
         const currentHash = await simpleHash(base64Data);
-        safeSetSessionItem('spline-editor-ref-image-hash', currentHash);
+        if (!options.skipSessionCache) {
+            safeSetSessionItem('spline-editor-ref-image-hash', currentHash);
+        }
         
         // Try to save the file to the bg folder via the backend API
         try {
@@ -87,19 +90,36 @@ async function saveRefImageToCache(base64Data, name = 'bg_image.png') {
                 const result = await response.json();
                 if (result.success) {
                  
-                    // Save to sessionStorage as backup
-                    safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                        base64: base64Data,
-                        type: 'image/png',
-                        name,
-                        hash: currentHash,
-                        timestamp: Date.now()
-                    }));
+                    // Save to sessionStorage as backup (unless skipped)
+                    if (!options.skipSessionCache) {
+                        safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
+                            base64: base64Data,
+                            type: 'image/png',
+                            name,
+                            hash: currentHash,
+                            timestamp: Date.now()
+                        }));
+                    }
                     
                     return true;
                 } else {
                     console.error('Backend error saving ref image:', result.error);
                     // Fallback to sessionStorage only
+                    if (!options.skipSessionCache) {
+                        safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
+                            base64: base64Data,
+                            type: 'image/png',
+                            name,
+                            hash: currentHash,
+                            timestamp: Date.now()
+                        }));
+                    }
+                    return false;
+                }
+            } else {
+                console.error('Failed to save ref image via API:', response.status);
+                // Fallback to sessionStorage only
+                if (!options.skipSessionCache) {
                     safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
                         base64: base64Data,
                         type: 'image/png',
@@ -107,31 +127,22 @@ async function saveRefImageToCache(base64Data, name = 'bg_image.png') {
                         hash: currentHash,
                         timestamp: Date.now()
                     }));
-                    return false;
                 }
-            } else {
-                console.error('Failed to save ref image via API:', response.status);
-                // Fallback to sessionStorage only
-                safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                    base64: base64Data,
-                    type: 'image/png',
-                    name: 'bg_image.png',
-                    hash: currentHash,
-                    timestamp: Date.now()
-                }));
                 return false;
             }
         } catch (error) {
             console.warn('API save failed, using sessionStorage fallback:', error);
             
             // Fallback to sessionStorage if API fails
-            safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                base64: base64Data,
-                type: 'image/png',
-                name,
-                hash: currentHash,
-                timestamp: Date.now()
-            }));
+            if (!options.skipSessionCache) {
+                safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
+                    base64: base64Data,
+                    type: 'image/png',
+                    name,
+                    hash: currentHash,
+                    timestamp: Date.now()
+                }));
+            }
             
             return true;
         }
@@ -166,6 +177,10 @@ async function getCachedRefImage(currentBase64 = null) {
         }
         
         const parsed = JSON.parse(cachedData);
+        // Guard: only honor caches explicitly saved for bg image overlays
+        if (parsed?.name && parsed.name !== 'bg_image.png') {
+            return null;
+        }
         
         // If current base64 is provided, check if it's different from cached
         if (currentBase64) {
@@ -175,7 +190,7 @@ async function getCachedRefImage(currentBase64 = null) {
                 return parsed;
             } else {
                 // Different image, update cache
-                await saveRefImageToCache(currentBase64);
+                await saveRefImageToCache(currentBase64, 'bg_image.png');
                 return JSON.parse(sessionStorage.getItem('spline-editor-cached-ref-image'));
             }
         }
@@ -963,7 +978,7 @@ app.registerExtension({
                             base64: base64Image.split(',')[1],
                             type: 'image/jpeg'
                         };
-                        try { await saveRefImageToCache(this.originalRefImageData.base64); } catch {}
+                        try { await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png'); } catch {}
                         if (this.uuid) {
                             sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
                         }
@@ -1132,7 +1147,7 @@ app.registerExtension({
                             this.editor.refreshBackgroundImage();
                         };
                         img.onerror = () => {
-                            // Fallback: try to load cached ref_image first, then default A.jpg
+                            // Fallback: try to load cached bg_image first, then default A.jpg
                             loadCachedRefImageAsBase64().then(cachedImageUrl => {
                                 if (cachedImageUrl) {
                                     const fallbackImg = new Image();
@@ -1188,7 +1203,7 @@ app.registerExtension({
                         // Use the original ref image data to create a data URL
                         img.src = `data:image/jpeg;base64,${this.originalRefImageData.base64}`;
                     } else {
-                        // If no original ref image data, try to load cached ref_image first, then fallback to default
+                        // If no original ref image data, try to load cached bg_image first, then fallback to default
                         loadCachedRefImageAsBase64().then(cachedImageUrl => {
                             if (cachedImageUrl) {
                                 const img = new Image();
@@ -1304,7 +1319,7 @@ app.registerExtension({
                     };
 
                     // Cache the ref image for future use
-                    await saveRefImageToCache(this.originalRefImageData.base64);
+                await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png');
                     
                     // Clear session storage cache for this node's image to force refresh
                     if (this.uuid) {
@@ -1329,8 +1344,8 @@ app.registerExtension({
                 }
             }.bind(this);
 
-            // Attach ref_images input to the active box layer (Ref -> Del behavior)
-            this.attachRefImageToActiveBoxLayer = async function() {
+            // Attach ref_images input to the active box layer (Ref selection)
+            this.attachRefImageToActiveBoxLayer = async function(desiredSelection = 'ref_1') {
                 const activeWidget = this.layerManager?.getActiveWidget?.();
                 if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
                     alert('Activate a box layer first to attach a ref image.');
@@ -1344,46 +1359,82 @@ app.registerExtension({
                     return;
                 }
 
-                const chosen = images[0];
-                const base64Data = chosen.startsWith('data:')
-                    ? chosen.split(',')[1]
-                    : chosen;
-                const dataUrl = chosen.startsWith('data:')
-                    ? chosen
-                    : `data:image/png;base64,${base64Data}`;
+                const attachments = [];
+                const maxRefs = 5;
+                for (let i = 0; i < Math.min(images.length, maxRefs); i++) {
+                    const imgData = images[i];
+                    const base64Data = imgData.startsWith('data:')
+                        ? imgData.split(',')[1]
+                        : imgData;
+                    const dataUrl = imgData.startsWith('data:')
+                        ? imgData
+                        : `data:image/png;base64,${base64Data}`;
 
-                // Load dimensions to fit the box without stretching
-                const dims = await new Promise((resolve) => {
-                    const img = new Image();
-                    img.onload = () => resolve({ width: img.width, height: img.height });
-                    img.onerror = () => resolve({ width: 1, height: 1 });
-                    img.src = dataUrl;
-                });
+                    // Load dimensions to fit the box without stretching
+                    // eslint-disable-next-line no-await-in-loop
+                    const dims = await new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve({ width: img.width, height: img.height });
+                        img.onerror = () => resolve({ width: 1, height: 1 });
+                        img.src = dataUrl;
+                    });
 
-                activeWidget.value.ref_attachment = {
-                    base64: base64Data,
-                    type: 'image/png',
-                    width: dims.width,
-                    height: dims.height,
-                    name: 'ref_image_0.png'
-                };
+                    // Save image to disk and store path instead of base64
+                    const filename = `ref_image_${i}.png`;
+                    // eslint-disable-next-line no-await-in-loop
+                    await saveRefImageToCache(base64Data, filename);
 
-                // Persist per-layer in sessionStorage for reloads
+                    attachments.push({
+                        path: `bg/${filename}`,  // Store file path instead of base64
+                        type: 'image/png',
+                        width: dims.width,
+                        height: dims.height,
+                        name: filename
+                    });
+                }
+
+                activeWidget.value.ref_attachment = { entries: attachments };
+
+                // Clear ref image cache when new attachments are loaded to prevent stale images
+                if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
+                    this.layerRenderer.clearRefImageCache();
+                    // Force render to update displayed reference image with new timestamp
+                    this.layerRenderer.render();
+                }
+
+                const availableOptions = activeWidget._getRefOptions ? activeWidget._getRefOptions() : ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
+                const desiredIdx = desiredSelection && availableOptions.includes(desiredSelection)
+                    ? Math.max(0, (parseInt(desiredSelection.split('_')[1], 10) || 1) - 1)
+                    : 0;
+                if (attachments.length === 0 || desiredIdx >= attachments.length) {
+                    activeWidget.value.ref_selection = 'no_ref';
+                } else {
+                    const clampedIndex = Math.min(attachments.length - 1, desiredIdx);
+                    activeWidget.value.ref_selection = `ref_${clampedIndex + 1}`;
+                }
+
+                // Persist per-layer in sessionStorage for reloads (store attachment + selection)
                 try {
                     const keyId = this.id ?? this.uuid;
                     const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
                     if (key) {
-                        sessionStorage.setItem(key, JSON.stringify(activeWidget.value.ref_attachment));
+                        sessionStorage.setItem(key, JSON.stringify({
+                            attachment: activeWidget.value.ref_attachment,
+                            selection: activeWidget.value.ref_selection,
+                        }));
                     }
                 } catch (e) {
                     console.warn('Failed to persist box ref attachment to session:', e);
                 }
 
+                // Clear global ref cache so background overlay does not use ref_images batch
+                try { sessionStorage.removeItem('spline-editor-cached-ref-image'); } catch {}
+
                 // Save all frames (first + any extras) to disk as numbered PNGs
                 for (let i = 0; i < images.length; i++) {
                     const imgData = images[i];
                     const b64 = imgData.startsWith('data:') ? imgData.split(',')[1] : imgData;
-                    await saveRefImageToCache(b64, `ref_image_${i}.png`);
+                    await saveRefImageToCache(b64, `ref_image_${i}.png`, { skipSessionCache: true });
                 }
 
                 // Refresh canvas
@@ -1396,6 +1447,7 @@ app.registerExtension({
                 const activeWidget = this.layerManager?.getActiveWidget?.();
                 if (activeWidget && activeWidget.value?.type === 'box_layer') {
                     activeWidget.value.ref_attachment = null;
+                    activeWidget.value.ref_selection = 'no_ref';
                     try {
                         const keyId = this.id ?? this.uuid;
                         const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
@@ -1405,21 +1457,112 @@ app.registerExtension({
                 }
             }.bind(this);
 
+            // Update ref attachments for all box layers from connected ref_images
+            this.updateAllBoxLayerRefs = async function() {
+                const widgets = this.layerManager?.getSplineWidgets?.() || [];
+                const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
+                if (!boxWidgets.length) return;
+
+                // Clear ref image cache to force reload of all images
+                if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
+                    this.layerRenderer.clearRefImageCache();
+                }
+
+                // Fetch images from ref_images input (first frame used)
+                const images = await getReferenceImagesFromConnectedNode(this);
+                if (!images || images.length === 0) {
+                    console.warn('No ref_images input found for updating box layer refs.');
+                    return;
+                }
+
+                const attachments = [];
+                const maxRefs = 5;
+                for (let i = 0; i < Math.min(images.length, maxRefs); i++) {
+                    const imgData = images[i];
+                    const base64Data = imgData.startsWith('data:')
+                        ? imgData.split(',')[1]
+                        : imgData;
+                    const dataUrl = imgData.startsWith('data:')
+                        ? imgData
+                        : `data:image/png;base64,${base64Data}`;
+
+                    // Load dimensions to fit the box without stretching
+                    // eslint-disable-next-line no-await-in-loop
+                    const dims = await new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve({ width: img.width, height: img.height });
+                        img.onerror = () => resolve({ width: 1, height: 1 });
+                        img.src = dataUrl;
+                    });
+
+                    // Save image to disk and store path instead of base64
+                    const filename = `ref_image_${i}.png`;
+                    // eslint-disable-next-line no-await-in-loop
+                    await saveRefImageToCache(base64Data, filename);
+
+                    attachments.push({
+                        path: `bg/${filename}`,
+                        type: 'image/png',
+                        width: dims.width,
+                        height: dims.height,
+                        name: filename
+                    });
+                }
+
+                // Update all box layers with the new attachments
+                boxWidgets.forEach(boxWidget => {
+                    const currentSelection = boxWidget.value.ref_selection || 'no_ref';
+                    boxWidget.value.ref_attachment = { entries: attachments };
+
+                    // Keep current selection if it's still valid, otherwise set to no_ref
+                    if (currentSelection !== 'no_ref') {
+                        const parts = currentSelection.split('_');
+                        const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+                        const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
+                        if (arrayIndex >= attachments.length) {
+                            boxWidget.value.ref_selection = 'no_ref';
+                        }
+                        // Otherwise keep the existing selection
+                    }
+
+                    // Persist to sessionStorage
+                    try {
+                        const keyId = this.id ?? this.uuid;
+                        const key = keyId ? `spline-editor-boxref-${keyId}-${boxWidget.value.name || boxWidget.name || 'box'}` : null;
+                        if (key) {
+                            sessionStorage.setItem(key, JSON.stringify({
+                                attachment: boxWidget.value.ref_attachment,
+                                selection: boxWidget.value.ref_selection,
+                            }));
+                        }
+                    } catch (e) {
+                        console.warn('Failed to persist box ref attachment to session:', e);
+                    }
+                });
+
+                // Clear global ref cache
+                try { sessionStorage.removeItem('spline-editor-cached-ref-image'); } catch {}
+
+                // Save all frames to disk
+                for (let i = 0; i < images.length; i++) {
+                    const imgData = images[i];
+                    const b64 = imgData.startsWith('data:') ? imgData.split(',')[1] : imgData;
+                    await saveRefImageToCache(b64, `ref_image_${i}.png`, { skipSessionCache: true });
+                }
+
+                // Clear ref image cache again after all images saved to force reload with new images
+                this.editor?.layerRenderer?.clearRefImageCache?.();
+
+                // Refresh canvas
+                this.setDirtyCanvas(true, true);
+            }.bind(this);
+
             // Add method to handle frames input refresh and box layer keyframe scaling
             this.handleFramesRefresh = function() {
                 console.log('Handling frames refresh...');
 
                 try {
-                    // Step 1: Check if we have a "frames" input connected
-                    const framesInputValue = this.getInputOrProperty('frames');
-                    if (!framesInputValue || typeof framesInputValue !== 'number') {
-                        console.log('No frames input connected or invalid value');
-                        return;
-                    }
-
-                    console.log('Frames input value:', framesInputValue);
-
-                    // Step 2: Find all box type layers in the layer manager
+                    // Step 1: Find all box type layers in the layer manager
                     const boxLayers = [];
                     if (this.widgets) {
                         for (const widget of this.widgets) {
@@ -1436,59 +1579,81 @@ app.registerExtension({
 
                     console.log(`Found ${boxLayers.length} box layer(s)`);
 
-                    // Step 3: Check which box layers have keyframes set
+                    // Step 2: Check which box layers have keyframes set
                     const boxLayersWithKeys = boxLayers.filter(layer => {
                         return layer.value.box_keys && Array.isArray(layer.value.box_keys) && layer.value.box_keys.length > 0;
                     });
 
                     if (boxLayersWithKeys.length === 0) {
                         console.log('No box layers with keyframes found');
-                        return;
+                    } else {
+                        console.log(`Found ${boxLayersWithKeys.length} box layer(s) with keyframes`);
                     }
 
-                    console.log(`Found ${boxLayersWithKeys.length} box layer(s) with keyframes`);
+                    // Step 3: Determine target frames (must come from frames input/property)
+                    const framesInputValue = this.getInputOrProperty('frames');
+                    const hasFramesInput = typeof framesInputValue === 'number' && !Number.isNaN(framesInputValue) && framesInputValue > 0;
+                    if (!hasFramesInput) {
+                        console.log('No frames input connected or invalid value; aborting frames refresh.');
+                        return;
+                    }
+                    const targetFrames = Math.max(1, Math.round(framesInputValue));
+                    console.log('Frames input value:', targetFrames);
 
                     // Step 4: Get current max frames from timeline (import from canvas_constants.js)
                     // We need to dynamically import or access the constant
                     import('./canvas/canvas_constants.js').then(module => {
-                        const currentMaxFrames = module.BOX_TIMELINE_MAX_POINTS || 50;
-                        console.log(`Current max frames: ${currentMaxFrames}, Target frames: ${framesInputValue}`);
+                        const currentMaxFrames = (this.editor?._getMaxFrames?.()) || module.BOX_TIMELINE_MAX_POINTS || 50;
+                        console.log(`Current max frames: ${currentMaxFrames}, Target frames: ${targetFrames}`);
 
-                        if (currentMaxFrames === framesInputValue) {
-                            console.log('Frames already match, no scaling needed');
-                            return;
-                        }
-
-                        // Step 5: Update BOX_TIMELINE_MAX_POINTS
-                        // Note: We can't directly modify the imported constant, but we can update it in the module
-                        // For now, we'll scale the keyframes based on the ratio
-                        const scaleRatio = framesInputValue / currentMaxFrames;
-                        console.log(`Scale ratio: ${scaleRatio}`);
-
-                        // Step 6: Scale/spread the keyframes for each box layer
-                        for (const layer of boxLayersWithKeys) {
-                            const originalKeys = layer.value.box_keys;
-                            const scaledKeys = originalKeys.map(key => {
-                                const newFrame = Math.max(1, Math.min(framesInputValue, Math.round(key.frame * scaleRatio)));
-                                return {
-                                    ...key,
-                                    frame: newFrame
-                                };
-                            });
-
-                            // Remove duplicate frames (keep last one for each frame)
-                            const keysByFrame = new Map();
-                            for (const key of scaledKeys) {
-                                keysByFrame.set(key.frame, key);
+                        const persistMaxFrames = (frames) => {
+                            if (this.editor) {
+                                this.editor._maxFrames = frames;
                             }
-                            layer.value.box_keys = Array.from(keysByFrame.values()).sort((a, b) => a.frame - b.frame);
+                            // Persist in both properties (serialized) and session (fast reload)
+                            this.properties = this.properties || {};
+                            this.properties.box_max_frames = frames;
+                            if (this.uuid) {
+                                safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(frames));
+                            }
+                        };
 
-                            console.log(`Scaled ${originalKeys.length} keys for layer "${layer.value.name}"`);
-                        }
+                        // Determine last keyframe across box layers (if any)
+                        const lastKeyFrame = boxLayersWithKeys.length > 0
+                            ? Math.max(...boxLayersWithKeys.map(layer => Math.max(...layer.value.box_keys.map(k => Math.max(1, Number(k.frame) || 1)))))
+                            : 0;
 
-                        // Step 7: Update the constant dynamically in the editor
-                        if (this.editor) {
-                            this.editor._maxFrames = framesInputValue;
+                        // Step 5: Decide scaling behavior based on target vs current max
+                        if (targetFrames > currentMaxFrames) {
+                            console.log('Extending timeline to target frames; preserving keyframe positions.');
+                            persistMaxFrames(targetFrames);
+                        } else {
+                            if (lastKeyFrame <= targetFrames) {
+                                console.log('Last keyframe within target; shrinking timeline without scaling.');
+                                persistMaxFrames(targetFrames);
+                            } else {
+                                const scaleRatio = targetFrames / currentMaxFrames;
+                                console.log(`Last keyframe exceeds target; scaling keyframes with ratio ${scaleRatio}.`);
+                                if (boxLayersWithKeys.length > 0) {
+                                    for (const layer of boxLayersWithKeys) {
+                                        const originalKeys = layer.value.box_keys;
+                                        const scaledKeys = originalKeys.map(key => {
+                                            const newFrame = Math.max(1, Math.min(targetFrames, Math.round(key.frame * scaleRatio)));
+                                            return { ...key, frame: newFrame };
+                                        });
+
+                                        // Remove duplicate frames (keep last one for each frame)
+                                        const keysByFrame = new Map();
+                                        for (const key of scaledKeys) {
+                                            keysByFrame.set(key.frame, key);
+                                        }
+                                        layer.value.box_keys = Array.from(keysByFrame.values()).sort((a, b) => a.frame - b.frame);
+
+                                        console.log(`Scaled ${originalKeys.length} keys for layer "${layer.value.name}"`);
+                                    }
+                                }
+                                persistMaxFrames(targetFrames);
+                            }
                         }
 
                         // Step 8: Force refresh the editor to show the changes
@@ -1510,12 +1675,22 @@ app.registerExtension({
 
             // Helper method to get input value or property
             this.getInputOrProperty = function(name) {
+                const coerceNumber = (val) => {
+                    if (val === null || val === undefined) return val;
+                    const num = Number(val);
+                    return Number.isNaN(num) ? val : num;
+                };
+
                 // First try to get from connected input
                 if (this.inputs) {
                     const inputIndex = this.inputs.findIndex(i => i.name === name);
                     if (inputIndex >= 0 && this.inputs[inputIndex].link != null) {
                         // Get the link
                         const link = app.graph.links.get(this.inputs[inputIndex].link);
+                        // Prefer explicit link data if available
+                        if (link && link.data !== undefined) {
+                            return coerceNumber(link.data);
+                        }
                         if (link) {
                             // Get the source node
                             const sourceNode = app.graph._nodes.find(n => n.id === link.origin_id);
@@ -1524,22 +1699,52 @@ app.registerExtension({
                                 const outputName = sourceNode.outputs[link.origin_slot].name;
                                 const widget = sourceNode.widgets?.find(w => w.name === outputName || w.name === name);
                                 if (widget) {
-                                    return widget.value;
+                                    return coerceNumber(widget.value);
+                                }
+                                // Fallback to output value on the source node
+                                const outputVal = sourceNode.outputs[link.origin_slot].value;
+                                if (outputVal !== undefined) {
+                                    return coerceNumber(outputVal);
+                                }
+                                // Fallback: first numeric widget on source node
+                                const firstNumericWidget = sourceNode.widgets?.find(w => {
+                                    const num = coerceNumber(w.value);
+                                    return typeof num === 'number' && !Number.isNaN(num);
+                                });
+                                if (firstNumericWidget) {
+                                    return coerceNumber(firstNumericWidget.value);
+                                }
+                                // Fallback: first numeric property on source node
+                                const firstNumericProp = (() => {
+                                    if (!sourceNode.properties) return null;
+                                    for (const val of Object.values(sourceNode.properties)) {
+                                        const num = coerceNumber(val);
+                                        if (typeof num === 'number' && !Number.isNaN(num)) return num;
+                                    }
+                                    return null;
+                                })();
+                                if (firstNumericProp !== null) {
+                                    return firstNumericProp;
                                 }
                             }
+                        }
+                        // Fallback to direct input value if present
+                        const directInputVal = this.inputs[inputIndex].value;
+                        if (directInputVal !== undefined) {
+                            return coerceNumber(directInputVal);
                         }
                     }
                 }
 
                 // Fallback to property
                 if (this.properties && this.properties[name] !== undefined) {
-                    return this.properties[name];
+                    return coerceNumber(this.properties[name]);
                 }
 
                 // Fallback to widget
                 const widget = this.widgets?.find(w => w.name === name);
                 if (widget) {
-                    return widget.value;
+                    return coerceNumber(widget.value);
                 }
 
                 return null;
@@ -1722,6 +1927,19 @@ app.registerExtension({
             element.appendChild(this.splineEditor2.parentEl);
 
             this.editor = new SplineEditor2(this);
+            // Restore persisted max frames for box timelines if available
+            const propMaxFrames = Number(this.properties?.box_max_frames);
+            if (!Number.isNaN(propMaxFrames) && propMaxFrames > 0) {
+                this.editor._maxFrames = propMaxFrames;
+                if (this.uuid) {
+                    safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(propMaxFrames));
+                }
+            } else if (this.uuid) {
+                const savedMaxFrames = Number(sessionStorage.getItem(`spline-editor-maxframes-${this.uuid}`));
+                if (!Number.isNaN(savedMaxFrames) && savedMaxFrames > 0) {
+                    this.editor._maxFrames = savedMaxFrames;
+                }
+            }
             // Expose commit handler for handdraw to the editor/node
             this.commitHanddraw = (points) => {
                 try { commitHanddrawPath(this, points); } catch (e) { console.error('commitHanddraw failed', e); }
@@ -1743,7 +1961,7 @@ app.registerExtension({
             if (this.editor && this.imgData) {
                  this.editor.refreshBackgroundImage();
             } else if (this.editor) {
-                // If no image is loaded from session, first try to load cached ref_image, then fallback to A.jpg
+                // If no image is loaded from session, first try to load cached bg_image, then fallback to A.jpg
                 // First check if we have saved dimensions to maintain proportions
                 let targetWidth, targetHeight;
                 const savedDims = sessionStorage.getItem(`spline-editor-dims-${this.uuid}`);
@@ -1757,7 +1975,7 @@ app.registerExtension({
                     targetHeight = this.properties.bgImageDims.height;
                 }
 
-                // Try to load cached ref_image first
+                // Try to load cached bg_image first
                 loadCachedRefImageAsBase64().then(cachedImageUrl => {
                     if (cachedImageUrl) {
                         this.loadBackgroundImageFromUrl(cachedImageUrl, 'bg_image.png', targetWidth, targetHeight);
@@ -1989,6 +2207,17 @@ app.registerExtension({
               return;
             }
 
+            // Restore persisted max frames for box timelines from properties
+            if (this.editor && this.properties?.box_max_frames) {
+              const propMaxFrames = Number(this.properties.box_max_frames);
+              if (!Number.isNaN(propMaxFrames) && propMaxFrames > 0) {
+                this.editor._maxFrames = propMaxFrames;
+                if (this.uuid) {
+                  safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(propMaxFrames));
+                }
+              }
+            }
+
             const savedSize = [this.size[0], this.size[1]];
             this.layerManager.recreateSplinesFromData(info.widgets_values);
 
@@ -2113,7 +2342,7 @@ app.registerExtension({
                   
                   // Determine which image to load based on the bg_img selection
                   if (bg_img === "None") {
-                      // Try to load cached ref_image first, then fallback to default
+                      // Try to load cached bg_image first, then fallback to default
                       loadCachedRefImageAsBase64().then(cachedImageUrl => {
                           if (cachedImageUrl) {
                               // Apply darkening effect to match onExecuted behavior
@@ -2273,7 +2502,7 @@ app.registerExtension({
             // If a new background image is provided, cache it and then finish execution.
             if (ref_image) {
               // Cache the ref_image for future use
-              saveRefImageToCache(ref_image).then(success => {
+            saveRefImageToCache(ref_image, 'bg_image.png').then(success => {
                 if (success) {
                   console.log('Ref image cached successfully for future use');
                 } else {

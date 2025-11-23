@@ -117,9 +117,11 @@ export class TopRowWidget extends RgthreeBaseWidget {
         this.options = { serialize: false };
         this.value = {};
         this.haveMouseMovedValue = false;
-        this.buttonMouseDown = false;
+        this.canvasButtonMouseDown = false;
+        this.framesButtonMouseDown = false;
         this.hitAreas = {
-            refreshButton: { bounds: [0, 0], onClick: null },
+            refreshCanvasButton: { bounds: [0, 0], onClick: null },
+            refreshFramesButton: { bounds: [0, 0], onClick: null },
             bgImgLeftArrow: { bounds: [0, 0], onClick: null },
             bgImgVal: { bounds: [0, 0], onClick: null },
             bgImgRightArrow: { bounds: [0, 0], onClick: null },
@@ -151,32 +153,44 @@ export class TopRowWidget extends RgthreeBaseWidget {
         const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
         
         // Calculate available width for components (excluding margins and spacing)
-        const availableWidth = node.size[0] - margin * 2 - spacing * 3; // Account for spacing between elements
+        const availableWidth = node.size[0] - margin * 2 - spacing * 4; // Account for spacing between elements
         
         // Calculate component widths based on percentages (now totaling 100% of available width)
-        const refreshButtonWidth = availableWidth * 0.15;
-        const bgImgDropdownWidth = availableWidth * 0.15;
+        const refreshCanvasWidth = availableWidth * 0.12;
+        const refreshFramesWidth = availableWidth * 0.12;
+        const bgImgDropdownWidth = availableWidth * 0.14;
         const iconButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
         const dimensionsAreaWidth = availableWidth - (
-            refreshButtonWidth + spacing +
+            refreshCanvasWidth + spacing +
+            refreshFramesWidth + spacing +
             bgImgDropdownWidth + spacing +
             iconButtonWidth
         );
         
         // Calculate total width and starting position to center everything
-        const totalWidth = refreshButtonWidth + spacing + bgImgDropdownWidth + spacing + iconButtonWidth + spacing + dimensionsAreaWidth;
+        const totalWidth = refreshCanvasWidth + spacing + refreshFramesWidth + spacing + bgImgDropdownWidth + spacing + iconButtonWidth + spacing + dimensionsAreaWidth;
         const startX = margin; // Start from left margin instead of centering
         let posX = startX;
         
-        // Draw Refresh button
+        // Draw Refresh Canvas button
         drawWidgetButton(
             ctx,
-            { size: [refreshButtonWidth, height], pos: [posX, posY] },
-            "Refresh",
-            this.buttonMouseDown
+            { size: [refreshCanvasWidth, height], pos: [posX, posY] },
+            "🔃 Canvas",
+            this.canvasButtonMouseDown
         );
-        this.hitAreas.refreshButton.bounds = [posX, refreshButtonWidth];
-        posX += refreshButtonWidth + spacing;
+        this.hitAreas.refreshCanvasButton.bounds = [posX, refreshCanvasWidth];
+        posX += refreshCanvasWidth + spacing;
+
+        // Draw Refresh Frames button
+        drawWidgetButton(
+            ctx,
+            { size: [refreshFramesWidth, height], pos: [posX, posY] },
+            "🕞 Frames",
+            this.framesButtonMouseDown
+        );
+        this.hitAreas.refreshFramesButton.bounds = [posX, refreshFramesWidth];
+        posX += refreshFramesWidth + spacing;
         
         // Draw bg_img control with left/right arrows
         const arrowWidth = 7; // Smaller arrows
@@ -313,7 +327,16 @@ export class TopRowWidget extends RgthreeBaseWidget {
         this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
         
         // Set up event handlers for refresh button
-        this.hitAreas.refreshButton.onClick = () => {
+        this.hitAreas.refreshCanvasButton.onClick = async () => {
+            // Update all box layer ref images from connected ref_images
+            if (node.updateAllBoxLayerRefs) {
+                try {
+                    await node.updateAllBoxLayerRefs();
+                } catch (e) {
+                    console.warn('Failed to update box layer refs:', e);
+                }
+            }
+
             if (node.updateReferenceImageFromConnectedNode) {
                 node.updateReferenceImageFromConnectedNode();
             }
@@ -322,6 +345,28 @@ export class TopRowWidget extends RgthreeBaseWidget {
             if (node.handleFramesRefresh) {
                 node.handleFramesRefresh();
             }
+        };
+        this.hitAreas.refreshCanvasButton.onDown = () => {
+            this.canvasButtonMouseDown = true;
+            node.setDirtyCanvas(true, false);
+        };
+        this.hitAreas.refreshCanvasButton.onUp = () => {
+            this.canvasButtonMouseDown = false;
+            node.setDirtyCanvas(true, false);
+        };
+
+        this.hitAreas.refreshFramesButton.onClick = () => {
+            if (node.handleFramesRefresh) {
+                node.handleFramesRefresh();
+            }
+        };
+        this.hitAreas.refreshFramesButton.onDown = () => {
+            this.framesButtonMouseDown = true;
+            node.setDirtyCanvas(true, false);
+        };
+        this.hitAreas.refreshFramesButton.onUp = () => {
+            this.framesButtonMouseDown = false;
+            node.setDirtyCanvas(true, false);
         };
         
         // Set up event handlers for bg_img control
@@ -443,7 +488,8 @@ export class TopRowWidget extends RgthreeBaseWidget {
     onMouseUp(event, pos, node) {
         super.onMouseUp(event, pos, node);
         this.haveMouseMovedValue = false;
-        this.buttonMouseDown = false;
+        this.canvasButtonMouseDown = false;
+        this.framesButtonMouseDown = false;
     }
 
     computeSize(width) {

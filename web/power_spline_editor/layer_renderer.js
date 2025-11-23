@@ -56,21 +56,53 @@ export class LayerRenderer {
         // Helpers to temporarily hide spline visuals and keep box manipulators visible
         this._boxPlayVisibility = false;
         this._boxRefOnlyMode = false;
+
+        // Cache for ref image URLs to prevent blinking during timeline scrub
+        // Key format: "widgetName_refSelection" -> cached URL with timestamp
+        this._refImageCache = new Map();
+        // Global cache bust counter - incremented when cache is cleared to force new URLs
+        this._cacheBustCounter = Date.now();
     }
 
     setBoxPlayVisibility(enabled) {
         this._boxPlayVisibility = !!enabled;
         const svg = this.vis?.canvas?.();
         if (!svg) return;
-        const applyToggle = (elements, keepBox = false) => {
-            elements.forEach(el => {
-                const pid = (el.parentNode && el.parentNode.id) || '';
-                const isBox = pid.includes('box');
-                if (keepBox && isBox) {
-                    el.style.display = '';
-                    return;
+
+        // Hide/show green box squares, rotation controls, and rotation text during playback
+        const boxSquares = svg.querySelectorAll('g#active-box-dots-direct > path, g#inactive-box-dots-direct > path');
+        const rotationTexts = svg.querySelectorAll('g#active-box-dots-direct > g[data-rotation-text], g#inactive-box-dots-direct > g[data-rotation-text]');
+
+        if (enabled) {
+            // Hide green boxes and rotation text during playback
+            boxSquares.forEach(el => {
+                el.dataset.prevDisplay = el.style.display || '';
+                el.style.display = 'none';
+            });
+            rotationTexts.forEach(el => {
+                el.dataset.prevDisplay = el.style.display || '';
+                el.style.display = 'none';
+            });
+        } else {
+            // Restore visibility when not in playback
+            boxSquares.forEach(el => {
+                if (el.dataset.prevDisplay !== undefined) {
+                    el.style.display = el.dataset.prevDisplay;
+                    delete el.dataset.prevDisplay;
                 }
-                if (this._boxPlayVisibility) {
+            });
+            rotationTexts.forEach(el => {
+                if (el.dataset.prevDisplay !== undefined) {
+                    el.style.display = el.dataset.prevDisplay;
+                    delete el.dataset.prevDisplay;
+                }
+            });
+        }
+
+        // Hide other spline elements including rotation handles (circles and paths)
+        const applyToggle = (elements) => {
+            elements.forEach(el => {
+                if (enabled) {
                     el.dataset.prevDisplay = el.style.display || '';
                     el.style.display = 'none';
                 } else if (el.dataset.prevDisplay !== undefined) {
@@ -79,10 +111,12 @@ export class LayerRenderer {
                 }
             });
         };
-        applyToggle(Array.from(svg.querySelectorAll('path')), false);
-        applyToggle(Array.from(svg.querySelectorAll('circle')), false);
-        applyToggle(Array.from(svg.querySelectorAll('g#active-dots-direct g path, g#inactive-dots-direct g path, g#active-dots-direct g circle, g#inactive-dots-direct g circle')), false);
-        applyToggle(Array.from(svg.querySelectorAll('g#active-box-dots-direct path, g#inactive-box-dots-direct path')), true);
+        // Hide all paths except box squares and box images
+        applyToggle(Array.from(svg.querySelectorAll('path:not(#active-box-dots-direct > path):not(#inactive-box-dots-direct > path):not(#active-box-images > *)')));
+        // Hide all circles (this includes rotation handle tips)
+        applyToggle(Array.from(svg.querySelectorAll('circle')));
+        // Hide dots from direct groups
+        applyToggle(Array.from(svg.querySelectorAll('g#active-dots-direct g path, g#inactive-dots-direct g path, g#active-dots-direct g circle, g#inactive-dots-direct g circle')));
     }
 
     setBoxRefOnlyMode(enabled) {
@@ -119,7 +153,7 @@ export class LayerRenderer {
                     if (idx === 0 && validPoints.length > 1 && layerType === 'normal' && interpolation !== 'points') {
                         const dx = validPoints[1].x - validPoints[0].x;
                         const dy = validPoints[1].y - validPoints[0].y;
-                        const rotationRad = (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI) : 0;
+                        const rotationRad = (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + Math.PI + 2 * Math.PI) % (2 * Math.PI) : 0;
                         rotationDeg = rotationRad * (180 / Math.PI);
                     }
                     element.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
@@ -127,17 +161,36 @@ export class LayerRenderer {
             });
         }
 
-        // Update active box dots (squares)
+        // Update active box dots (squares) and rotation text
         if (this._renderedGroups.activeBoxDots) {
             const children = Array.from(this._renderedGroups.activeBoxDots.children);
-            children.forEach((element, idx) => {
-                if (idx >= validPoints.length) return;
-                const point = validPoints[idx];
-                const rotationRad = this._getBoxRotationValue(point);
-                const rotationDeg = rotationRad * (180 / Math.PI);
+            const activeWidget = this.node.layerManager.getActiveWidget();
+            const radius = validPoints.length > 0 ? BOX_BASE_RADIUS * this.getPointScale(validPoints[0], true) : BOX_BASE_RADIUS;
 
-                if (element.tagName === 'path') {
+            children.forEach((element, idx) => {
+                if (element.tagName === 'path' && idx < validPoints.length) {
+                    const point = validPoints[idx];
+                    const rotationRad = this._getBoxRotationValue(point);
+                    const rotationDeg = rotationRad * (180 / Math.PI);
                     element.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+                } else if (element.tagName === 'g' && element.hasAttribute('data-rotation-text') && validPoints.length > 0) {
+                    // Update rotation text group
+                    const point = validPoints[0];
+                    const rotationRad = this._getBoxRotationValue(point);
+                    const rotationDeg = rotationRad * (180 / Math.PI);
+
+                    // Update group position
+                    element.setAttribute('transform', `translate(${point.x},${point.y})`);
+
+                    // Update text content
+                    const textElement = element.querySelector('text');
+                    if (textElement) {
+                        const offsetX = -radius;
+                        const offsetY = -radius - 5;
+                        textElement.setAttribute('x', offsetX);
+                        textElement.setAttribute('y', offsetY);
+                        textElement.textContent = `${rotationDeg.toFixed(1)}°`;
+                    }
                 }
             });
         }
@@ -458,6 +511,61 @@ export class LayerRenderer {
         };
     }
 
+    _getSelectedRefAttachment(widget) {
+        const ref = widget?.value?.ref_attachment;
+        const selection = widget?.value?.ref_selection || 'no_ref';
+        if (!ref || selection === 'no_ref') return null;
+
+        // New multi-entry format
+        if (Array.isArray(ref.entries)) {
+            const parts = selection.split('_');
+            const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+            const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
+            return ref.entries[arrayIndex] || null;
+        }
+
+        // Legacy single entry
+        if (ref.base64) return ref;
+        return null;
+    }
+
+    _getRefImageUrl(widget, attachment) {
+        if (!attachment) return null;
+
+        // For base64, return directly (no caching needed)
+        if (attachment.base64) {
+            return `data:${attachment.type || 'image/png'};base64,${attachment.base64}`;
+        }
+
+        // For path-based images, use cache to prevent blinking during timeline scrub
+        if (attachment.path) {
+            const widgetName = widget?.value?.name || widget?.name || 'unknown';
+            const selection = widget?.value?.ref_selection || 'no_ref';
+            // Include attachment name/path in cache key to differentiate between different ref images
+            const attachmentId = attachment.name || attachment.path;
+            const cacheKey = `${widgetName}_${selection}_${attachmentId}`;
+
+            // Check if we have a cached URL for this widget+selection+attachment
+            if (!this._refImageCache.has(cacheKey)) {
+                // Create new URL with cache bust counter to force browser refresh when cache is cleared
+                // Using cacheBustCounter ensures all URLs get new timestamps when clearRefImageCache() is called
+                const url = new URL(`${attachment.path}?v=${this._cacheBustCounter}`, import.meta.url).href;
+                this._refImageCache.set(cacheKey, url);
+            }
+
+            return this._refImageCache.get(cacheKey);
+        }
+
+        return null;
+    }
+
+    clearRefImageCache() {
+        this._refImageCache.clear();
+        // Update cache bust counter to ensure new URLs are generated with fresh timestamps
+        // Add random component to make it even more unique and bypass aggressive browser caching
+        this._cacheBustCounter = Date.now() + Math.random().toString(36).substring(2, 9);
+    }
+
     clampPointScale(value) {
         return (typeof value === 'number' && !Number.isNaN(value)) 
             ? Math.max(0.2, Math.min(3.0, value)) 
@@ -752,7 +860,8 @@ export class LayerRenderer {
         const boxPlayMode = !!this._boxPlayVisibility;
 
         if (boxPlayMode) {
-            const boxWidgets = allWidgets.filter(w => w?.value?.type === 'box_layer');
+            // Only render box layers that are visible (on === true)
+            const boxWidgets = allWidgets.filter(w => w?.value?.type === 'box_layer' && w?.value?.on !== false);
             boxWidgets.forEach(w => this._queueBoxManipulator(w));
 
             this._ensureActivePanelOnTop();
@@ -949,11 +1058,11 @@ export class LayerRenderer {
         );
 
         // 1. Queue the GREEN SQUARES
-        const attachment = widget?.value?.ref_attachment;
-        const refOnly = !!(this._boxRefOnlyMode && attachment && attachment.base64);
+        const attachment = this._getSelectedRefAttachment(widget);
 
-        if (!refOnly) {
-            sortedPoints.forEach((dot) => {
+        // During preview mode (_boxRefOnlyMode), don't render green boxes or rotation controls
+        if (!this._boxRefOnlyMode) {
+            sortedPoints.forEach((dot, index) => {
                 const radius = BOX_BASE_RADIUS * this.getPointScale(dot, true);
                 const rotation = this._getBoxRotationValue(dot);
 
@@ -986,6 +1095,36 @@ export class LayerRenderer {
                     // Queue for rendering after vis.render()
                     this._pendingShapes.activeBoxDots.push(element);
                 }
+
+                // Add rotation text display (green with 60% opacity) - only for first box
+                if (index === 0) {
+                    const rotationRad = this._getBoxRotationValue(dot);
+                    const rotationDeg = rotationRad * (180 / Math.PI);
+
+                    // Create a group to hold the text so we can position it correctly
+                    const textGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    textGroup.setAttribute('data-rotation-text', 'true');
+
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    // Position at top-left corner of the box (relative to box center)
+                    const offsetX = -radius;
+                    const offsetY = -radius - 5;
+                    text.setAttribute('x', offsetX);
+                    text.setAttribute('y', offsetY);
+                    text.setAttribute('fill', 'rgba(19, 150, 19, 0.6)'); // Green with 60% opacity
+                    text.setAttribute('font-size', '14');
+                    text.setAttribute('font-family', 'monospace');
+                    text.setAttribute('font-weight', 'bold');
+                    text.setAttribute('text-anchor', 'start');
+                    text.setAttribute('pointer-events', 'none');
+                    text.textContent = `${rotationDeg.toFixed(1)}°`;
+
+                    textGroup.appendChild(text);
+                    textGroup.setAttribute('transform', `translate(${dot.x},${dot.y})`);
+                    textGroup.style.pointerEvents = 'none';
+
+                    this._pendingShapes.activeBoxDots.push(textGroup);
+                }
             });
 
             // Draw rotation handle and center dot when not in ref-only mode
@@ -1001,7 +1140,7 @@ export class LayerRenderer {
         }
 
         // Queue attached reference image (fit inside box, preserve aspect)
-        if (attachment && attachment.base64 && sortedPoints.length > 0) {
+        if (attachment && (attachment.base64 || attachment.path) && sortedPoints.length > 0) {
             const point = sortedPoints[0];
             const boxRadius = BOX_BASE_RADIUS * this.getPointScale(point, true);
             const boxSize = boxRadius * 2;
@@ -1013,7 +1152,15 @@ export class LayerRenderer {
             const rotationDeg = this._getBoxRotationValue(point) * (180 / Math.PI);
 
             const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', `data:${attachment.type || 'image/png'};base64,${attachment.base64}`);
+            // Use cached URL to prevent blinking during timeline scrub
+            const imageHref = this._getRefImageUrl(widget, attachment);
+            if (!imageHref) return; // Skip if no valid image source
+
+            // Force image reload by setting href to empty first, then to actual URL
+            // This prevents browser from using stale cached image data
+            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '');
+            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
+
             image.setAttribute('width', renderW);
             image.setAttribute('height', renderH);
             image.setAttribute('x', -renderW / 2);
@@ -1022,6 +1169,8 @@ export class LayerRenderer {
             image.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
             image.style.pointerEvents = 'none';
             image.style.opacity = '0.6';
+            // Store cache bust version to track if image needs updating
+            image.dataset.cacheBustVersion = this._cacheBustCounter;
 
             this._pendingShapes.boxImages.push(image);
         }
@@ -1116,18 +1265,47 @@ export class LayerRenderer {
             fill: styles.pointFill || "rgba(19, 150, 19, 0.1)",
             cursor: "default"
         };
-        const attachment = widget?.value?.ref_attachment;
-        const refOnly = !!(this._boxRefOnlyMode && attachment && attachment.base64);
+        const attachment = this._getSelectedRefAttachment(widget);
 
-        if (!refOnly) {
+        // During preview mode (_boxRefOnlyMode), don't render green boxes or rotation text
+        if (!this._boxRefOnlyMode) {
             const element = this._createSVGPath('square', point, svgStyles, this._getBoxRotationValue(point));
             if (element) {
                 element.style.pointerEvents = 'none';
                 this._pendingShapes.activeBoxDots.push(element);
             }
+
+            // Add rotation text display (green with 60% opacity)
+            const rotationRad = this._getBoxRotationValue(point);
+            const rotationDeg = rotationRad * (180 / Math.PI);
+
+            // Create a group to hold the text so we can position it correctly
+            const textGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            textGroup.setAttribute('data-rotation-text', 'true');
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            // Position at top-left corner of the box (relative to box center)
+            const offsetX = -radius;
+            const offsetY = -radius - 5;
+            text.setAttribute('x', offsetX);
+            text.setAttribute('y', offsetY);
+            text.setAttribute('fill', 'rgba(19, 150, 19, 0.6)'); // Green with 60% opacity
+            text.setAttribute('font-size', '14');
+            text.setAttribute('font-family', 'monospace');
+            text.setAttribute('font-weight', 'bold');
+            text.setAttribute('text-anchor', 'start');
+            text.setAttribute('pointer-events', 'none');
+            text.textContent = `${rotationDeg.toFixed(1)}°`;
+
+            textGroup.appendChild(text);
+            textGroup.setAttribute('transform', `translate(${point.x},${point.y})`);
+            textGroup.style.pointerEvents = 'none';
+
+            this._pendingShapes.activeBoxDots.push(textGroup);
         }
 
-        if (attachment && attachment.base64) {
+        // Render attached reference image if it exists
+        if (attachment && (attachment.base64 || attachment.path)) {
             const boxSize = radius * 2;
             const imgW = Math.max(1, attachment.width || boxSize);
             const imgH = Math.max(1, attachment.height || boxSize);
@@ -1137,7 +1315,15 @@ export class LayerRenderer {
             const rotationDeg = this._getBoxRotationValue(point) * (180 / Math.PI);
 
             const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', `data:${attachment.type || 'image/png'};base64,${attachment.base64}`);
+            // Use cached URL to prevent blinking during timeline scrub
+            const imageHref = this._getRefImageUrl(widget, attachment);
+            if (!imageHref) return; // Skip if no valid image source
+
+            // Force image reload by setting href to empty first, then to actual URL
+            // This prevents browser from using stale cached image data
+            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '');
+            image.setAttributeNS('http://www.w3.org/1999/xlink', 'href', imageHref);
+
             image.setAttribute('width', renderW);
             image.setAttribute('height', renderH);
             image.setAttribute('x', -renderW / 2);
@@ -1146,6 +1332,8 @@ export class LayerRenderer {
             image.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
             image.style.pointerEvents = 'none';
             image.style.opacity = '0.6';
+            // Store cache bust version to track if image needs updating
+            image.dataset.cacheBustVersion = this._cacheBustCounter;
 
             this._pendingShapes.boxImages.push(image);
         }
@@ -1304,7 +1492,7 @@ export class LayerRenderer {
 
             const dx = allPoints[1].x - allPoints[0].x;
             const dy = allPoints[1].y - allPoints[0].y;
-            return (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI) : 0;
+            return (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + Math.PI + 2 * Math.PI) % (2 * Math.PI) : 0;
         }
         return 0; // Default fallback
     }
@@ -1482,7 +1670,7 @@ export class LayerRenderer {
                 if (isFirstPoint && points.length > 1) {
                     const dx = points[1].x - points[0].x;
                     const dy = points[1].y - points[0].y;
-                    rotationRad = (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI) : 0;
+                    rotationRad = (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + Math.PI + 2 * Math.PI) % (2 * Math.PI) : 0;
                 }
                 element = this._createSVGPath(shape, dot, svgStyles, rotationRad);
             }

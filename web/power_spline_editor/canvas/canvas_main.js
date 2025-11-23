@@ -98,23 +98,43 @@ export default class SplineEditor2 {
         const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
         if (!boxWidgets.length) return;
 
-        // Enable ref-only mode if any box layer has an attached ref
-        this._boxRefOnlyMode = boxWidgets.some(w => w?.value?.ref_attachment);
-        this.layerRenderer?.setBoxRefOnlyMode?.(this._boxRefOnlyMode);
+        // Update ref attachments for all box layers from connected ref_images before preview
+        (async () => {
+          try {
+            await this.updateAllBoxLayerRefs?.();
+          } catch (e) {
+            console.warn('Failed to update box layer refs:', e);
+          }
 
-        // Hide splines/points and show box manipulators
-        this._boxPlayModeActive = true;
-        this._boxPlayModeStartedAt = performance.now();
-        this.layerRenderer?.setBoxPlayVisibility?.(true);
+          // Enable ref-only mode if any box layer has a selected ref entry
+          this._boxRefOnlyMode = boxWidgets.some((w) => {
+            const ref = w?.value?.ref_attachment;
+            const selection = w?.value?.ref_selection || 'no_ref';
+            if (!ref || selection === 'no_ref') return false;
+            if (Array.isArray(ref.entries)) {
+              const parts = selection.split('_');
+              const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+              const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
+              return !!ref.entries[arrayIndex];
+            }
+            return !!ref.base64;
+          });
+          this.layerRenderer?.setBoxRefOnlyMode?.(this._boxRefOnlyMode);
 
-        // Reset timelines to frame 1 and start playback in sync
-        boxWidgets.forEach(w => {
-          try { w.stopBoxPlayback?.(this.node); } catch {}
-          try { this.applyBoxTimelineFrame?.(w, 1); } catch {}
-          try { w.startBoxPlayback?.(this.node); } catch {}
-        });
+          // Hide splines/points and show box manipulators
+          this._boxPlayModeActive = true;
+          this._boxPlayModeStartedAt = performance.now();
+          this.layerRenderer?.setBoxPlayVisibility?.(true);
 
-        this.layerRenderer?.render?.();
+          // Reset timelines to frame 1 and start playback in sync
+          boxWidgets.forEach(w => {
+            try { w.stopBoxPlayback?.(this.node); } catch {}
+            try { this.applyBoxTimelineFrame?.(w, 1); } catch {}
+            try { w.startBoxPlayback?.(this.node); } catch {}
+          });
+
+          this.layerRenderer?.render?.();
+        })();
         return;
       }
       // Stop preview with plain spacebar when already in play mode

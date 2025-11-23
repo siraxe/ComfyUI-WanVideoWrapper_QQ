@@ -106,9 +106,32 @@ export function attachInteractionHandlers(editor) {
       return;
     }
     const angle = Math.atan2(dy, dx);
-    const rotation = angle + Math.PI / 2;
-    point.rotation = rotation;
-    point.boxRotation = rotation;
+    const newRotation = angle + Math.PI / 2;
+
+    // Calculate rotation delta to allow unlimited rotation (360+)
+    // Store previous angle to detect when we cross the -π/π boundary
+    if (editor._lastBoxRotationAngle !== undefined) {
+      const prevAngle = editor._lastBoxRotationAngle;
+      let delta = newRotation - prevAngle;
+
+      // Detect wrapping across -π/π boundary
+      if (delta > Math.PI) {
+        delta -= 2 * Math.PI;
+      } else if (delta < -Math.PI) {
+        delta += 2 * Math.PI;
+      }
+
+      // Accumulate the delta
+      const currentRotation = point.rotation || point.boxRotation || 0;
+      point.rotation = currentRotation + delta;
+      point.boxRotation = point.rotation;
+    } else {
+      // First update - set initial rotation
+      point.rotation = newRotation;
+      point.boxRotation = newRotation;
+    }
+
+    editor._lastBoxRotationAngle = newRotation;
     editor.layerRenderer?.render();
   };
 
@@ -132,6 +155,7 @@ export function attachInteractionHandlers(editor) {
       cleanup();
       editor.isRotatingBoxHandle = false;
       editor.boxRotationIndex = -1;
+      editor._lastBoxRotationAngle = undefined; // Reset for next drag
       editor.dragEndHandler(evt);
     };
     const cleanup = () => {

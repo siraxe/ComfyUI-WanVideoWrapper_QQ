@@ -563,6 +563,130 @@ export function showInterpolationMenu(event, widget, position) {
     }, 50);
 }
 
+// Ref image selection dropdown menu
+export function showRefSelectionMenu(event, widget, position, onSelect) {
+    try { event?.preventDefault?.(); event?.stopPropagation?.(); } catch {}
+
+    const existing = document.getElementById('ref-select-menu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'ref-select-menu';
+    menu.className = 'litegraph litecontextmenu litemenubar-panel';
+    menu.style.cssText = `
+        position: absolute !important;
+        left: ${position.x}px !important;
+        top: ${position.y + 10}px !important;
+        background-color: #1a1a1a !important;
+        border: 1px solid #000 !important;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.8) !important;
+        z-index: 10000 !important;
+        padding: 4px !important;
+        border-radius: 0px !important;
+        min-width: 140px !important;
+        display: block !important;
+        font-family: Arial, sans-serif !important;
+        font-size: 11px !important;
+        transform: translateX(-40%) !important;
+    `;
+
+    const options = widget?._getRefOptions?.() || ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
+    const current = widget?.value?.ref_selection || 'no_ref';
+
+    const list = document.createElement('div');
+    list.style.cssText = `
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 2px !important;
+        padding: 2px !important;
+    `;
+
+    options.forEach(opt => {
+        const item = document.createElement('div');
+        item.textContent = opt;
+        item.style.cssText = `
+            padding: 4px 6px !important;
+            cursor: pointer !important;
+            color: ${opt === current ? '#fff' : '#ddd'} !important;
+            background-color: ${opt === current ? '#333' : 'transparent'} !important;
+        `;
+        item.onmouseover = () => { item.style.backgroundColor = '#2a2a2a'; item.style.color = '#fff'; };
+        item.onmouseout = () => { item.style.backgroundColor = (opt === current ? '#333' : 'transparent'); item.style.color = (opt === current ? '#fff' : '#ddd'); };
+        item.onclick = async (e) => {
+            e.stopPropagation();
+            if (typeof onSelect === 'function') {
+                onSelect(opt);
+            } else if (widget) {
+                widget.value.ref_selection = opt;
+
+                // Reload image dimensions from file when switching to a ref selection
+                // This ensures we get the latest image data if the file was updated
+                if (opt !== 'no_ref' && widget.value.ref_attachment?.entries) {
+                    const parts = opt.split('_');
+                    const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
+                    const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
+                    const attachment = widget.value.ref_attachment.entries[arrayIndex];
+
+                    if (attachment && attachment.path) {
+                        // Reload dimensions from the actual image file
+                        try {
+                            const img = new Image();
+                            const cacheBust = Date.now() + Math.random().toString(36).substring(2, 9);
+                            img.src = `${attachment.path}?v=${cacheBust}`;
+                            await new Promise((resolve, reject) => {
+                                img.onload = () => {
+                                    // Update attachment with fresh dimensions
+                                    attachment.width = img.width;
+                                    attachment.height = img.height;
+                                    resolve();
+                                };
+                                img.onerror = (err) => reject(err);
+                                // Timeout after 2 seconds
+                                setTimeout(() => resolve(), 2000);
+                            });
+                        } catch (e) {
+                            console.warn('Failed to reload image dimensions:', e);
+                        }
+                    }
+                }
+
+                widget.parent?.setDirtyCanvas?.(true, true);
+                // Clear ref image cache to force reload with new selection
+                widget.parent?.editor?.layerRenderer?.clearRefImageCache?.();
+                // Force render to update the displayed reference image
+                widget.parent?.editor?.layerRenderer?.render?.();
+            }
+            menu.remove();
+        };
+        list.appendChild(item);
+    });
+
+    menu.appendChild(list);
+    document.body.appendChild(menu);
+
+    const cleanup = (ev) => {
+        const target = ev?.target;
+        if (target && menu.contains(target)) return;
+        menu.remove();
+        document.removeEventListener('mousedown', cleanup, true);
+        document.removeEventListener('contextmenu', cleanup, true);
+        document.removeEventListener('keydown', onEsc, true);
+    };
+    const onEsc = (ev) => {
+        if (ev.key === 'Escape') {
+            menu.remove();
+            document.removeEventListener('mousedown', cleanup, true);
+            document.removeEventListener('contextmenu', cleanup, true);
+            document.removeEventListener('keydown', onEsc, true);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('mousedown', cleanup, true);
+        document.addEventListener('contextmenu', cleanup, true);
+        document.addEventListener('keydown', onEsc, true);
+    }, 0);
+}
+
 // Helper to create static number display (non-interactive for UI-only)
 function createStaticNumberDisplay(value, min, max, precision = 1) {
     const container = document.createElement('div');
@@ -927,7 +1051,7 @@ export function showCustomLayerMenu(event, widget, node, position) {
         }, !hasPoints));
     }
 
-    menu.appendChild(createMenuItem('???', 'Remove', () => {
+    menu.appendChild(createMenuItem('🗑️', 'Remove', () => {
         node.layerManager.removeSpline(widget);
     }));
 
