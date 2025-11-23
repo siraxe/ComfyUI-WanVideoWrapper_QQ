@@ -1,8 +1,8 @@
 {
   "id": "e1c8bd47-5134-4f75-85c1-b99c1c1fd0ad",
   "revision": 0,
-  "last_node_id": 182,
-  "last_link_id": 285,
+  "last_node_id": 184,
+  "last_link_id": 286,
   "nodes": [
     {
       "id": 104,
@@ -378,7 +378,7 @@
         "collapsed": true
       },
       "order": 5,
-      "mode": 0,
+      "mode": 4,
       "inputs": [],
       "outputs": [
         {
@@ -549,7 +549,7 @@
         "collapsed": false
       },
       "order": 60,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "model",
@@ -769,7 +769,7 @@
       ],
       "flags": {},
       "order": 49,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "model",
@@ -940,7 +940,7 @@
         "collapsed": true
       },
       "order": 51,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "images",
@@ -1063,10 +1063,10 @@
         }
       ],
       "properties": {
-        "randomMax": 1125899906842624,
-        "randomMin": 0,
         "cnr_id": "rgthree-comfy",
         "ver": "944d5353a1b0a668f40844018c3dc956b95a67d7",
+        "randomMax": 1125899906842624,
+        "randomMin": 0,
         "ue_properties": {
           "version": "7.2.2",
           "widget_ue_connectable": {},
@@ -1232,12 +1232,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "WanVideoWrapper_I2V_00018.mp4",
+            "filename": "WanVideoWrapper_I2V_00001.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "WanVideoWrapper_I2V_00018.png",
+            "workflow": "WanVideoWrapper_I2V_00001.png",
             "fullpath": ""
           }
         }
@@ -1873,7 +1873,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 39,
+      "order": 38,
       "mode": 0,
       "inputs": [
         {
@@ -1915,7 +1915,9 @@
           "version": "7.2.2"
         }
       },
-      "widgets_values": []
+      "widgets_values": [
+        "width: 768, height: 432\n batch size: 1"
+      ]
     },
     {
       "id": 58,
@@ -2014,11 +2016,11 @@
           "type": "IMAGE",
           "links": [
             267,
-            268,
             269,
             270,
             271,
-            277
+            277,
+            286
           ]
         },
         {
@@ -2182,7 +2184,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 44,
+      "order": 43,
       "mode": 0,
       "inputs": [
         {
@@ -2401,7 +2403,7 @@
         258
       ],
       "flags": {},
-      "order": 40,
+      "order": 39,
       "mode": 0,
       "inputs": [
         {
@@ -2553,7 +2555,7 @@
         406
       ],
       "flags": {},
-      "order": 43,
+      "order": 44,
       "mode": 0,
       "inputs": [
         {
@@ -2634,13 +2636,13 @@
       ],
       "size": [
         437.0481965505983,
-        583.0271611256369
+        334
       ],
       "flags": {
         "collapsed": false
       },
       "order": 62,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "images",
@@ -2721,7 +2723,7 @@
       ],
       "size": [
         437.0481965505983,
-        583.0271611256369
+        334
       ],
       "flags": {
         "collapsed": false
@@ -2808,11 +2810,11 @@
       ],
       "size": [
         235.6418872657032,
-        469.0796675598612
+        334
       ],
       "flags": {},
       "order": 53,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "images",
@@ -3230,7 +3232,7 @@
         "collapsed": true
       },
       "order": 50,
-      "mode": 0,
+      "mode": 4,
       "inputs": [
         {
           "name": "vae",
@@ -3478,8 +3480,7 @@
         "0, 0, 0",
         "center",
         1,
-        "cpu",
-        "<tr><td>Output: </td><td><b>61</b> x <b>1280</b> x <b>720 | 643.36MB</b></td></tr>"
+        "cpu"
       ]
     },
     {
@@ -3509,6 +3510,8 @@
         }
       ],
       "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "eadc24ecc8bfc3c80fcc50724c0ebe74489f255b",
         "randomMax": 1125899906842624,
         "randomMin": 0,
         "ue_properties": {
@@ -3618,6 +3621,289 @@
       "bgcolor": "#3f5159"
     },
     {
+      "id": 162,
+      "type": "WanVideoTextEncodeCached",
+      "pos": [
+        672.2041881812962,
+        182.15129644390373
+      ],
+      "size": [
+        411.51107617001026,
+        302
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "shape": 7,
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "link": null
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "positive_prompt"
+          },
+          "link": 255
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            254,
+            256
+          ]
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": null
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "siraxe/ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoTextEncodeCached",
+        "ue_properties": {
+          "version": "7.2.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "ver": "bbf14ec9e9965c1a8582eea02b50913e79a036d0",
+        "cnr_id": "ComfyUI-WanVideoWrapper"
+      },
+      "widgets_values": [
+        "umt5-xxl-enc-bf16.safetensors",
+        "bf16",
+        "",
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走.motion blur",
+        "disabled",
+        true,
+        "gpu"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 156,
+      "type": "StringConstantMultiline",
+      "pos": [
+        672.2041881812962,
+        221.58757945818084
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            255
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "6ee278aa7d802c03ad713a7c5fbc02861b6773a8",
+        "Node name for S&R": "StringConstantMultiline",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": [
+        "city street video , expanding building",
+        true
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 95,
+      "type": "WanFrames",
+      "pos": [
+        365.3394887646782,
+        372.7400145660101
+      ],
+      "size": [
+        280.3130859375,
+        58
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 22,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "links": [
+            247
+          ]
+        }
+      ],
+      "title": "Wan Frames (QQ) dont change for ATI",
+      "properties": {
+        "cnr_id": "wanvideowrapper_qq",
+        "ver": "7c72ca796ffeb6ebb1873374dfd17bcdafe22fa1",
+        "Node name for S&R": "WanFrames",
+        "aux_id": "siraxe/ComfyUI-WanVideoWrapper_QQ",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": [
+        120
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 177,
+      "type": "Fast Groups Bypasser (rgthree)",
+      "pos": [
+        1088.9785291481528,
+        307.2404723811052
+      ],
+      "size": [
+        236.74765625,
+        106
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "OPT_CONNECTION",
+          "type": "*",
+          "links": null
+        }
+      ],
+      "properties": {
+        "matchColors": "",
+        "matchTitle": "",
+        "showNav": true,
+        "showAllGraphs": true,
+        "sort": "position",
+        "customSortAlphabet": "",
+        "toggleRestriction": "default",
+        "ue_properties": {
+          "version": "7.2.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "color": "#2a363b",
+      "bgcolor": "#3f5159"
+    },
+    {
+      "id": 171,
+      "type": "INTConstant",
+      "pos": [
+        131.5347493114735,
+        369.48850145996585
+      ],
+      "size": [
+        210,
+        76.51242065429688
+      ],
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "INT",
+          "links": [
+            262
+          ]
+        }
+      ],
+      "title": "SIZE",
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "87d0cf42db7d59992daba4d58a83655b5b359f44",
+        "Node name for S&R": "INTConstant",
+        "ue_properties": {
+          "version": "7.2.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        1280
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "shape": 1
+    },
+    {
+      "id": 172,
+      "type": "easy float",
+      "pos": [
+        131.5347493114735,
+        475.98716634263565
+      ],
+      "size": [
+        210,
+        61.56190488874529
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "float",
+          "type": "FLOAT",
+          "links": [
+            263
+          ]
+        }
+      ],
+      "title": "scale",
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "8ecc929cd41cf0f7ef6fcc45d4bbc5729c6f287f",
+        "Node name for S&R": "easy float",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": [
+        0.6
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "shape": 1
+    },
+    {
       "id": 142,
       "type": "Fast Groups Bypasser (rgthree)",
       "pos": [
@@ -3629,7 +3915,7 @@
         106
       ],
       "flags": {},
-      "order": 21,
+      "order": 26,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -3665,24 +3951,24 @@
       ],
       "size": [
         685,
-        866
+        906
       ],
       "flags": {
         "collapsed": false
       },
-      "order": 38,
+      "order": 40,
       "mode": 0,
       "inputs": [
         {
-          "name": "ref_image",
+          "name": "bg_image",
           "shape": 7,
           "type": "IMAGE",
-          "link": 268
+          "link": 286
         },
         {
-          "name": "coord_in",
+          "name": "ref_images",
           "shape": 7,
-          "type": "STRING",
+          "type": "IMAGE",
           "link": null
         },
         {
@@ -3690,11 +3976,23 @@
           "shape": 7,
           "type": "INT",
           "link": 247
+        },
+        {
+          "name": "ref_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "coord_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
         }
       ],
       "outputs": [
         {
-          "name": "ref_image",
+          "name": "bg_image",
           "type": "IMAGE",
           "links": [
             248
@@ -3732,7 +4030,7 @@
         "userAdjustedDims": true
       },
       "widgets_values": [
-        "[{\"on\":true,\"name\":\"freeze\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.07932387727187457,\\\"y\\\":0.4566292396619278,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":3},{\\\"x\\\":0.01988023084067757,\\\"y\\\":0.4774970974259682,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":4},{\\\"x\\\":0.02212002636058506,\\\"y\\\":0.9183706420637404,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":5},{\\\"x\\\":0.08343131203265076,\\\"y\\\":0.9169085417880725,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":6},{\\\"x\\\":0.14915297696536306,\\\"y\\\":0.9457164062875579,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":63},{\\\"x\\\":0.08412708376475368,\\\"y\\\":0.7313972216195288,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":40},{\\\"x\\\":0.08806357533903214,\\\"y\\\":0.5591748967633857,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":41},{\\\"x\\\":0.503904181430024,\\\"y\\\":0.5648915866821349,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":42},{\\\"x\\\":0.5049289117136991,\\\"y\\\":0.7749862763930471,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.5028795553809416,\\\"y\\\":0.9777947364215953,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.6244734817209882,\\\"y\\\":0.9756695552132482,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":48},{\\\"x\\\":0.723149051031941,\\\"y\\\":0.9754877330218865,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.7227049126429447,\\\"y\\\":0.8844669176922162,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":45},{\\\"x\\\":0.7194602252681661,\\\"y\\\":0.7826377348239477,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":46},{\\\"x\\\":0.6989326554046245,\\\"y\\\":0.6032979111413681,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":54},{\\\"x\\\":0.6101282479781661,\\\"y\\\":0.5998063765616352,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":47},{\\\"x\\\":0.6077372627668862,\\\"y\\\":0.7834873718383201,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":53},{\\\"x\\\":0.9089032356786918,\\\"y\\\":0.09551788690655094,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":55},{\\\"x\\\":0.9786165829313024,\\\"y\\\":0.28253872531795376,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":56},{\\\"x\\\":0.9830901028311018,\\\"y\\\":0.05878154887175673,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":57}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":false,\"name\":\"ctrl1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":90,\"easing\":\"out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.5095540372684575,\\\"y\\\":0.8749225574270775,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":42},{\\\"x\\\":0.44243668240647827,\\\"y\\\":0.8324629967708117,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.4935499938290846,\\\"y\\\":0.7409917768054837,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":61},{\\\"x\\\":0.4410015512604181,\\\"y\\\":0.6604549059635699,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":62},{\\\"x\\\":0.4698471567251221,\\\"y\\\":0.7224808424569075,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":59}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 3\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.21836619665713056,\\\"y\\\":0.36891258540819805,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":14},{\\\"x\\\":0.21195419105297084,\\\"y\\\":0.5458134208125587,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":13},{\\\"x\\\":0.20554218544881106,\\\"y\\\":0.7227142562169192,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":15},{\\\"x\\\":0.19913017984465128,\\\"y\\\":0.8996150916212798,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":11},{\\\"x\\\":0.22477820226129033,\\\"y\\\":0.19201175000383733,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":12}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 5\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":5,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.30756015514604024,\\\"y\\\":0.7251879040065742,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":25},{\\\"x\\\":0.30351815902299784,\\\"y\\\":0.9101705578085539,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":21},{\\\"x\\\":0.31160215126908253,\\\"y\\\":0.5402052502045946,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":23},{\\\"x\\\":0.31564414739212493,\\\"y\\\":0.35522259640261494,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":24},{\\\"x\\\":0.31968614351516733,\\\"y\\\":0.1702399426006352,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":22}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 4\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.41558933251958996,\\\"y\\\":0.35894870983381655,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":19},{\\\"x\\\":0.41606190816231736,\\\"y\\\":0.5408263047458944,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":18},{\\\"x\\\":0.4165344838050449,\\\"y\\\":0.7227038996579725,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":20},{\\\"x\\\":0.4170070594477723,\\\"y\\\":0.9045814945700503,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":16},{\\\"x\\\":0.4151167568768623,\\\"y\\\":0.17707111492173855,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":17}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":false,\"name\":\"ctrl2\",\"interpolation\":\"linear\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":80,\"easing\":\"out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.7196111121892453,\\\"y\\\":0.9112338777507967,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":42,\\\"fix\\\":{\\\"x\\\":0,\\\"y\\\":0}},{\\\"x\\\":0.7741297546444392,\\\"y\\\":0.7175177517956652,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.7610387606207571,\\\"y\\\":0.7644051393967106,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":60}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.7811216298308135,\\\"y\\\":0.714973400615751,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.789723611011745,\\\"y\\\":0.9638501287323339,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.7711534458395742,\\\"y\\\":0.45030925471856015,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7_1\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":5,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.8880286935495153,\\\"y\\\":0.6997931377576827,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.9048279958268853,\\\"y\\\":0.9681005838019989,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.8794267123685837,\\\"y\\\":0.45091640964109997,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7_2\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.9775163847916654,\\\"y\\\":0.7004003853331939,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.9943156870690353,\\\"y\\\":0.9687078313775102,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44,\\\"fix\\\":{\\\"x\\\":0,\\\"y\\\":0}},{\\\"x\\\":0.9689144036107337,\\\"y\\\":0.45152365721661125,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"}]",
+        "[{\"on\":true,\"name\":\"freeze\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.07932387727187457,\\\"y\\\":0.4566292396619278,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":3},{\\\"x\\\":0.01988023084067757,\\\"y\\\":0.4774970974259683,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":4},{\\\"x\\\":0.02212002636058511,\\\"y\\\":0.9183706420637404,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":5},{\\\"x\\\":0.08343131203265063,\\\"y\\\":0.9169085417880725,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":6},{\\\"x\\\":0.14915297696536306,\\\"y\\\":0.9457164062875579,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":63},{\\\"x\\\":0.08412708376475378,\\\"y\\\":0.7313972216195288,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":40},{\\\"x\\\":0.08806357533903224,\\\"y\\\":0.5591748967633857,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":41},{\\\"x\\\":0.503904181430024,\\\"y\\\":0.5648915866821349,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":42},{\\\"x\\\":0.5049289117136992,\\\"y\\\":0.7749862763930471,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.5028795553809418,\\\"y\\\":0.9777947364215953,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.6244734817209882,\\\"y\\\":0.975669555213248,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":48},{\\\"x\\\":0.7231490510319412,\\\"y\\\":0.9754877330218864,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.7227049126429448,\\\"y\\\":0.8844669176922161,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":45},{\\\"x\\\":0.7194602252681662,\\\"y\\\":0.7826377348239478,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":46},{\\\"x\\\":0.6989326554046245,\\\"y\\\":0.6032979111413681,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":54},{\\\"x\\\":0.610128247978166,\\\"y\\\":0.5998063765616352,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":47},{\\\"x\\\":0.607737262766886,\\\"y\\\":0.78348737183832,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":53},{\\\"x\\\":0.9089032356786917,\\\"y\\\":0.09551788690655093,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":55},{\\\"x\\\":0.9786165829313024,\\\"y\\\":0.28253872531795376,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":56},{\\\"x\\\":0.9830901028311019,\\\"y\\\":0.05878154887175673,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":57}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":false,\"name\":\"ctrl1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":90,\"easing\":\"out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.5095540372684575,\\\"y\\\":0.8749225574270775,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":42},{\\\"x\\\":0.44243668240647827,\\\"y\\\":0.8324629967708117,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.4935499938290846,\\\"y\\\":0.7409917768054837,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":61},{\\\"x\\\":0.4410015512604181,\\\"y\\\":0.6604549059635699,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":62},{\\\"x\\\":0.4698471567251221,\\\"y\\\":0.7224808424569075,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":59}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 3\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.21836619665713056,\\\"y\\\":0.36891258540819805,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":14},{\\\"x\\\":0.21195419105297084,\\\"y\\\":0.5458134208125587,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":13},{\\\"x\\\":0.20554218544881106,\\\"y\\\":0.7227142562169192,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":15},{\\\"x\\\":0.19913017984465128,\\\"y\\\":0.8996150916212798,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":11},{\\\"x\\\":0.22477820226129033,\\\"y\\\":0.19201175000383733,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":12}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 5\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":5,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.30756015514604024,\\\"y\\\":0.7251879040065742,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":25},{\\\"x\\\":0.30351815902299784,\\\"y\\\":0.9101705578085539,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":21},{\\\"x\\\":0.31160215126908253,\\\"y\\\":0.5402052502045946,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":23},{\\\"x\\\":0.31564414739212493,\\\"y\\\":0.35522259640261494,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":24},{\\\"x\\\":0.31968614351516733,\\\"y\\\":0.1702399426006352,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":22}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 4\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl1\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.41558933251958996,\\\"y\\\":0.35894870983381655,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":19},{\\\"x\\\":0.41606190816231736,\\\"y\\\":0.5408263047458944,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":18},{\\\"x\\\":0.4165344838050449,\\\"y\\\":0.7227038996579725,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":20},{\\\"x\\\":0.4170070594477723,\\\"y\\\":0.9045814945700503,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":16},{\\\"x\\\":0.4151167568768623,\\\"y\\\":0.17707111492173855,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":17}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":false,\"name\":\"ctrl2\",\"interpolation\":\"linear\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":80,\"easing\":\"out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.7196111121892453,\\\"y\\\":0.9112338777507967,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":42,\\\"fix\\\":{\\\"x\\\":0,\\\"y\\\":0}},{\\\"x\\\":0.7741297546444392,\\\"y\\\":0.7175177517956652,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":43},{\\\"x\\\":0.7610387606207571,\\\"y\\\":0.7644051393967106,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":60}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.7811216298308135,\\\"y\\\":0.714973400615751,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.789723611011745,\\\"y\\\":0.9638501287323339,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.7711534458395742,\\\"y\\\":0.45030925471856015,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7_1\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":5,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.8880286935495153,\\\"y\\\":0.6997931377576827,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.9048279958268853,\\\"y\\\":0.9681005838019989,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44},{\\\"x\\\":0.8794267123685837,\\\"y\\\":0.45091640964109997,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 7_2\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":10,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl2\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.9775163847916654,\\\"y\\\":0.7004003853331939,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":58},{\\\"x\\\":0.9943156870690353,\\\"y\\\":0.9687078313775102,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":44,\\\"fix\\\":{\\\"x\\\":0,\\\"y\\\":0}},{\\\"x\\\":0.9689144036107337,\\\"y\\\":0.45152365721661125,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"uid\\\":45}]\",\"coordinates\":\"[]\",\"type\":\"spline\"}]",
         null,
         "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
         640,
@@ -3763,7 +4061,7 @@
             "acceleration": 0
           },
           "scale": 1,
-          "points_store": "[{\"x\":0.07932387727187457,\"y\":0.4566292396619278,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"uid\":3},{\"x\":0.01988023084067757,\"y\":0.4774970974259682,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"uid\":4},{\"x\":0.02212002636058506,\"y\":0.9183706420637404,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":5},{\"x\":0.08343131203265076,\"y\":0.9169085417880725,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":6},{\"x\":0.14915297696536306,\"y\":0.9457164062875579,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":63},{\"x\":0.08412708376475368,\"y\":0.7313972216195288,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":40},{\"x\":0.08806357533903214,\"y\":0.5591748967633857,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":41},{\"x\":0.503904181430024,\"y\":0.5648915866821349,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":42},{\"x\":0.5049289117136991,\"y\":0.7749862763930471,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":43},{\"x\":0.5028795553809416,\"y\":0.9777947364215953,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":44},{\"x\":0.6244734817209882,\"y\":0.9756695552132482,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":48},{\"x\":0.723149051031941,\"y\":0.9754877330218865,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":58},{\"x\":0.7227049126429447,\"y\":0.8844669176922162,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":45},{\"x\":0.7194602252681661,\"y\":0.7826377348239477,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":46},{\"x\":0.6989326554046245,\"y\":0.6032979111413681,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":54},{\"x\":0.6101282479781661,\"y\":0.5998063765616352,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":47},{\"x\":0.6077372627668862,\"y\":0.7834873718383201,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":53},{\"x\":0.9089032356786918,\"y\":0.09551788690655094,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":55},{\"x\":0.9786165829313024,\"y\":0.28253872531795376,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":56},{\"x\":0.9830901028311018,\"y\":0.05878154887175673,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":57}]",
+          "points_store": "[{\"x\":0.07932387727187457,\"y\":0.4566292396619278,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"uid\":3},{\"x\":0.01988023084067757,\"y\":0.4774970974259683,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"uid\":4},{\"x\":0.02212002636058511,\"y\":0.9183706420637404,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":5},{\"x\":0.08343131203265063,\"y\":0.9169085417880725,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":6},{\"x\":0.14915297696536306,\"y\":0.9457164062875579,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":63},{\"x\":0.08412708376475378,\"y\":0.7313972216195288,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":40},{\"x\":0.08806357533903224,\"y\":0.5591748967633857,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":41},{\"x\":0.503904181430024,\"y\":0.5648915866821349,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":42},{\"x\":0.5049289117136992,\"y\":0.7749862763930471,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":43},{\"x\":0.5028795553809418,\"y\":0.9777947364215953,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":44},{\"x\":0.6244734817209882,\"y\":0.975669555213248,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":48},{\"x\":0.7231490510319412,\"y\":0.9754877330218864,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":58},{\"x\":0.7227049126429448,\"y\":0.8844669176922161,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":45},{\"x\":0.7194602252681662,\"y\":0.7826377348239478,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":46},{\"x\":0.6989326554046245,\"y\":0.6032979111413681,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":54},{\"x\":0.610128247978166,\"y\":0.5998063765616352,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":47},{\"x\":0.607737262766886,\"y\":0.78348737183832,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":53},{\"x\":0.9089032356786917,\"y\":0.09551788690655093,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":55},{\"x\":0.9786165829313024,\"y\":0.28253872531795376,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":56},{\"x\":0.9830901028311019,\"y\":0.05878154887175673,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":57}]",
           "coordinates": "[]",
           "type": "spline"
         },
@@ -3992,289 +4290,6 @@
           "type": "spline"
         }
       ]
-    },
-    {
-      "id": 162,
-      "type": "WanVideoTextEncodeCached",
-      "pos": [
-        672.2041881812962,
-        182.15129644390373
-      ],
-      "size": [
-        411.51107617001026,
-        302
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 33,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "extender_args",
-          "shape": 7,
-          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
-          "link": null
-        },
-        {
-          "name": "positive_prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "positive_prompt"
-          },
-          "link": 255
-        }
-      ],
-      "outputs": [
-        {
-          "name": "text_embeds",
-          "type": "WANVIDEOTEXTEMBEDS",
-          "links": [
-            254,
-            256
-          ]
-        },
-        {
-          "name": "negative_text_embeds",
-          "type": "WANVIDEOTEXTEMBEDS",
-          "links": null
-        },
-        {
-          "name": "positive_prompt",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "aux_id": "siraxe/ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoTextEncodeCached",
-        "ue_properties": {
-          "version": "7.2.2",
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {}
-        },
-        "ver": "bbf14ec9e9965c1a8582eea02b50913e79a036d0",
-        "cnr_id": "ComfyUI-WanVideoWrapper"
-      },
-      "widgets_values": [
-        "umt5-xxl-enc-bf16.safetensors",
-        "bf16",
-        "",
-        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走.motion blur",
-        "disabled",
-        true,
-        "gpu"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 156,
-      "type": "StringConstantMultiline",
-      "pos": [
-        672.2041881812962,
-        221.58757945818084
-      ],
-      "size": [
-        400,
-        200
-      ],
-      "flags": {},
-      "order": 22,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "STRING",
-          "type": "STRING",
-          "links": [
-            255
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "6ee278aa7d802c03ad713a7c5fbc02861b6773a8",
-        "Node name for S&R": "StringConstantMultiline",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        "city street video , expanding building",
-        true
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
-      "id": 95,
-      "type": "WanFrames",
-      "pos": [
-        365.3394887646782,
-        372.7400145660101
-      ],
-      "size": [
-        270,
-        58
-      ],
-      "flags": {
-        "collapsed": false
-      },
-      "order": 23,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "frame_count",
-          "type": "INT",
-          "links": [
-            247
-          ]
-        }
-      ],
-      "title": "Wan Frames (QQ) dont change for ATI",
-      "properties": {
-        "cnr_id": "wanvideowrapper_qq",
-        "ver": "7c72ca796ffeb6ebb1873374dfd17bcdafe22fa1",
-        "Node name for S&R": "WanFrames",
-        "aux_id": "siraxe/ComfyUI-WanVideoWrapper_QQ",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        120
-      ],
-      "color": "#232",
-      "bgcolor": "#353"
-    },
-    {
-      "id": 177,
-      "type": "Fast Groups Bypasser (rgthree)",
-      "pos": [
-        1088.9785291481528,
-        307.2404723811052
-      ],
-      "size": [
-        236.74765625,
-        106
-      ],
-      "flags": {},
-      "order": 24,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "OPT_CONNECTION",
-          "type": "*",
-          "links": null
-        }
-      ],
-      "properties": {
-        "matchColors": "",
-        "matchTitle": "",
-        "showNav": true,
-        "showAllGraphs": true,
-        "sort": "position",
-        "customSortAlphabet": "",
-        "toggleRestriction": "default",
-        "ue_properties": {
-          "version": "7.2.2",
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {}
-        }
-      },
-      "color": "#2a363b",
-      "bgcolor": "#3f5159"
-    },
-    {
-      "id": 171,
-      "type": "INTConstant",
-      "pos": [
-        131.5347493114735,
-        369.48850145996585
-      ],
-      "size": [
-        210,
-        76.51242065429688
-      ],
-      "flags": {},
-      "order": 25,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "value",
-          "type": "INT",
-          "links": [
-            262
-          ]
-        }
-      ],
-      "title": "SIZE",
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "87d0cf42db7d59992daba4d58a83655b5b359f44",
-        "Node name for S&R": "INTConstant",
-        "ue_properties": {
-          "version": "7.2.2",
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        1280
-      ],
-      "color": "#432",
-      "bgcolor": "#653",
-      "shape": 1
-    },
-    {
-      "id": 172,
-      "type": "easy float",
-      "pos": [
-        131.5347493114735,
-        475.98716634263565
-      ],
-      "size": [
-        210,
-        61.56190488874529
-      ],
-      "flags": {},
-      "order": 26,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "float",
-          "type": "FLOAT",
-          "links": [
-            263
-          ]
-        }
-      ],
-      "title": "scale",
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "8ecc929cd41cf0f7ef6fcc45d4bbc5729c6f287f",
-        "Node name for S&R": "easy float",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        0.6
-      ],
-      "color": "#432",
-      "bgcolor": "#653",
-      "shape": 1
     }
   ],
   "links": [
@@ -4783,14 +4798,6 @@
       "IMAGE"
     ],
     [
-      268,
-      170,
-      0,
-      159,
-      0,
-      "IMAGE"
-    ],
-    [
       269,
       170,
       0,
@@ -4901,6 +4908,14 @@
       167,
       0,
       "IMAGE"
+    ],
+    [
+      286,
+      170,
+      0,
+      159,
+      0,
+      "IMAGE"
     ]
   ],
   "groups": [
@@ -4934,13 +4949,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6115909044842032,
+      "scale": 0.8140274938684746,
       "offset": [
-        236.40776413940247,
-        -84.06956267036412
+        387.6023430387666,
+        -145.24774842003026
       ]
     },
-    "frontendVersion": "1.28.7",
+    "frontendVersion": "1.33.5",
     "node_versions": {
       "ComfyUI-WanVideoWrapper": "5a2383621a05825d0d0437781afcb8552d9590fd",
       "comfy-core": "0.3.26",
@@ -4952,7 +4967,8 @@
     "VHS_MetadataImage": true,
     "VHS_KeepIntermediate": true,
     "ue_links": [],
-    "links_added_by_ue": []
+    "links_added_by_ue": [],
+    "workflowRendererVersion": "LG"
   },
   "version": 0.4
 }
