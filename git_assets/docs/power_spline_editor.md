@@ -30,11 +30,13 @@
 
 ### Keyframes
 - S + left click - adds/removes keys in timeline and canvas (when pressed on box or point to remove) 
-- Alt + right click - on object would scale it (proportionally only for now) 
-- Shift + Spacebar - playback add layers (preview mode) 
-- Shift + left click - on canvas scrubs selected timeline , on timetime scrubs time without moving object
+- Alt + right click drag - on object would scale it (proportionally for now only) 
+- Shift + Spacebar - playback all layers (preview mode) , press spacebar or somewhere to stop it.
+- Shift + left click drag - on canvas scrubs selected timeline , on timetime scrubs time without moving object
 - 🔃 Canvas - refreshes canvas and ref images
 - 🕞 Frames - updates all timeline max frames (or squeezes currnt keyframes if last key is < than new max)
+- Change no_ref to pick a ref from ref_images
+- Keyframe points can also be moved same way as normal spline points
 
 </td>
 </tr>
