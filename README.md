@@ -6,6 +6,8 @@
 - **Proper keyframes control in editor + TTM sample**: Cleaned up keyframe layer , added ref pull and animation to later be used with ttm [Example](examples/ttm/ttm_example_wf.json) , https://github.com/time-to-move/TTM , ty https://github.com/kijai/ComfyUI-WanVideoWrapper for wrapper implementation.
 - [Power Spline Editor - keyframe hotkey usage](git_assets/docs/power_spline_editor.md) 
 
+https://github.com/user-attachments/assets/41974029-4935-4952-92b6-d2d69a8873d9
+
 
 **Version 1.0.8** - 2025-11-17
 - **Refactor + better ATI driver control**: Slight messy refactor + proper ati point output with pause [Example](examples/ATI_buildings_wobble/ATI_buildings_wobble.json)
