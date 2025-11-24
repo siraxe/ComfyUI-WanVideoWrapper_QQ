@@ -6,7 +6,11 @@ export function attachInteractionHandlers(editor) {
   editor.boxRotationIndex = -1;
   editor.getBoxPointRadius = (point) => {
     const boxScale = editor.getPointScaleForMode(point, true);
-    return BOX_BASE_RADIUS * boxScale;
+    // Apply editor.scale to make boxes scale with canvas size changes
+    const canvasScale = (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0)
+      ? editor.scale
+      : 1;
+    return BOX_BASE_RADIUS * boxScale * canvasScale;
   };
 
   editor.pickBoxPointFromCoords = (coords) => {

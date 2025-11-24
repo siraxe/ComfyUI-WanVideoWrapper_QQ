@@ -1,5 +1,9 @@
 import torch
 import torch.nn.functional as F # Added F
+import folder_paths
+from PIL import Image
+import numpy as np
+import os
 
 class ImageBlend_GPU:
     # Moved blend modes inside the class
@@ -211,6 +215,207 @@ class ImageBlend_GPU:
         output_bhwc = torch.clamp(output_bhwc, 0.0, 1.0)        
         # Return tensor on CPU as expected by ComfyUI
         return (output_bhwc.cpu(),)
+
+
+class CreateImageList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "export_alpha": ("BOOLEAN", {"default": True})
+            },
+            "optional": {
+                "image1": ("IMAGE",)
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "prompt": "PROMPT",
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    RETURN_NAMES = ("images", "masks")
+    FUNCTION = "batch"
+    CATEGORY = "WanVideoWrapper_QQ/image"
+
+    def load_image_with_alpha(self, image_path):
+        """Load image from path with alpha channel preserved"""
+        try:
+            img = Image.open(image_path)
+
+            # Handle RGBA images
+            if img.mode == 'RGBA':
+                img_np = np.array(img).astype(np.float32) / 255.0
+                img_tensor = torch.from_numpy(img_np)[None,]  # [1, H, W, 4]
+                return img_tensor
+            else:
+                # Convert to RGB and add alpha=1.0
+                img = img.convert('RGB')
+                img_np = np.array(img).astype(np.float32) / 255.0
+                alpha = np.ones((img_np.shape[0], img_np.shape[1], 1), dtype=np.float32)
+                img_rgba = np.concatenate([img_np, alpha], axis=2)
+                img_tensor = torch.from_numpy(img_rgba)[None,]  # [1, H, W, 4]
+                return img_tensor
+        except Exception as e:
+            print(f"Error loading image with alpha from {image_path}: {e}")
+            return None
+
+    def find_source_image_path(self, prompt, node_id, input_name):
+        """Trace connections to find LoadImage node and get the filename"""
+        try:
+            # Get the current node from prompt
+            if str(node_id) not in prompt:
+                return None
+
+            current_node = prompt[str(node_id)]
+            inputs = current_node.get("inputs", {})
+
+            # Check if the input is connected (array format: [source_node_id, source_output_index])
+            if input_name in inputs and isinstance(inputs[input_name], list):
+                source_node_id = str(inputs[input_name][0])
+
+                # Recursively trace through connections
+                return self._trace_to_load_image(prompt, source_node_id)
+
+            return None
+        except Exception as e:
+            print(f"Error tracing connections: {e}")
+            return None
+
+    def _trace_to_load_image(self, prompt, node_id):
+        """Recursively trace back to LoadImage node"""
+        try:
+            if node_id not in prompt:
+                return None
+
+            node = prompt[node_id]
+            class_type = node.get("class_type", "")
+
+            # Found LoadImage node!
+            if class_type in ["LoadImage", "LoadImageMask"]:
+                inputs = node.get("inputs", {})
+                if "image" in inputs:
+                    filename = inputs["image"]
+                    # Get full path
+                    input_dir = folder_paths.get_input_directory()
+                    image_path = os.path.join(input_dir, filename)
+                    if os.path.exists(image_path):
+                        print(f"Found LoadImage source: {image_path}")
+                        return image_path
+
+            # Not a LoadImage, check its inputs
+            inputs = node.get("inputs", {})
+            for input_name, input_value in inputs.items():
+                if isinstance(input_value, list):
+                    source_node_id = str(input_value[0])
+                    result = self._trace_to_load_image(prompt, source_node_id)
+                    if result:
+                        return result
+
+            return None
+        except Exception as e:
+            print(f"Error in trace: {e}")
+            return None
+
+    def batch(self, export_alpha, unique_id=None, prompt=None, **kwargs):
+        # Collect all image inputs from kwargs (dynamic inputs)
+        images = []
+
+        # Sort by key to maintain order (image1, image2, image3, etc.)
+        sorted_inputs = sorted(kwargs.items(), key=lambda x: x[0])
+
+        for input_name, img in sorted_inputs:
+            if img is not None:
+                # Try to reload with alpha if tracing is available
+                if prompt and unique_id:
+                    path = self.find_source_image_path(prompt, unique_id, input_name)
+                    if path:
+                        reloaded = self.load_image_with_alpha(path)
+                        if reloaded is not None:
+                            print(f"Reloaded {input_name} with alpha: {path}")
+                            img = reloaded
+
+                images.append(img)
+
+        # If no images provided, return empty tensors
+        if len(images) == 0:
+            empty_image = torch.zeros((1, 64, 64, 3 if not export_alpha else 4))
+            empty_mask = torch.zeros((1, 64, 64))
+            return (empty_image, empty_mask)
+
+        # If only one image, just process it
+        if len(images) == 1:
+            img = images[0]
+            # Ensure alpha channel exists
+            if img.shape[-1] == 3:
+                img = torch.nn.functional.pad(img, (0, 1), mode='constant', value=1.0)
+
+            # Extract masks
+            masks = img[:, :, :, 3]
+
+            # Conditionally strip alpha
+            if export_alpha:
+                output_images = img
+            else:
+                output_images = img[:, :, :, :3]
+
+            return (output_images, masks)
+
+        # Multiple images: pad channels and find max dimension
+        processed_images = []
+        for img in images:
+            # Pad channels if needed - always ensure we have alpha channel
+            if img.shape[-1] == 3:
+                img = torch.nn.functional.pad(img, (0, 1), mode='constant', value=1.0)
+            processed_images.append(img)
+
+        # Find the largest dimension across all images to create square canvas
+        max_dim = max(img.shape[1] for img in processed_images)
+        max_dim = max(max_dim, max(img.shape[2] for img in processed_images))
+
+        # Process each image to fit in square canvas
+        def fit_to_square(img, canvas_size):
+            h, w, c = img.shape[1], img.shape[2], img.shape[3]
+
+            # If already square and correct size, return as-is
+            if h == canvas_size and w == canvas_size:
+                return img
+
+            # Scale to fit (preserve aspect ratio)
+            scale = canvas_size / max(h, w)
+            new_h = int(h * scale)
+            new_w = int(w * scale)
+
+            # Resize (this will scale both RGB and alpha channels)
+            img_bchw = img.permute(0, 3, 1, 2)
+            scaled = F.interpolate(img_bchw, size=(new_h, new_w), mode='bilinear', align_corners=False)
+            scaled = scaled.permute(0, 2, 3, 1)
+
+            # Create square canvas and center the image
+            canvas = torch.zeros((img.shape[0], canvas_size, canvas_size, c), dtype=img.dtype, device=img.device)
+            y_offset = (canvas_size - new_h) // 2
+            x_offset = (canvas_size - new_w) // 2
+
+            # Copy entire scaled image (including its alpha) to canvas
+            canvas[:, y_offset:y_offset+new_h, x_offset:x_offset+new_w, :] = scaled
+
+            return canvas
+
+        fitted_images = [fit_to_square(img, max_dim) for img in processed_images]
+
+        # Concatenate all images
+        s = torch.cat(fitted_images, dim=0)
+
+        # Extract alpha channel as masks (MASK format is BHW, not BHWC)
+        masks = s[:, :, :, 3]  # Shape: [B, H, W]
+
+        # Conditionally strip alpha channel from image output
+        if export_alpha:
+            output_images = s  # Keep RGBA (4 channels)
+        else:
+            output_images = s[:, :, :, :3]  # Strip alpha, output RGB (3 channels)
+
+        return (output_images, masks)
 class ImageRadialZoomBlur_GPU:
     @classmethod
     def INPUT_TYPES(s):
@@ -692,12 +897,14 @@ class WanScaleAB:
         return resized.permute(0, 2, 3, 1)
 
 NODE_CLASS_MAPPINGS = {
+    "CreateImageList": CreateImageList,
     "ImageRadialZoomBlur_GPU": ImageRadialZoomBlur_GPU,
     "ImageBlend_GPU": ImageBlend_GPU,
     "WanScaleAB": WanScaleAB
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "CreateImageList": "Create Image List",
     "ImageRadialZoomBlur_GPU": "Image Radial Zoom Blur (GPU)",
     "ImageBlend_GPU": "Image Blend (GPU)",
     "WanScaleAB": "Wan Scale AB"

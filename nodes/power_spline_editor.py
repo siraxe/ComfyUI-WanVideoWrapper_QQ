@@ -5,9 +5,7 @@ import math
 
 from torchvision import transforms
 from ..utility.driver_utils import apply_driver_offset
-
-BOX_BASE_RADIUS = 56
-BOX_TIMELINE_MAX_POINTS = 50
+from ..config.constants import BOX_BASE_RADIUS, BOX_TIMELINE_MAX_POINTS
 
 class PowerSplineEditor:
     @classmethod
@@ -913,6 +911,14 @@ class PowerSplineEditor:
         # Set coord_width/coord_height to 1 so draw_shapes knows to scale them to frame dimensions
         coord_out_data["coord_width"] = 1.0
         coord_out_data["coord_height"] = 1.0
+
+        # Extract editor scale from the first layer (all layers should have the same editor scale)
+        editor_scale = 1.0
+        for spline_data in all_splines:
+            if isinstance(spline_data, dict) and 'editor_scale' in spline_data:
+                editor_scale = float(spline_data.get('editor_scale', 1.0))
+                break
+        coord_out_data["editor_scale"] = editor_scale
 
         coord_out = json.dumps(coord_out_data)
 

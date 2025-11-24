@@ -20,14 +20,14 @@ export function attachBoxTimelineHelpers(editor) {
         if (!key) return null;
         const rawX = typeof key.x === 'number' ? key.x : 0.5;
         const rawY = typeof key.y === 'number' ? key.y : 0.5;
-        const normX = Math.abs(rawX) > 1 ? rawX / width : rawX;
-        const normY = Math.abs(rawY) > 1 ? rawY / height : rawY;
+        const normX = Math.abs(rawX) >= 10 ? rawX / width : rawX;
+        const normY = Math.abs(rawY) >= 10 ? rawY / height : rawY;
         const scaleVal = (typeof key.scale === 'number' && !Number.isNaN(key.scale)) ? key.scale : 1;
         const rotationVal = (typeof key.rotation === 'number' && !Number.isNaN(key.rotation)) ? key.rotation : 0;
         return {
           frame: Math.max(1, Math.min(editor._getMaxFrames(), Math.round(key.frame || 1))),
-          x: Math.max(0, Math.min(1, normX)),
-          y: Math.max(0, Math.min(1, normY)),
+          x: normX,
+          y: normY,
           scale: editor.clampScaleValue ? editor.clampScaleValue(scaleVal) : Math.max(0.2, Math.min(3, scaleVal)),
           rotation: rotationVal,
         };
@@ -293,11 +293,11 @@ export function attachBoxTimelineHelpers(editor) {
       const height = Math.max(1, Number(editor.height) || 1);
       const rawX = (typeof stored?.x === 'number' && !Number.isNaN(stored.x)) ? stored.x : 0.5;
       const rawY = (typeof stored?.y === 'number' && !Number.isNaN(stored.y)) ? stored.y : 0.5;
-      const normX = Math.abs(rawX) > 1 ? rawX / width : rawX;
-      const normY = Math.abs(rawY) > 1 ? rawY / height : rawY;
+      const normX = Math.abs(rawX) >= 10 ? rawX / width : rawX;
+      const normY = Math.abs(rawY) >= 10 ? rawY / height : rawY;
       return {
-        x: Math.max(0, Math.min(1, normX)),
-        y: Math.max(0, Math.min(1, normY)),
+        x: normX,
+        y: normY,
         scale: editor.clampScaleValue(stored?.scale ?? 1),
         rotation: (typeof stored?.rotation === 'number' && !Number.isNaN(stored.rotation)) ? stored.rotation : 0,
       };

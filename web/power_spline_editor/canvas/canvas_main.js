@@ -708,6 +708,11 @@ export default class SplineEditor2 {
     svgElement.style['zIndex'] = "2"
     svgElement.style['position'] = "relative"
     svgElement.style['display'] = "block"
+    svgElement.style['overflow'] = "visible"
+    // Remove viewBox to allow content outside canvas bounds
+    svgElement.removeAttribute('viewBox');
+    // Set a very large viewBox or remove clipping
+    svgElement.setAttribute('overflow', 'visible');
     this.node.splineEditor2.parentEl.appendChild(svgElement);
     // Let the size manager handle height - don't set explicit height here
     this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements

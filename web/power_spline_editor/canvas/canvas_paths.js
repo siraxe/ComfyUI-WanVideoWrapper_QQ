@@ -213,7 +213,10 @@ export function attachPathHelpers(editor) {
         easingConfig: JSON.parse(JSON.stringify(widget.value.easingConfig || { path: 'each', strength: 1.0 })),
         scale: typeof widget.value.scale === 'number' ? widget.value.scale : Number(widget.value.scale) || 1,
         points_store: widget.value.points_store,
-        coordinates: normalizedCoords
+        coordinates: normalizedCoords,
+        editor_scale: editor.scale || 1.0,
+        original_image_width: editor.originalImageWidth || null,
+        original_image_height: editor.originalImageHeight || null
       };
 
       if (isBoxLayer) {

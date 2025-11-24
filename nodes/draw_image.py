@@ -2,14 +2,13 @@
 import json
 import math
 import numpy as np
+import os
 
 import torch
 from PIL import Image
 
 from ..utility.utility import pil2tensor, tensor2pil
-
-# Match Power Spline box sizing reference (radius 56 -> diameter 112)
-DEFAULT_BOX_BASE_SIZE = 112.0
+from ..config.constants import BOX_BASE_SIZE
 
 
 class DrawImageOnPath:
@@ -36,8 +35,19 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 "use_box_scale_size": ("BOOLEAN", {"default": True}),
                 "fallback_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.01}),
                 "overlay_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "add_shadows": ("BOOLEAN", {"default": False}),
             }
         }
+
+    def __init__(self):
+        # Load shadow image
+        self.shadow_image = None
+        try:
+            shadow_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "power_spline_editor", "bg", "shadow_ref.png")
+            if os.path.exists(shadow_path):
+                self.shadow_image = Image.open(shadow_path).convert("RGBA")
+        except Exception as e:
+            print(f"Warning: Could not load shadow_ref.png: {e}")
 
     def _safe_json_load(self, text):
         try:
@@ -57,6 +67,8 @@ Draws an input image along a coordinate path for each frame, returning the rende
         coord_height = None
         coords = []
         ref_selections = []
+        visibility = []
+        editor_scale = 1.0
         try:
             parsed = self._safe_json_load(coordinates_str)
             if isinstance(parsed, dict):
@@ -64,6 +76,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 coords_raw = parsed.get("coordinates") or []
                 coord_width = parsed.get("coord_width")
                 coord_height = parsed.get("coord_height")
+                editor_scale = float(parsed.get("editor_scale", 1.0))
 
                 # Extract ref_selections metadata
                 ref_selections_meta = parsed.get("ref_selections", {})
@@ -71,6 +84,13 @@ Draws an input image along a coordinate path for each frame, returning the rende
                     # ref_selections has structure {"p": [...], "c": [...], "b": [...]}
                     # Since box coordinates are merged into "c", we use the "c" list
                     ref_selections = ref_selections_meta.get("c", [])
+
+                # Extract visibility metadata
+                visibility_meta = parsed.get("visibility", {})
+                if isinstance(visibility_meta, dict):
+                    # visibility has structure {"p": [...], "c": [...], "b": [...]}
+                    # Since box coordinates are merged into "c", we use the "c" list
+                    visibility = visibility_meta.get("c", [])
 
                 # Handle both single layer and multiple layers
                 if isinstance(coords_raw, list):
@@ -103,7 +123,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 if layer_cleaned and all(isinstance(c.get("frame", None), (int, float)) for c in layer_cleaned):
                     layer_cleaned = sorted(layer_cleaned, key=lambda item: float(item.get("frame", 0)))
                 cleaned.append(layer_cleaned)
-            return cleaned, coord_width, coord_height, ref_selections
+            return cleaned, coord_width, coord_height, ref_selections, visibility, editor_scale
         else:
             # Single layer
             cleaned = []
@@ -112,7 +132,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                     cleaned.append(c)
             if cleaned and all(isinstance(c.get("frame", None), (int, float)) for c in cleaned):
                 cleaned = sorted(cleaned, key=lambda item: float(item.get("frame", 0)))
-            return cleaned, coord_width, coord_height, ref_selections
+            return cleaned, coord_width, coord_height, ref_selections, visibility, editor_scale
 
     def _scale_point(self, point, frame_width, frame_height, coord_width, coord_height):
         try:
@@ -156,9 +176,13 @@ Draws an input image along a coordinate path for each frame, returning the rende
             pass
         return 0
 
-    def _compute_target_size(self, base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size):
+    def _compute_target_size(self, base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size, editor_scale=1.0):
         if use_box_scale_size:
-            target_short = DEFAULT_BOX_BASE_SIZE * scale_factor
+            # Apply editor_scale to match what was shown in the Power Spline Editor canvas
+            # The editor displays boxes at: BOX_BASE_RADIUS * scale * editor_scale
+            # So the final size should be: BOX_BASE_SIZE * scale * editor_scale
+            adjusted_scale = scale_factor * editor_scale
+            target_short = BOX_BASE_SIZE * adjusted_scale
             ratio = target_short / max(1.0, min(base_w, base_h))
             new_w = int(round(base_w * ratio))
             new_h = int(round(base_h * ratio))
@@ -178,6 +202,34 @@ Draws an input image along a coordinate path for each frame, returning the rende
         new_h = max(1, new_h)
         return new_w, new_h
 
+    def _create_shadow(self, ref_img_width, ref_img_height, pos_x, pos_y, scale_factor):
+        """
+        Create a shadow image scaled horizontally to match ref_image width only.
+        Shadow is positioned at the bottom center of the original (non-rotated) ref_image.
+        Returns: (shadow_img, shadow_paste_x, shadow_paste_y) or None if shadow unavailable
+        """
+        if self.shadow_image is None:
+            return None
+
+        # Scale shadow to match ref_image width only (maintain original shadow height)
+        shadow_orig_w, shadow_orig_h = self.shadow_image.size
+        # Calculate height maintaining aspect ratio based on width scaling
+        width_scale = ref_img_width / shadow_orig_w
+        shadow_new_h = int(round(shadow_orig_h * width_scale))
+        shadow_scaled = self.shadow_image.resize((ref_img_width, shadow_new_h), Image.LANCZOS)
+
+        # Position shadow at the bottom center of the original ref_image position
+        # The ref_img is centered at (pos_x, pos_y), so bottom center is at:
+        # x: pos_x (horizontally centered)
+        # y: pos_y + ref_img_height/2 (bottom of ref_img)
+        # Then we need to center the shadow horizontally and align its top to ref_img bottom
+        # Offset shadow upward slightly so it overlaps with the bottom of the ref_image
+        shadow_offset_y = shadow_new_h * 0.5  # Offset by 50% of shadow height
+        shadow_paste_x = int(round(pos_x - shadow_scaled.width / 2))
+        shadow_paste_y = int(round(pos_y + ref_img_height / 2 - shadow_offset_y))
+
+        return shadow_scaled, shadow_paste_x, shadow_paste_y
+
     def _normalize_frame_count(self, coords, total_frames):
         if not coords:
             return []
@@ -195,13 +247,13 @@ Draws an input image along a coordinate path for each frame, returning the rende
         return padded
 
     def create(self, bg_image, ref_images, coordinates, ref_masks=None, use_box_rotation=True, use_box_scale_size=True,
-               fallback_scale=1.0, overlay_opacity=1.0, frames=0):
+               fallback_scale=1.0, overlay_opacity=1.0, frames=0, add_shadows=False):
         try:
             overlay_opacity = max(0.0, min(1.0, float(overlay_opacity)))
         except (TypeError, ValueError):
             overlay_opacity = 1.0
         # Parse coordinates and metadata
-        coords, coord_width, coord_height, ref_selections = self._parse_coordinates(coordinates)
+        coords, coord_width, coord_height, ref_selections, visibility, editor_scale = self._parse_coordinates(coordinates)
         if not coords:
             # Nothing to draw, return background and empty coords
             return bg_image, torch.zeros([bg_image.shape[0], bg_image.shape[1], bg_image.shape[2]], dtype=torch.float32)
@@ -300,12 +352,19 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 bg_rgba = bg_src.convert("RGBA") if bg_src else Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 255))
                 mask_base = Image.new("L", (frame_width, frame_height), 0)
 
-                # Process each layer for this frame
-                for layer_idx, layer_coords in enumerate(coords):
+                # Process each layer for this frame (reversed so top layers in list draw on top)
+                for reversed_idx, layer_coords in enumerate(reversed(coords)):
                     if frame_idx >= len(layer_coords):
                         continue
 
                     point = layer_coords[frame_idx]
+
+                    # Get original layer index (before reversal) for ref_selections
+                    layer_idx = len(coords) - 1 - reversed_idx
+
+                    # Skip this layer if visibility is False
+                    if visibility and layer_idx < len(visibility) and not visibility[layer_idx]:
+                        continue
 
                     # Determine which ref_image to use for this layer
                     ref_selection = ref_selections[layer_idx] if layer_idx < len(ref_selections) else 'no_ref'
@@ -320,7 +379,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                     scale_factor = self._get_scale(point, fallback_scale)
 
                     new_w, new_h = self._compute_target_size(
-                        base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size
+                        base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size, editor_scale
                     )
                     ref_img = base_ref.resize((new_w, new_h), Image.LANCZOS)
                     mask_img = None
@@ -348,18 +407,17 @@ Draws an input image along a coordinate path for each frame, returning the rende
                                 mask_pil = Image.fromarray(mask_arr, mode="L")
                                 # Resize mask to match ref_img size
                                 mask_resized = mask_pil.resize((new_w, new_h), Image.LANCZOS)
-                                # Invert mask to align with expected compositing from editor
-                                inv_mask = mask_resized.point(lambda v: 255 - v)
+                                # Don't invert mask - use it directly
                                 # Multiply ref_mask with existing alpha channel from ref_img (preserves PNG transparency)
                                 r, g, b, original_alpha = ref_img.split()
                                 # Combine original alpha with mask by multiplying them
-                                inv_mask_arr = np.array(inv_mask).astype(np.float32) / 255.0
+                                mask_arr_float = np.array(mask_resized).astype(np.float32) / 255.0
                                 original_alpha_arr = np.array(original_alpha).astype(np.float32) / 255.0
-                                combined_alpha_arr = np.clip(inv_mask_arr * original_alpha_arr * 255.0, 0, 255).astype(np.uint8)
+                                combined_alpha_arr = np.clip(mask_arr_float * original_alpha_arr * 255.0, 0, 255).astype(np.uint8)
                                 combined_alpha = Image.fromarray(combined_alpha_arr, mode="L")
                                 ref_img = Image.merge("RGBA", (r, g, b, combined_alpha))
-                                # Store mask for mask output
-                                mask_img = mask_resized.point(lambda v: 255 - v)
+                                # Store mask for mask output without inversion
+                                mask_img = mask_resized
                         except Exception as e:
                             print(f"Error applying mask: {e}, mask shape: {ref_masks.shape if ref_masks is not None else 'None'}, ref_idx: {ref_idx}")
                             pass
@@ -385,6 +443,13 @@ Draws an input image along a coordinate path for each frame, returning the rende
                     paste_x = int(round(pos_x - ref_img.width / 2))
                     paste_y = int(round(pos_y - ref_img.height / 2))
 
+                    # Add shadow if enabled (before ref_img, behind it)
+                    if add_shadows:
+                        shadow_result = self._create_shadow(new_w, new_h, pos_x, pos_y, scale_factor)
+                        if shadow_result is not None:
+                            shadow_img, shadow_paste_x, shadow_paste_y = shadow_result
+                            bg_rgba.alpha_composite(shadow_img, dest=(shadow_paste_x, shadow_paste_y))
+
                     bg_rgba.alpha_composite(ref_img, dest=(paste_x, paste_y))
 
                     if mask_img is not None:
@@ -395,6 +460,15 @@ Draws an input image along a coordinate path for each frame, returning the rende
 
         else:
             # Process single layer
+            # Check if this single layer is visible
+            layer_visible = True
+            if visibility and len(visibility) > 0:
+                layer_visible = visibility[0]
+
+            # If layer is not visible, return background unchanged
+            if not layer_visible:
+                return bg_image, torch.zeros([bg_image.shape[0], bg_image.shape[1], bg_image.shape[2]], dtype=torch.float32)
+
             for idx, point in enumerate(coords):
                 bg_src = bg_pils[min(idx, len(bg_pils) - 1)] if bg_pils else None
                 bg_rgba = bg_src.convert("RGBA") if bg_src else Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 255))
@@ -412,7 +486,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 scale_factor = self._get_scale(point, fallback_scale)
 
                 new_w, new_h = self._compute_target_size(
-                    base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size
+                    base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size, editor_scale
                 )
                 ref_img = base_ref.resize((new_w, new_h), Image.LANCZOS)
                 mask_img = None
@@ -440,18 +514,17 @@ Draws an input image along a coordinate path for each frame, returning the rende
                             mask_pil = Image.fromarray(mask_arr, mode="L")
                             # Resize mask to match ref_img size
                             mask_resized = mask_pil.resize((new_w, new_h), Image.LANCZOS)
-                            # Invert mask to align with expected compositing from editor
-                            inv_mask = mask_resized.point(lambda v: 255 - v)
+                            # Don't invert mask - use it directly
                             # Multiply ref_mask with existing alpha channel from ref_img (preserves PNG transparency)
                             r, g, b, original_alpha = ref_img.split()
                             # Combine original alpha with mask by multiplying them
-                            inv_mask_arr = np.array(inv_mask).astype(np.float32) / 255.0
+                            mask_arr_float = np.array(mask_resized).astype(np.float32) / 255.0
                             original_alpha_arr = np.array(original_alpha).astype(np.float32) / 255.0
-                            combined_alpha_arr = np.clip(inv_mask_arr * original_alpha_arr * 255.0, 0, 255).astype(np.uint8)
+                            combined_alpha_arr = np.clip(mask_arr_float * original_alpha_arr * 255.0, 0, 255).astype(np.uint8)
                             combined_alpha = Image.fromarray(combined_alpha_arr, mode="L")
                             ref_img = Image.merge("RGBA", (r, g, b, combined_alpha))
-                            # Store mask for mask output
-                            mask_img = mask_resized.point(lambda v: 255 - v)
+                            # Store mask for mask output without inversion
+                            mask_img = mask_resized
                     except Exception as e:
                         print(f"Error applying mask: {e}, mask shape: {ref_masks.shape if ref_masks is not None else 'None'}, ref_idx: {ref_idx}")
                         pass
@@ -478,6 +551,14 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 paste_y = int(round(pos_y - ref_img.height / 2))
 
                 frame_image = bg_rgba.copy()
+
+                # Add shadow if enabled (before ref_img, behind it)
+                if add_shadows:
+                    shadow_result = self._create_shadow(new_w, new_h, pos_x, pos_y, scale_factor)
+                    if shadow_result is not None:
+                        shadow_img, shadow_paste_x, shadow_paste_y = shadow_result
+                        frame_image.alpha_composite(shadow_img, dest=(shadow_paste_x, shadow_paste_y))
+
                 frame_image.alpha_composite(ref_img, dest=(paste_x, paste_y))
                 frames.append(frame_image.convert("RGB"))
 

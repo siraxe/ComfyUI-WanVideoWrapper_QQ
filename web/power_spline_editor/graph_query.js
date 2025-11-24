@@ -307,6 +307,7 @@ async function extractImagesFromSourceNode(sourceNodeObj, includeDomFallback = f
 
             // Batching/list helpers: expect widgets to hold arrays of images
             case 'ImageBatch':
+            case 'CreateImageList':
             case 'ImpactMakeImageList':
             case 'ImpactMakeAnyList': {
                 await collectFromWidgets(sourceNode.widgets, 'temp');
@@ -583,7 +584,7 @@ function isImageNode(node) {
         'ImagePadForOutpaint', 'ImageBatch', 'ImageBlend', 'ImageBlur', 'ImageColorToBW',
         'ImageFlip', 'ImageOnlyCheckpointLoader', 'ImageApplyProcessing',
         // Additional list/batch helpers that produce image lists
-        'ImpactMakeImageList', 'ImpactMakeAnyList'
+        'CreateImageList', 'ImpactMakeImageList', 'ImpactMakeAnyList'
     ];
     if (imageNodeTypes.some(type => node.type && node.type.includes(type))) {
         return true;

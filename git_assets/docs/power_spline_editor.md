@@ -9,7 +9,7 @@
 </td>
 <td width="65%" valign="top">
 
-### All splines
+### Normal splines
 - Double click - change spline layer
 - Click alt + left/right/middle to rotate/scale/move curves from their base point
 - Ctrl + left - add point between
@@ -23,7 +23,26 @@
 <tr>
 <td width="35%">
 
-![Spline Editor](../img/s3.webp)
+![Spline Editor](../img/s4.webp)
+
+</td>
+<td width="65%" valign="top">
+
+### Keyframes
+- S + left click - adds/removes keys in timeline and canvas (when pressed on box or point to remove) 
+- Alt + right click - on object would scale it (proportionally only for now) 
+- Shift + Spacebar - playback add layers (preview mode) 
+- Shift + left click - on canvas scrubs selected timeline , on timetime scrubs time without moving object
+- 🔃 Canvas - refreshes canvas and ref images
+- 🕞 Frames - updates all timeline max frames (or squeezes currnt keyframes if last key is < than new max)
+
+</td>
+</tr>
+
+<tr>
+<td width="35%">
+
+![Keyframe Editor](../img/s3.webp)
 
 </td>
 <td width="65%" valign="top">

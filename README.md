@@ -1,20 +1,16 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 ## Updates
+
+**Version 1.0.9** - 2025-11-24
+- **Proper keyframes control in editor + TTM sample**: Cleaned up keyframe layer , added ref pull and animation to later be used with ttm [Example](examples/ttm/ttm_example_wf.json) , https://github.com/time-to-move/TTM , ty https://github.com/kijai/ComfyUI-WanVideoWrapper for wrapper implementation.
+- [Power Spline Editor - keyframe hotkey usage](git_assets/docs/power_spline_editor.md) 
+
+
 **Version 1.0.8** - 2025-11-17
 - **Refactor + better ATI driver control**: Slight messy refactor + proper ati point output with pause [Example](examples/ATI_buildings_wobble/ATI_buildings_wobble.json)
 
 https://github.com/user-attachments/assets/c945432c-fe58-4783-a1c3-565e61868245
-
-
-**Version 1.0.7** - 2025-11-16
-- **Box layer type**: New layer type that can scale "points" type layer points when driving them (only points for now)
-- Right click drag in inner border of boxes to scale each one individually.
-- If updated spline editor messes up workflow , open it ,delete node , refresh page ,create new.
-
-https://github.com/user-attachments/assets/e5849627-5f1a-4056-a941-a15b40bfc6c4
-
-
 
 
 

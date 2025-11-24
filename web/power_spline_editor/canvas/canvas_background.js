@@ -95,19 +95,26 @@ export function attachBackgroundHandlers(editor) {
   };
 
   editor.refreshBackgroundImage = () => {
-    if (editor.node.imgData && editor.node.imgData.base64) {
-      const base64String = editor.node.imgData.base64;
-      const imageUrl = `data:${editor.node.imgData.type};base64,${base64String}`;
-      const img = new Image();
-      img.src = imageUrl;
-      img.onload = () => {
-        editor.handleImageLoad(img, null, base64String);
-        editor.renderPreviousSplines();
-        editor.layerRenderer.render();
-      };
-      img.onerror = (error) => {
-        console.error(`refreshBackgroundImage: Failed to load image:`, error);
-      };
-    }
+    return new Promise((resolve, reject) => {
+      if (editor.node.imgData && editor.node.imgData.base64) {
+        const base64String = editor.node.imgData.base64;
+        const imageUrl = `data:${editor.node.imgData.type};base64,${base64String}`;
+        const img = new Image();
+        img.src = imageUrl;
+        img.onload = () => {
+          editor.handleImageLoad(img, null, base64String);
+          editor.renderPreviousSplines();
+          editor.layerRenderer.render();
+          resolve();
+        };
+        img.onerror = (error) => {
+          console.error(`refreshBackgroundImage: Failed to load image:`, error);
+          reject(error);
+        };
+      } else {
+        // No image data available, resolve immediately
+        resolve();
+      }
+    });
   };
 }

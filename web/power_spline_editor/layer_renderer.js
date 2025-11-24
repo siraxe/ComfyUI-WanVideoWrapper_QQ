@@ -165,7 +165,7 @@ export class LayerRenderer {
         if (this._renderedGroups.activeBoxDots) {
             const children = Array.from(this._renderedGroups.activeBoxDots.children);
             const activeWidget = this.node.layerManager.getActiveWidget();
-            const radius = validPoints.length > 0 ? BOX_BASE_RADIUS * this.getPointScale(validPoints[0], true) : BOX_BASE_RADIUS;
+            const radius = validPoints.length > 0 ? this.getScaledBoxRadius(validPoints[0]) : (BOX_BASE_RADIUS * this.getCanvasScale());
 
             children.forEach((element, idx) => {
                 if (element.tagName === 'path' && idx < validPoints.length) {
@@ -580,6 +580,21 @@ export class LayerRenderer {
         return 1;
     }
 
+    getCanvasScale() {
+        // Returns the canvas scaling factor used for background image
+        const editor = this.splineEditor;
+        return (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0)
+            ? editor.scale
+            : 1;
+    }
+
+    getScaledBoxRadius(point) {
+        // Combines canvas scale with individual box scale
+        const pointScale = this.getPointScale(point, true);
+        const canvasScale = this.getCanvasScale();
+        return BOX_BASE_RADIUS * pointScale * canvasScale;
+    }
+
     _getBoxRotationValue(point) {
         if (!point) return 0;
         if (typeof point.boxRotation === 'number' && !Number.isNaN(point.boxRotation)) return point.boxRotation;
@@ -589,9 +604,9 @@ export class LayerRenderer {
 
     _computeBoxHandleGeometry(point) {
         if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
-        
+
         const rotation = this._getBoxRotationValue(point);
-        const radius = BOX_BASE_RADIUS * this.getPointScale(point, true);
+        const radius = this.getScaledBoxRadius(point);
         if (!Number.isFinite(radius)) return null;
         
         const extra = Math.max(18, radius * 0.5);
@@ -861,8 +876,9 @@ export class LayerRenderer {
 
         if (boxPlayMode) {
             // Only render box layers that are visible (on === true)
+            // Render in reverse order so top layers in list draw on top
             const boxWidgets = allWidgets.filter(w => w?.value?.type === 'box_layer' && w?.value?.on !== false);
-            boxWidgets.forEach(w => this._queueBoxManipulator(w));
+            [...boxWidgets].reverse().forEach(w => this._queueBoxManipulator(w));
 
             this._ensureActivePanelOnTop();
             this.vis.render();
@@ -878,7 +894,8 @@ export class LayerRenderer {
         }
 
         // Render inactive layers
-        allWidgets.forEach(widget => {
+        // Render inactive layers in reverse order so top layers in list draw on top
+        [...allWidgets].reverse().forEach(widget => {
             const treatActiveAsInactive = isDrawing && handdrawMode === 'create' && widget === activeWidget;
             if (widget !== activeWidget || treatActiveAsInactive) {
                 this.drawInactiveLayer(widget);
@@ -1063,7 +1080,7 @@ export class LayerRenderer {
         // During preview mode (_boxRefOnlyMode), don't render green boxes or rotation controls
         if (!this._boxRefOnlyMode) {
             sortedPoints.forEach((dot, index) => {
-                const radius = BOX_BASE_RADIUS * this.getPointScale(dot, true);
+                const radius = this.getScaledBoxRadius(dot);
                 const rotation = this._getBoxRotationValue(dot);
 
                 const svgStyles = {
@@ -1142,7 +1159,7 @@ export class LayerRenderer {
         // Queue attached reference image (fit inside box, preserve aspect)
         if (attachment && (attachment.base64 || attachment.path) && sortedPoints.length > 0) {
             const point = sortedPoints[0];
-            const boxRadius = BOX_BASE_RADIUS * this.getPointScale(point, true);
+            const boxRadius = this.getScaledBoxRadius(point);
             const boxSize = boxRadius * 2;
             const imgW = Math.max(1, attachment.width || boxSize);
             const imgH = Math.max(1, attachment.height || boxSize);
@@ -1257,7 +1274,7 @@ export class LayerRenderer {
         point.boxRotation = (typeof normalized.rotation === 'number' && !Number.isNaN(normalized.rotation)) ? normalized.rotation : 0;
 
         const styles = this._getLayerStyles('box', 'active', true, false);
-        const radius = BOX_BASE_RADIUS * this.getPointScale(point, true);
+        const radius = this.getScaledBoxRadius(point);
         const svgStyles = {
             radius,
             stroke: styles.pointStroke || "#139613",
@@ -1739,21 +1756,18 @@ export class LayerRenderer {
                 const frameVal = Number(key.frame);
                 const rawX = (typeof key.x === 'number' && !Number.isNaN(key.x)) ? key.x : 0.5;
                 const rawY = (typeof key.y === 'number' && !Number.isNaN(key.y)) ? key.y : 0.5;
-                
-                // Normalize if needed
-                const normX = Math.abs(rawX) > 1 ? rawX / editorWidth : rawX;
-                const normY = Math.abs(rawY) > 1 ? rawY / editorHeight : rawY;
-                
-                const clampedX = Math.max(0, Math.min(1, normX));
-                const clampedY = Math.max(0, Math.min(1, normY));
-                
+
+                // Normalize if needed (values >= 10 are assumed to be pixel coordinates)
+                const normX = Math.abs(rawX) >= 10 ? rawX / editorWidth : rawX;
+                const normY = Math.abs(rawY) >= 10 ? rawY / editorHeight : rawY;
+
                 const scaleVal = (typeof key.scale === 'number' && !Number.isNaN(key.scale)) ? key.scale : 1;
                 const rotationVal = (typeof key.rotation === 'number' && !Number.isNaN(key.rotation)) ? key.rotation : 0;
 
                 return {
                     frame: Number.isFinite(frameVal) ? Math.round(frameVal) : 1,
-                    x: clampedX,
-                    y: clampedY,
+                    x: normX,
+                    y: normY,
                     scale: this.splineEditor.clampScaleValue?.(scaleVal) ?? Math.max(0.2, Math.min(3, scaleVal)),
                     rotation: rotationVal,
                 };
@@ -1803,13 +1817,10 @@ export class LayerRenderer {
         const interpolationMode = widget.value.box_interpolation || 'linear';
 
         // Validate denormalized points to prevent drawing artifacts
-        const validKeyframeDenormPoints = keyframeDenormPoints.filter(p => 
-            p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
-            p.x >= 0 && p.y >= 0 && 
-            p.x <= (this.splineEditor?.width || 1000) && 
-            p.y <= (this.splineEditor?.height || 1000)
+        const validKeyframeDenormPoints = keyframeDenormPoints.filter(p =>
+            p && Number.isFinite(p.x) && Number.isFinite(p.y)
         );
-        
+
         if (!validKeyframeDenormPoints.length) return;
 
         // Generate path points for connecting line

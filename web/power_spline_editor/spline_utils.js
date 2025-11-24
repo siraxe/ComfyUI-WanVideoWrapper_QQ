@@ -32,7 +32,8 @@ export {
 };
 
 //from melmass
-export const BOX_BASE_RADIUS = 40;
+// IMPORTANT: These must match config/constants.py - keep them in sync!
+export const BOX_BASE_RADIUS = 200;
 export const POINT_BASE_RADIUS = 8;
 export const BOX_BORDER_BAND = 20;
 
@@ -101,7 +102,7 @@ export const create_documentation_stylesheet = () => {
         line-height: 1.5em;
         padding: 0px;
         z-index: 0;
-        overflow: hidden;
+        overflow: visible;
         display: block;
        }
         `
@@ -337,8 +338,20 @@ export class TopRowWidget extends RgthreeBaseWidget {
                 }
             }
 
+            // Wait for reference image update and scale recalculation to complete
             if (node.updateReferenceImageFromConnectedNode) {
-                node.updateReferenceImageFromConnectedNode();
+                try {
+                    // This now properly awaits the image loading and scale recalculation
+                    await node.updateReferenceImageFromConnectedNode();
+
+                    // Force a final render with the correct scale
+                    // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
+                    if (node.editor && node.editor.layerRenderer) {
+                        node.editor.layerRenderer.render();
+                    }
+                } catch (e) {
+                    console.warn('Failed to update reference image:', e);
+                }
             }
 
             // Check for frames input and handle box layer keyframe scaling
