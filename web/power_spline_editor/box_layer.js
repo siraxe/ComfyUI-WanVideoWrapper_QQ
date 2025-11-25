@@ -157,7 +157,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         this.hitAreas.repeatAny.bounds = [repeatParts[0][0], posY, repeatParts[2][0] + repeatParts[2][1] - repeatParts[0][0], mainRowHeight];
         rposX -= drawNumberWidgetPart.WIDTH_TOTAL + 10;
 
-        // Interpolation dropdown (Type column) - 70px width to match header
+        // Interpolation dropdown (Type column) - matches Draw column width
         const interpWidth = 70;
         const interpModes = ['linear', 'basis'];
         const interpIndex = interpModes.indexOf(this.value.box_interpolation || 'linear');
@@ -188,7 +188,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         rposX -= actionWidth + 10;
 
         const refOptions = this._getRefOptions();
-        const refWidth = 70;
+        const refWidth = drawNumberWidgetPart.WIDTH_TOTAL;
         const currentRef = this.value.ref_selection || 'no_ref';
         const refDisplay = refOptions.includes(currentRef) ? currentRef : 'no_ref';
         ctx.textAlign = 'center';
@@ -222,7 +222,8 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         ctx.textAlign = 'left';
         const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
         const drivenPosX = rposX - numberWidth / 2 - 15;
-        this.hitAreas.drivenToggle.bounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height, value: this.value.driven });
+        const drivenBounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height: mainRowHeight, value: this.value.driven });
+        this.hitAreas.drivenToggle.bounds = [drivenBounds[0], posY, drivenBounds[1], mainRowHeight];
         rposX -= numberWidth + 10;
 
         ctx.textAlign = 'left';
