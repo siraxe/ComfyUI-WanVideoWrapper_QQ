@@ -1302,11 +1302,6 @@ app.registerExtension({
                 console.log('Attempting to update reference image from connected node...');
 
                 try {
-                    // Preserve the original canvas dimensions before refresh
-                    const preservedWidth = this.editor?.originalImageWidth;
-                    const preservedHeight = this.editor?.originalImageHeight;
-                    const preservedScale = this.editor?.scale;
-
                     // Get reference image from connected bg_image input
                     const base64Image = await getReferenceImageFromConnectedNode(this, 'bg_image');
                     if (!base64Image) {
@@ -1316,45 +1311,13 @@ app.registerExtension({
                         return;
                     }
 
-                    // We need to resize the fetched image to match the original canvas dimensions
-                    // to maintain consistent scaling for the green boxes
-                    if (preservedWidth && preservedHeight) {
-                        const tempImg = new Image();
-                        const resizedImageData = await new Promise((resolve, reject) => {
-                            tempImg.onload = () => {
-                                // Create a canvas to resize the image
-                                const resizeCanvas = document.createElement('canvas');
-                                resizeCanvas.width = preservedWidth;
-                                resizeCanvas.height = preservedHeight;
-                                const resizeCtx = resizeCanvas.getContext('2d');
-
-                                // Draw the image scaled to the preserved dimensions
-                                resizeCtx.drawImage(tempImg, 0, 0, preservedWidth, preservedHeight);
-
-                                // Get the resized image as base64
-                                const resizedDataUrl = resizeCanvas.toDataURL('image/jpeg', 0.95);
-                                const resizedBase64 = resizedDataUrl.split(',')[1];
-
-                                resolve(resizedBase64);
-                            };
-                            tempImg.onerror = reject;
-                            tempImg.src = base64Image;
-                        });
-
-                        // Store the resized reference image
-                        this.originalRefImageData = {
-                            name: 'ref_image_from_connection.jpg',
-                            base64: resizedImageData,
-                            type: 'image/jpeg'
-                        };
-                    } else {
-                        // No preserved dimensions, use the image as-is
-                        this.originalRefImageData = {
-                            name: 'ref_image_from_connection.jpg',
-                            base64: base64Image.split(',')[1],
-                            type: 'image/jpeg'
-                        };
-                    }
+                    // Store the fetched image as-is without resizing
+                    // The canvas system will handle aspect ratio preservation via recenterBackgroundImage()
+                    this.originalRefImageData = {
+                        name: 'ref_image_from_connection.jpg',
+                        base64: base64Image.split(',')[1],
+                        type: 'image/jpeg'
+                    };
 
                     // Cache the ref image for future use
                     await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png');
@@ -1373,16 +1336,6 @@ app.registerExtension({
 
                     // Wait for the image processing to complete
                     await new Promise(resolve => setTimeout(resolve, 200));
-
-                    // Restore the preserved dimensions and scale if they changed
-                    if (preservedWidth && preservedHeight && this.editor) {
-                        if (this.editor.originalImageWidth !== preservedWidth || this.editor.originalImageHeight !== preservedHeight) {
-                            this.editor.originalImageWidth = preservedWidth;
-                            this.editor.originalImageHeight = preservedHeight;
-                            this.editor.scale = preservedScale;
-                            this.editor.recenterBackgroundImage();
-                        }
-                    }
 
                 } catch (error) {
                     console.error('Error updating reference image from connected node:', error);

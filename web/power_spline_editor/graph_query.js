@@ -4,6 +4,7 @@
  */
 
 import { app } from '../../../scripts/app.js';
+import { applyResizeParams } from './image_resize.js';
 
 /**
  * Find the source node connected to a specific input of the current node
@@ -395,6 +396,122 @@ async function loadImageAsBase64(imageUrl) {
 }
 
 /**
+ * Check if ImageResizeKJv2 is in the node chain and extract its parameters
+ * @param {Object} startNode - The starting node
+ * @param {string} inputName - The input name to trace
+ * @returns {Object|null} Resize node parameters or null if not found
+ */
+function findResizeNodeInChain(startNode, inputName) {
+    const graph = app.graph;
+    if (!graph || !graph.links) return null;
+
+    const visited = new Set();
+    const toVisit = [{ node: startNode, input: inputName }];
+
+    while (toVisit.length > 0) {
+        const { node, input } = toVisit.shift();
+
+        if (visited.has(node.id)) continue;
+        visited.add(node.id);
+
+        // Check if this node is ImageResizeKJv2
+        if (node.type === 'ImageResizeKJv2') {
+            // Extract parameters from the node's widgets
+            const params = {};
+            if (node.widgets) {
+                for (const widget of node.widgets) {
+                    params[widget.name] = widget.value;
+                }
+            }
+
+            // Check if width/height are connected from other nodes
+            if (node.inputs) {
+                for (let i = 0; i < node.inputs.length; i++) {
+                    const nodeInput = node.inputs[i];
+                    const inputName = nodeInput.name;
+
+                    // Find if this input has a connection
+                    let link = null;
+                    if (graph.links instanceof Map) {
+                        for (const [linkId, linkObj] of graph.links) {
+                            if (linkObj && linkObj.target_id === node.id && linkObj.target_slot === i) {
+                                link = linkObj;
+                                break;
+                            }
+                        }
+                    } else if (Array.isArray(graph.links)) {
+                        link = graph.links.find(linkObj =>
+                            linkObj && linkObj.target_id === node.id && linkObj.target_slot === i
+                        );
+                    }
+
+                    if (link) {
+                        // Found a connection for this input
+                        const sourceNode = graph._nodes?.find(n => n.id === link.origin_id);
+                        if (sourceNode) {
+                            // Try to get the value from the source node's output
+                            const outputSlot = link.origin_slot;
+
+                            // Check if source node has widgets_values or properties
+                            if (sourceNode.widgets_values && sourceNode.widgets_values.length > outputSlot) {
+                                params[inputName] = sourceNode.widgets_values[outputSlot];
+                            } else if (sourceNode.widgets && sourceNode.widgets[outputSlot]) {
+                                params[inputName] = sourceNode.widgets[outputSlot].value;
+                            } else {
+                                // Try to find matching output name
+                                const outputInfo = sourceNode.outputs?.[outputSlot];
+                                if (outputInfo) {
+                                    // If it's a primitive or value node, try to get its value
+                                    if (sourceNode.widgets && sourceNode.widgets.length > 0) {
+                                        const widget = sourceNode.widgets.find(w => w.name === outputInfo.name || w.name === 'value');
+                                        if (widget) {
+                                            params[inputName] = widget.value;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return params;
+        }
+
+        // Continue traversing upstream
+        if (node.inputs) {
+            for (const nodeInput of node.inputs) {
+                const inputIndex = node.inputs.indexOf(nodeInput);
+
+                // Find link connected to this input
+                let link = null;
+                if (graph.links instanceof Map) {
+                    for (const [linkId, linkObj] of graph.links) {
+                        if (linkObj && linkObj.target_id === node.id && linkObj.target_slot === inputIndex) {
+                            link = linkObj;
+                            break;
+                        }
+                    }
+                } else if (Array.isArray(graph.links)) {
+                    link = graph.links.find(linkObj =>
+                        linkObj && linkObj.target_id === node.id && linkObj.target_slot === inputIndex
+                    );
+                }
+
+                if (link) {
+                    const sourceNode = graph._nodes?.find(n => n.id === link.origin_id);
+                    if (sourceNode) {
+                        toVisit.push({ node: sourceNode, input: nodeInput.name });
+                    }
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
  * Main function to get reference image from connected node
  * @param {Object} currentNode - The Power Spline Editor node
  * @returns {Promise<string|null>} Promise that resolves to base64 image data or null
@@ -415,11 +532,14 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
             });
         }
     }
-    
+
     if (!sourceNodeObj) {
         console.log(`No source node found for ${inputName} input after deep search`);
         return null;
     }
+
+    // Check if ImageResizeKJv2 is in the chain and get its parameters
+    const resizeParams = findResizeNodeInChain(currentNode, inputName);
 
     // Step 2: Extract image data from the source node
     let imageDataUrl = await extractImageFromSourceNode(sourceNodeObj);
@@ -445,10 +565,32 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
     }
 
     // Step 3: Load the image as base64
-    const base64Image = await loadImageAsBase64(imageDataUrl);
+    let base64Image = await loadImageAsBase64(imageDataUrl);
     if (!base64Image) {
         console.error('Failed to load image as base64');
         return null;
+    }
+
+    // Step 4: Apply resize parameters if ImageResizeKJv2 was detected
+    if (resizeParams) {
+        try {
+            // Load image to apply resize
+            const img = new Image();
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = base64Image;
+            });
+
+            // Apply resize transformation
+            const { canvas } = await applyResizeParams(img, resizeParams);
+
+            // Convert back to base64
+            base64Image = canvas.toDataURL('image/jpeg', 0.95);
+        } catch (error) {
+            console.error('Error applying resize parameters:', error);
+            // Continue with original image if resize fails
+        }
     }
 
     console.log('Successfully retrieved reference image from connected node');

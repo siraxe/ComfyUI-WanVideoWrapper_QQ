@@ -14,6 +14,16 @@ app.registerExtension({
 				}
 			};
 
+			// Override onConfigure to ensure image_ref stays at bottom after page refresh
+			const originalOnConfigure = nodeType.prototype.onConfigure;
+			nodeType.prototype.onConfigure = function(info) {
+				if (originalOnConfigure) {
+					originalOnConfigure.apply(this, arguments);
+				}
+				// Ensure image_ref stays at the bottom after loading
+				ensureImageRefAtBottom.call(this);
+			};
+
 			nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info) {
 				const stackTrace = new Error().stack;
 

@@ -26,11 +26,11 @@ Draws an input image along a coordinate path for each frame, returning the rende
             "required": {
                 "bg_image": ("IMAGE", ),
                 "coordinates": ("STRING", {"forceInput": True}),
+                "frames": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1,"forceInput": True}),
                 "ref_images": ("IMAGE", ),
             },
             "optional": {
                 "ref_masks": ("MASK", ),
-                "frames": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1}),
                 "use_box_rotation": ("BOOLEAN", {"default": True}),
                 "use_box_scale_size": ("BOOLEAN", {"default": True}),
                 "fallback_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.01}),
