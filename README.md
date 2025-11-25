@@ -1,7 +1,8 @@
 # ComfyUI-WanVideoWrapper_QQ
 
-**Version 1.0.91** - 2025-11-24
+**Version 1.0.92** - 2025-11-25
 - Optional color match added to `Create Image List` batch node (if no ref_image connected it's not used)
+- Bugfixes , Canvas refresh now can read ImageResizeKJv2 resize and match its parameters to be able to draw on same aspect ratio/crop etc. 
 
 https://github.com/user-attachments/assets/e1b70e5a-71af-4d01-9034-f80c9172811f
 
