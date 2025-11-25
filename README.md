@@ -1,6 +1,9 @@
 # ComfyUI-WanVideoWrapper_QQ
 
-## Updates
+**Version 1.0.91** - 2025-11-24
+- Optinal color match added to `Create Image List` batch node (if no ref_image connected it's not used)
+
+https://github.com/user-attachments/assets/e1b70e5a-71af-4d01-9034-f80c9172811f
 
 **Version 1.0.9** - 2025-11-24
 - **Proper keyframes control in editor + TTM sample**: Cleaned up keyframe layer , added ref pull and animation to later be used with ttm [WF Example](examples/ttm/ttm_example_wf.json)
