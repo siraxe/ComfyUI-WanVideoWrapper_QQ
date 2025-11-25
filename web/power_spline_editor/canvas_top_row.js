@@ -7,7 +7,7 @@ import {
 
 // === TOP ROW WIDGET (Combined refresh button, bg_image dropdown, and width/height controls) ===
 export class TopRowWidget extends RgthreeBaseWidget {
-    constructor(name = "TopRowWidget") {
+    constructor(name = "TopRowWidget", visibility = {}) {
         super(name);
         this.type = "custom";
         this.options = { serialize: false };
@@ -15,6 +15,15 @@ export class TopRowWidget extends RgthreeBaseWidget {
         this.haveMouseMovedValue = false;
         this.canvasButtonMouseDown = false;
         this.framesButtonMouseDown = false;
+        this.visibility = {
+            refreshCanvasButton: true,
+            refreshFramesButton: true,
+            bgImgControl: true,
+            animToggleButton: true,
+            widthControl: true,
+            heightControl: true,
+            ...visibility,
+        };
         this.hitAreas = {
             refreshCanvasButton: { bounds: [0, 0], onClick: null },
             refreshFramesButton: { bounds: [0, 0], onClick: null },
@@ -39,6 +48,17 @@ export class TopRowWidget extends RgthreeBaseWidget {
         const midY = posY + height * 0.5;
 
         ctx.save();
+
+        const assignBounds = (name, bounds) => {
+            const area = this.hitAreas[name];
+            if (!area) return;
+            area.bounds = bounds;
+            area.onClick = null;
+            area.onDown = null;
+            area.onUp = null;
+            area.onMove = null;
+            area.onRightDown = null;
+        };
 
         // Get widget values
         const widthWidget = node.widgets?.find(w => w.name === "mask_width");
@@ -69,79 +89,90 @@ export class TopRowWidget extends RgthreeBaseWidget {
         let posX = startX;
 
         // Draw Refresh Canvas button
-        drawWidgetButton(
-            ctx,
-            { size: [refreshCanvasWidth, height], pos: [posX, posY] },
-            "🔃 Canvas",
-            this.canvasButtonMouseDown
-        );
-        this.hitAreas.refreshCanvasButton.bounds = [posX, refreshCanvasWidth];
+        if (this.visibility.refreshCanvasButton) {
+            drawWidgetButton(
+                ctx,
+                { size: [refreshCanvasWidth, height], pos: [posX, posY] },
+                "🔃 Canvas",
+                this.canvasButtonMouseDown
+            );
+        }
+        assignBounds("refreshCanvasButton", [posX, refreshCanvasWidth]);
         posX += refreshCanvasWidth + spacing;
 
         // Draw Refresh Frames button
-        drawWidgetButton(
-            ctx,
-            { size: [refreshFramesWidth, height], pos: [posX, posY] },
-            "🕞 Frames",
-            this.framesButtonMouseDown
-        );
-        this.hitAreas.refreshFramesButton.bounds = [posX, refreshFramesWidth];
+        if (this.visibility.refreshFramesButton) {
+            drawWidgetButton(
+                ctx,
+                { size: [refreshFramesWidth, height], pos: [posX, posY] },
+                "🕞 Frames",
+                this.framesButtonMouseDown
+            );
+        }
+        assignBounds("refreshFramesButton", [posX, refreshFramesWidth]);
         posX += refreshFramesWidth + spacing;
 
         // Draw bg_img control with left/right arrows
         const arrowWidth = 7; // Smaller arrows
 
-        // Draw background box
-        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
-        ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
-        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
-        ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
+        if (this.visibility.bgImgControl) {
+            // Draw background box
+            ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+            ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
+            ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+            ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
 
-        // Draw left arrow (positioned at the very left edge)
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.fillText("<", posX + arrowWidth / 2, midY);
-        this.hitAreas.bgImgLeftArrow.bounds = [posX, arrowWidth];
+            // Draw left arrow (positioned at the very left edge)
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.fillText("<", posX + arrowWidth / 2, midY);
 
-        // Draw text value (centered in the control)
-        ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
-        this.hitAreas.bgImgVal.bounds = [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)];
+            // Draw text value (centered in the control)
+            ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
 
-        // Draw right arrow (positioned at the very right edge)
-        ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
-        this.hitAreas.bgImgRightArrow.bounds = [posX + bgImgDropdownWidth - arrowWidth, arrowWidth];
+            // Draw right arrow (positioned at the very right edge)
+            ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
+        }
+
+        assignBounds("bgImgLeftArrow", [posX, arrowWidth]);
+        assignBounds("bgImgVal", [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)]);
+        assignBounds("bgImgRightArrow", [posX + bgImgDropdownWidth - arrowWidth, arrowWidth]);
 
         // Combined bounds for the entire control
-        this.hitAreas.bgImgAny.bounds = [posX, bgImgDropdownWidth];
+        assignBounds("bgImgAny", [posX, bgImgDropdownWidth]);
         posX += bgImgDropdownWidth + spacing;
 
         // Animation toggle icon for inactive flow animation (default OFF)
         const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? false);
-        drawWidgetButton(
-            ctx,
-            { size: [iconButtonWidth, height], pos: [posX, posY] },
-            "~", // wavy line icon
-            isAnimOn
-        );
-        if (isAnimOn) {
-            const pad = 0.5;
-            ctx.save();
-            ctx.strokeStyle = '#2cc6ff';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(posX + pad, posY + pad, iconButtonWidth - pad * 2, height - pad * 2, [4]);
-            ctx.stroke();
-            ctx.restore();
-        }
-        this.hitAreas.animToggleButton = { bounds: [posX, iconButtonWidth], onClick: (e, p, n) => {
-            if (n?.editor) {
-                n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
-                try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
-                n.setDirtyCanvas(true, true);
+        if (this.visibility.animToggleButton) {
+            drawWidgetButton(
+                ctx,
+                { size: [iconButtonWidth, height], pos: [posX, posY] },
+                "~", // wavy line icon
+                isAnimOn
+            );
+            if (isAnimOn) {
+                const pad = 0.5;
+                ctx.save();
+                ctx.strokeStyle = '#2cc6ff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(posX + pad, posY + pad, iconButtonWidth - pad * 2, height - pad * 2, [4]);
+                ctx.stroke();
+                ctx.restore();
             }
-            return true;
-        }};
+            this.hitAreas.animToggleButton = { bounds: [posX, iconButtonWidth], onClick: (e, p, n) => {
+                if (n?.editor) {
+                    n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
+                    try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
+                    n.setDirtyCanvas(true, true);
+                }
+                return true;
+            }};
+        } else {
+            assignBounds("animToggleButton", [posX, iconButtonWidth]);
+        }
         posX += iconButtonWidth + spacing;
 
         // Draw rounded area for width/height controls
@@ -173,9 +204,12 @@ export class TopRowWidget extends RgthreeBaseWidget {
         const widthControlX = controlsStartX;
 
         // Draw width label
-        ctx.textAlign = "left";
-        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-        ctx.fillText(widthLabel, widthControlX, midY);
+        if (this.visibility.widthControl) {
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "left";
+            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+            ctx.fillText(widthLabel, widthControlX, midY);
+        }
 
         // Draw width control (positioned after label)
         const widthControlStartX = widthControlX + labelWidth;
@@ -185,23 +219,29 @@ export class TopRowWidget extends RgthreeBaseWidget {
             height,
             value: widthValue,
             direction: 1,
+            textColor: this.visibility.widthControl ? undefined : "transparent",
         });
 
-        this.hitAreas.widthDec.bounds = wLeftArrow;
-        this.hitAreas.widthVal.bounds = wText;
-        this.hitAreas.widthInc.bounds = wRightArrow;
-        this.hitAreas.widthAny.bounds = [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]];
-        this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
-        this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
-        this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
-        this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
+        assignBounds("widthDec", wLeftArrow);
+        assignBounds("widthVal", wText);
+        assignBounds("widthInc", wRightArrow);
+        assignBounds("widthAny", [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]]);
+        if (this.visibility.widthControl) {
+            this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
+            this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
+            this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
+            this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
+        }
 
         // Height control with label
         const heightControlX = widthControlStartX + numberControlWidth + controlSpacing;
         const heightLabel = "height:";
 
         // Draw height label
-        ctx.fillText(heightLabel, heightControlX, midY);
+        if (this.visibility.heightControl) {
+            ctx.textBaseline = "middle";
+            ctx.fillText(heightLabel, heightControlX, midY);
+        }
 
         // Draw height control (positioned after label)
         const heightControlStartX = heightControlX + labelWidth;
@@ -211,76 +251,85 @@ export class TopRowWidget extends RgthreeBaseWidget {
             height,
             value: heightValue,
             direction: 1,
+            textColor: this.visibility.heightControl ? undefined : "transparent",
         });
 
-        this.hitAreas.heightDec.bounds = hLeftArrow;
-        this.hitAreas.heightVal.bounds = hText;
-        this.hitAreas.heightInc.bounds = hRightArrow;
-        this.hitAreas.heightAny.bounds = [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]];
-        this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
-        this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
-        this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
-        this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
+        assignBounds("heightDec", hLeftArrow);
+        assignBounds("heightVal", hText);
+        assignBounds("heightInc", hRightArrow);
+        assignBounds("heightAny", [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]]);
+        if (this.visibility.heightControl) {
+            this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
+            this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
+            this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
+            this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
+        }
 
         // Set up event handlers for refresh button
-        this.hitAreas.refreshCanvasButton.onClick = async () => {
-            // Update all box layer ref images from connected ref_images
-            if (node.updateAllBoxLayerRefs) {
-                try {
-                    await node.updateAllBoxLayerRefs();
-                } catch (e) {
-                    console.warn('Failed to update box layer refs:', e);
-                }
-            }
-
-            // Wait for reference image update and scale recalculation to complete
-            if (node.updateReferenceImageFromConnectedNode) {
-                try {
-                    // This now properly awaits the image loading and scale recalculation
-                    await node.updateReferenceImageFromConnectedNode();
-
-                    // Force a final render with the correct scale
-                    // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
-                    if (node.editor && node.editor.layerRenderer) {
-                        node.editor.layerRenderer.render();
+        if (this.visibility.refreshCanvasButton) {
+            this.hitAreas.refreshCanvasButton.onClick = async () => {
+                // Update all box layer ref images from connected ref_images
+                if (node.updateAllBoxLayerRefs) {
+                    try {
+                        await node.updateAllBoxLayerRefs();
+                    } catch (e) {
+                        console.warn('Failed to update box layer refs:', e);
                     }
-                } catch (e) {
-                    console.warn('Failed to update reference image:', e);
                 }
-            }
 
-            // Check for frames input and handle box layer keyframe scaling
-            if (node.handleFramesRefresh) {
-                node.handleFramesRefresh();
-            }
-        };
-        this.hitAreas.refreshCanvasButton.onDown = () => {
-            this.canvasButtonMouseDown = true;
-            node.setDirtyCanvas(true, false);
-        };
-        this.hitAreas.refreshCanvasButton.onUp = () => {
-            this.canvasButtonMouseDown = false;
-            node.setDirtyCanvas(true, false);
-        };
+                // Wait for reference image update and scale recalculation to complete
+                if (node.updateReferenceImageFromConnectedNode) {
+                    try {
+                        // This now properly awaits the image loading and scale recalculation
+                        await node.updateReferenceImageFromConnectedNode();
 
-        this.hitAreas.refreshFramesButton.onClick = () => {
-            if (node.handleFramesRefresh) {
-                node.handleFramesRefresh();
-            }
-        };
-        this.hitAreas.refreshFramesButton.onDown = () => {
-            this.framesButtonMouseDown = true;
-            node.setDirtyCanvas(true, false);
-        };
-        this.hitAreas.refreshFramesButton.onUp = () => {
-            this.framesButtonMouseDown = false;
-            node.setDirtyCanvas(true, false);
-        };
+                        // Force a final render with the correct scale
+                        // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
+                        if (node.editor && node.editor.layerRenderer) {
+                            node.editor.layerRenderer.render();
+                        }
+                    } catch (e) {
+                        console.warn('Failed to update reference image:', e);
+                    }
+                }
+
+                // Check for frames input and handle box layer keyframe scaling
+                if (node.handleFramesRefresh) {
+                    node.handleFramesRefresh();
+                }
+            };
+            this.hitAreas.refreshCanvasButton.onDown = () => {
+                this.canvasButtonMouseDown = true;
+                node.setDirtyCanvas(true, false);
+            };
+            this.hitAreas.refreshCanvasButton.onUp = () => {
+                this.canvasButtonMouseDown = false;
+                node.setDirtyCanvas(true, false);
+            };
+        }
+
+        if (this.visibility.refreshFramesButton) {
+            this.hitAreas.refreshFramesButton.onClick = () => {
+                if (node.handleFramesRefresh) {
+                    node.handleFramesRefresh();
+                }
+            };
+            this.hitAreas.refreshFramesButton.onDown = () => {
+                this.framesButtonMouseDown = true;
+                node.setDirtyCanvas(true, false);
+            };
+            this.hitAreas.refreshFramesButton.onUp = () => {
+                this.framesButtonMouseDown = false;
+                node.setDirtyCanvas(true, false);
+            };
+        }
 
         // Set up event handlers for bg_img control
-        this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
-        this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
-        this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
+        if (this.visibility.bgImgControl) {
+            this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
+            this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
+            this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
+        }
 
         ctx.restore();
     }
