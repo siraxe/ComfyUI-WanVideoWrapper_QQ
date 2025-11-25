@@ -1,84 +1,8 @@
-import { app } from '../../../scripts/app.js';
-import { isLowQuality, drawTogglePart, drawNumberWidgetPart, drawRoundedRectangle, fitString, RgthreeBaseWidget } from './drawing_utils.js';
+// Normal spline layer widget
+import { RgthreeBaseWidget, drawRoundedRectangle, drawTogglePart, drawNumberWidgetPart, fitString } from './drawing_utils.js';
 import { initializeDrivenConfig, initializeEasingConfig, initializeScaleConfig, toggleDrivenState, prepareDrivenMenu } from './persistence.js';
 import { showCustomEasingMenu, showCustomDrivenToggleMenu, showInterpolationMenu } from './context_menu.js';
-
-// === SPLINE MULTI WIDGET ===
-export class PowerSplineHeaderWidget extends RgthreeBaseWidget {
-    constructor(name = "PowerSplineHeaderWidget") {
-        super(name);
-        this.value = { type: "PowerSplineHeaderWidget" };
-        this.type = "custom";
-        this.options = { serialize: false };
-        this.hitAreas = {
-            toggle: { bounds: [0, 0], onDown: this.onToggleDown },
-        };
-    }
-
-    draw(ctx, node, w, posY, height) {
-        const margin = 10;
-        const innerMargin = margin * 0.33;
-        const lowQuality = isLowQuality();
-        const allSplineState = node.allSplinesState ? node.allSplinesState() : false;
-        posY += 2;
-        const midY = posY + height * 0.5;
-        let posX = 10;
-        ctx.save();
-        this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: allSplineState });
-        if (!lowQuality) {
-            posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-            ctx.globalAlpha = app.canvas.editor_alpha * 0.55;
-            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.textAlign = "left";
-            ctx.textBaseline = "middle";
-            ctx.fillText("Toggle All", posX, midY);
-
-            let rposX = node.size[0] - margin - innerMargin - innerMargin;
-            ctx.textAlign = "center";
-
-            // Match the widget layout exactly:
-            // 1. Repeat control (far right) - drawNumberWidgetPart.WIDTH_TOTAL = 56
-            const repeatWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-            ctx.fillText("Repeat", rposX - repeatWidth / 2, midY);
-            rposX -= repeatWidth + 10;
-
-            // 2. Interpolation selector - just text, no arrows (width = 70)
-            const interpTextWidth = 70;
-            ctx.fillText("Type", rposX - interpTextWidth / 2, midY);
-            rposX -= interpTextWidth + 10;
-
-            const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-            ctx.fillText("Z-Pause", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            ctx.fillText("A-Pause", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            ctx.fillText("Offset", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-
-            // Easing column - same width as interpolation
-            const easingTextWidth = 70;
-            ctx.fillText("Easing", rposX - easingTextWidth / 2, midY);
-            rposX -= easingTextWidth + 10;
-
-            // Scale column
-            ctx.fillText("Scale", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-            
-            // Driven column (moved after Scale)
-            ctx.fillText("Driven", rposX - numberWidth / 2, midY);
-            rposX -= numberWidth + 10;
-        }
-        ctx.restore();
-    }
-
-    onToggleDown(event, pos, node) {
-        if (node.toggleAllSplines) {
-            node.toggleAllSplines();
-        }
-        this.cancelMouseDown();
-        return true;
-    }
-}
+import { app } from '../../../scripts/app.js';
 
 export class PowerSplineWidget extends RgthreeBaseWidget {
     constructor(name) {
@@ -149,7 +73,6 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         ctx.save();
         const margin = 10;
         const innerMargin = margin * 0.33;
-        const lowQuality = isLowQuality();
         const midY = posY + height * 0.5;
         let posX = margin;
 
@@ -167,11 +90,6 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
 
         this.hitAreas.toggle.bounds = drawTogglePart(ctx, { posX, posY, height, value: this.value.on });
         posX += this.hitAreas.toggle.bounds[1] + innerMargin;
-
-        if (lowQuality) {
-            ctx.restore();
-            return;
-        }
 
         if (!this.value.on) {
             ctx.globalAlpha = app.canvas.editor_alpha * 0.4;
@@ -779,6 +697,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         document.addEventListener('pointermove', onMove, true);
         document.addEventListener('pointerup', onUp, true);
     }
+
     serializeValue(node, index) {
         // Return a deep copy to prevent reference sharing between widgets during serialization
         // This ensures each widget has independent interpolation and other values
@@ -789,53 +708,4 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
     computeSize(width) {
         return [width, LiteGraph.NODE_WIDGET_HEIGHT];
     }
-}
-
-export function chainCallback(object, property, callback) {
-  if (object == undefined) {
-      //This should not happen.
-      console.error("Tried to add callback to non-existant object")
-      return;
-  }
-  if (property in object) {
-      const callback_orig = object[property]
-      object[property] = function () {
-          const r = callback_orig.apply(this, arguments);
-          callback.apply(this, arguments);
-          return r
-      };
-  } else {
-      object[property] = callback;
-  }
-}
-
-export function hideWidgetForGood(node, widget, suffix = '') {
-  widget.origType = widget.type;
-  widget.type = 'hidden' + suffix;
-  widget.hidden = true;
-  
-  // Monkeypatch draw to do nothing
-  widget.draw = () => {};
-  
-  // Monkeypatch computeSize to return [0, -4]
-  // This is a hack to make the widget not take up any space
-  // We need to return -4 instead of 0 because of how LiteGraph calculates node height
-  // In recent versions of LiteGraph, it adds 4 to the widget height
-  widget.computeSize = () => [0, -4];
-  
-  // Prevent the widget from being serialized
-  if (!widget.options) {
-    widget.options = {};
-  }
-  // widget.options.serialize = false;
-  
-  // Hide the widget from the node's list of widgets
-  // This is another hack to prevent the widget from being drawn
-  // We can't just remove it from the list, because other parts of the code
-  // might still need to access it
-  const index = node.widgets.indexOf(widget);
-  if (index > -1) {
-    node.widgets.splice(index, 1);
-    node.widgets.push(widget);
-  }
 }

@@ -1,7 +1,7 @@
 import { app } from '../../../scripts/app.js';
 import { PowerSplineWidget } from './spline_utils.js';
-import { HandDrawLayerWidget } from './handdraw_layer.js';
-import { BoxLayerWidget } from './box_layer.js';
+import { HandDrawLayerWidget } from './layer_type_draw.js';
+import { BoxLayerWidget } from './layer_type_box.js';
 import { updateDrivenConfigValue, updateEasingConfigValue } from './persistence.js';
 
 // Helper to create interactive number input with arrows and drag support
