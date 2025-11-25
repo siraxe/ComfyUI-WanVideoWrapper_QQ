@@ -4,6 +4,7 @@ import folder_paths
 from PIL import Image
 import numpy as np
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 class ImageBlend_GPU:
     # Moved blend modes inside the class
@@ -225,7 +226,21 @@ class CreateImageList:
                 "export_alpha": ("BOOLEAN", {"default": True})
             },
             "optional": {
-                "image1": ("IMAGE",)
+                "image1": ("IMAGE",),
+                "image_ref": ("IMAGE",),
+                "method": (
+            [
+                'mkl',
+                'hm',
+                'reinhard',
+                'mvgd',
+                'hm-mvgd-hm',
+                'hm-mkl-hm',
+            ], {
+               "default": 'mkl'
+            }),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "multithread": ("BOOLEAN", {"default": True}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -237,6 +252,16 @@ class CreateImageList:
     RETURN_NAMES = ("images", "masks")
     FUNCTION = "batch"
     CATEGORY = "WanVideoWrapper_QQ/image"
+    DESCRIPTION = """
+Creates a batch of images from multiple dynamic image inputs.
+Optionally applies color matching to all images if image_ref is provided.
+
+Color matching uses the color-matcher library to transfer color characteristics
+from a reference image to all batch images. This is useful for maintaining
+consistent color grading across multiple images.
+
+Supports alpha channel preservation with export_alpha option.
+"""
 
     def load_image_with_alpha(self, image_path):
         """Load image from path with alpha channel preserved"""
@@ -317,7 +342,66 @@ class CreateImageList:
             print(f"Error in trace: {e}")
             return None
 
-    def batch(self, export_alpha, unique_id=None, prompt=None, **kwargs):
+    def apply_color_match(self, images, image_ref, method, strength, multithread):
+        """Apply color matching to a batch of images using a reference image"""
+        try:
+            from color_matcher import ColorMatcher
+        except:
+            raise Exception("Can't import color-matcher, did you install requirements.txt? Manual install: pip install color-matcher")
+
+        images = images.cpu()
+        image_ref = image_ref.cpu()
+        batch_size = images.size(0)
+
+        # Handle alpha channel: extract RGB for color matching
+        has_alpha = images.shape[-1] == 4
+        if has_alpha:
+            rgb_images = images[:, :, :, :3]
+            alpha_channel = images[:, :, :, 3]
+        else:
+            rgb_images = images
+
+        # Extract RGB from reference if it has alpha
+        if image_ref.shape[-1] == 4:
+            image_ref_rgb = image_ref[:, :, :, :3]
+        else:
+            image_ref_rgb = image_ref
+
+        images_rgb = rgb_images.squeeze()
+        images_ref = image_ref_rgb.squeeze()
+
+        image_ref_np = images_ref.numpy()
+        images_rgb_np = images_rgb.numpy()
+
+        def process(i):
+            cm = ColorMatcher()
+            image_rgb_np_i = images_rgb_np if batch_size == 1 else images_rgb[i].numpy()
+            image_ref_np_i = image_ref_np if image_ref_rgb.size(0) == 1 else images_ref[i].numpy()
+            try:
+                image_result = cm.transfer(src=image_rgb_np_i, ref=image_ref_np_i, method=method)
+                image_result = image_rgb_np_i + strength * (image_result - image_rgb_np_i)
+                return torch.from_numpy(image_result)
+            except Exception as e:
+                print(f"Color matching thread {i} error: {e}")
+                return torch.from_numpy(image_rgb_np_i)  # fallback
+
+        if multithread and batch_size > 1:
+            max_threads = min(os.cpu_count() or 1, batch_size)
+            with ThreadPoolExecutor(max_workers=max_threads) as executor:
+                out = list(executor.map(process, range(batch_size)))
+        else:
+            out = [process(i) for i in range(batch_size)]
+
+        out = torch.stack(out, dim=0).to(torch.float32)
+        out.clamp_(0, 1)
+
+        # Reattach alpha channel if it was present
+        if has_alpha:
+            out = torch.cat([out, alpha_channel.unsqueeze(-1)], dim=-1)
+
+        return out
+
+    def batch(self, export_alpha, unique_id=None, prompt=None, image_ref=None, method='mkl', strength=1.0, multithread=True, **kwargs):
         # Collect all image inputs from kwargs (dynamic inputs)
         images = []
 
@@ -349,6 +433,10 @@ class CreateImageList:
             # Ensure alpha channel exists
             if img.shape[-1] == 3:
                 img = torch.nn.functional.pad(img, (0, 1), mode='constant', value=1.0)
+
+            # Apply color matching if image_ref is provided
+            if image_ref is not None:
+                img = self.apply_color_match(img, image_ref, method, strength, multithread)
 
             # Extract masks
             masks = img[:, :, :, 3]
@@ -405,6 +493,10 @@ class CreateImageList:
 
         # Concatenate all images
         s = torch.cat(fitted_images, dim=0)
+
+        # Apply color matching if image_ref is provided
+        if image_ref is not None:
+            s = self.apply_color_match(s, image_ref, method, strength, multithread)
 
         # Extract alpha channel as masks (MASK format is BHW, not BHWC)
         masks = s[:, :, :, 3]  # Shape: [B, H, W]

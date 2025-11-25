@@ -4,6 +4,16 @@ app.registerExtension({
 	name: "WanVideoWrapper.CreateImageList",
 	async beforeRegisterNodeDef(nodeType, nodeData, app) {
 		if (nodeData.name === 'CreateImageList') {
+			// Helper function to ensure image_ref is at the bottom
+			const ensureImageRefAtBottom = function() {
+				const imageRefIndex = this.inputs.findIndex(inp => inp.name === 'image_ref');
+				if (imageRefIndex !== -1 && imageRefIndex < this.inputs.length - 1) {
+					// Move image_ref to the end
+					const imageRefInput = this.inputs.splice(imageRefIndex, 1)[0];
+					this.inputs.push(imageRefInput);
+				}
+			};
+
 			nodeType.prototype.onConnectionsChange = function (type, index, connected, link_info) {
 				const stackTrace = new Error().stack;
 
@@ -29,14 +39,14 @@ app.registerExtension({
 					return;
 				}
 
-				// Don't process the export_alpha input (it's a widget converted to input)
+				// Don't process specific inputs (widgets converted to inputs or color matching params)
 				const input = this.inputs[index];
-				if (input && input.name === 'export_alpha') {
+				if (input && (input.name === 'export_alpha' || input.name === 'image_ref' || input.name === 'method' || input.name === 'strength' || input.name === 'multithread')) {
 					return;
 				}
 
-				// Count how many IMAGE type inputs we have (excluding export_alpha)
-				const imageInputCount = this.inputs.filter(inp => inp.type === 'IMAGE').length;
+				// Count how many IMAGE type inputs we have (excluding image_ref, which is for color matching)
+				const imageInputCount = this.inputs.filter(inp => inp.type === 'IMAGE' && inp.name !== 'image_ref').length;
 
 				// When disconnecting, remove the input if there's more than one IMAGE input
 				if (!connected && imageInputCount > 1) {
@@ -49,17 +59,17 @@ app.registerExtension({
 					}
 				}
 
-				// Ensure at least one IMAGE input exists
-				const remainingImageInputs = this.inputs.filter(inp => inp.type === 'IMAGE').length;
+				// Ensure at least one IMAGE input exists (excluding image_ref)
+				const remainingImageInputs = this.inputs.filter(inp => inp.type === 'IMAGE' && inp.name !== 'image_ref').length;
 				if (remainingImageInputs === 0) {
 					this.addInput("image1", "IMAGE");
 				}
 
-				// Renumber all IMAGE inputs sequentially
+				// Renumber all IMAGE inputs sequentially (excluding image_ref)
 				let slot_i = 1;
 				for (let i = 0; i < this.inputs.length; i++) {
 					const inp = this.inputs[i];
-					if (inp.type === 'IMAGE') {
+					if (inp.type === 'IMAGE' && inp.name !== 'image_ref') {
 						inp.name = `image${slot_i}`;
 						slot_i++;
 					}
@@ -69,6 +79,9 @@ app.registerExtension({
 				if (connected) {
 					this.addInput(`image${slot_i}`, "IMAGE");
 				}
+
+				// Ensure image_ref stays at the bottom
+				ensureImageRefAtBottom.call(this);
 			}
 		}
 	}

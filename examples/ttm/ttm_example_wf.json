@@ -1,8 +1,8 @@
 {
   "id": "c6e410bc-5e2c-460b-ae81-c91b6094fbb1",
   "revision": 0,
-  "last_node_id": 167,
-  "last_link_id": 363,
+  "last_node_id": 168,
+  "last_link_id": 372,
   "nodes": [
     {
       "id": 92,
@@ -890,7 +890,8 @@
         2,
         "linear",
         0,
-        0.01
+        0.01,
+        "[2.0, 1.0, 1.0, 1.0, 1.0, 1.0]"
       ]
     },
     {
@@ -1140,12 +1141,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "WanVideo2_2_I2V_00005.mp4",
+            "filename": "WanVideo2_2_I2V_00002.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "WanVideo2_2_I2V_00005.png",
+            "workflow": "WanVideo2_2_I2V_00002.png",
             "fullpath": ""
           }
         }
@@ -1278,12 +1279,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "WanVideo2_2_I2V_00003.mp4",
+            "filename": "WanVideo2_2_I2V_00001.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "WanVideo2_2_I2V_00003.png",
+            "workflow": "WanVideo2_2_I2V_00001.png",
             "fullpath": ""
           }
         }
@@ -1312,7 +1313,7 @@
             263,
             278,
             301,
-            346
+            365
           ]
         },
         {
@@ -1496,7 +1497,8 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            352
+            352,
+            366
           ]
         },
         {
@@ -1540,7 +1542,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            345
+            364
           ]
         },
         {
@@ -1565,192 +1567,6 @@
       ]
     },
     {
-      "id": 155,
-      "type": "PreviewImage",
-      "pos": [
-        -499.9862067775319,
-        491.79242257161894
-      ],
-      "size": [
-        210,
-        667.7696706327888
-      ],
-      "flags": {},
-      "order": 26,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 347
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.71",
-        "Node name for S&R": "PreviewImage",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 158,
-      "type": "MaskPreview+",
-      "pos": [
-        -268.09960736634764,
-        490.45363849199936
-      ],
-      "size": [
-        210,
-        668.6430337189952
-      ],
-      "flags": {},
-      "order": 27,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "mask",
-          "type": "MASK",
-          "link": 350
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "cnr_id": "comfyui_essentials",
-        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
-        "Node name for S&R": "MaskPreview+",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 161,
-      "type": "CreateImageList",
-      "pos": [
-        -492.1722697061646,
-        281.26596728639873
-      ],
-      "size": [
-        270,
-        118
-      ],
-      "flags": {},
-      "order": 22,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "image1",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 345
-        },
-        {
-          "name": "image2",
-          "type": "IMAGE",
-          "link": 346
-        },
-        {
-          "name": "image3",
-          "type": "IMAGE",
-          "link": 352
-        },
-        {
-          "name": "image4",
-          "type": "IMAGE",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "links": [
-            347,
-            348,
-            349
-          ]
-        },
-        {
-          "name": "masks",
-          "type": "MASK",
-          "links": [
-            350,
-            351
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "wanvideowrapper_qq",
-        "ver": "91d07cb0be299bb8c2c83b6d77faa422959a9b1f",
-        "Node name for S&R": "CreateImageList",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        true
-      ],
-      "shape": 1
-    },
-    {
-      "id": 124,
-      "type": "LoadImage",
-      "pos": [
-        -484.35588731056015,
-        -95.80907240982795
-      ],
-      "size": [
-        274.080078125,
-        314.0000000000001
-      ],
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            218
-          ]
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.71",
-        "Node name for S&R": "LoadImage",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        "bg.png",
-        "image"
-      ],
-      "color": "#432",
-      "bgcolor": "#653",
-      "shape": 1
-    },
-    {
       "id": 126,
       "type": "ImageResizeKJv2",
       "pos": [
@@ -1764,7 +1580,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 23,
+      "order": 22,
       "mode": 0,
       "inputs": [
         {
@@ -1842,7 +1658,8 @@
         "0, 0, 0",
         "center",
         16,
-        "cpu"
+        "cpu",
+        "<tr><td>Output: </td><td><b>1</b> x <b>800</b> x <b>656 | 6.01MB</b></td></tr>"
       ]
     },
     {
@@ -1995,12 +1812,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "AnimateDiff_00007.mp4",
+            "filename": "AnimateDiff_00003.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "AnimateDiff_00007.png",
+            "workflow": "AnimateDiff_00003.png",
             "fullpath": ""
           }
         }
@@ -2077,79 +1894,16 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "AnimateDiff_00008.mp4",
+            "filename": "AnimateDiff_00004.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "AnimateDiff_00008.png",
+            "workflow": "AnimateDiff_00004.png",
             "fullpath": ""
           }
         }
       }
-    },
-    {
-      "id": 121,
-      "type": "GetImageRangeFromBatch",
-      "pos": [
-        723.1343342581331,
-        178.8695429625597
-      ],
-      "size": [
-        340.3267578125,
-        102
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 34,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 211
-        },
-        {
-          "name": "masks",
-          "shape": 7,
-          "type": "MASK",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            212,
-            362
-          ]
-        },
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "6ee278aa7d802c03ad713a7c5fbc02861b6773a8",
-        "Node name for S&R": "GetImageRangeFromBatch",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "num_frames": true
-          },
-          "version": "7.3",
-          "input_ue_unconnectable": {}
-        },
-        "aux_id": "kijai/ComfyUI-KJNodes"
-      },
-      "widgets_values": [
-        0,
-        1
-      ]
     },
     {
       "id": 89,
@@ -2288,7 +2042,7 @@
         139.1564075673432
       ],
       "flags": {},
-      "order": 14,
+      "order": 13,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -2334,7 +2088,7 @@
         258
       ],
       "flags": {},
-      "order": 28,
+      "order": 26,
       "mode": 0,
       "inputs": [
         {
@@ -2433,7 +2187,7 @@
       "flags": {
         "collapsed": true
       },
-      "order": 15,
+      "order": 14,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -2487,13 +2241,13 @@
         {
           "name": "ref_images",
           "type": "IMAGE",
-          "link": 349
+          "link": 369
         },
         {
           "name": "ref_masks",
           "shape": 7,
           "type": "MASK",
-          "link": 351
+          "link": 371
         },
         {
           "name": "frames",
@@ -2556,7 +2310,7 @@
         738
       ],
       "flags": {},
-      "order": 29,
+      "order": 28,
       "mode": 0,
       "inputs": [
         {
@@ -2569,7 +2323,7 @@
           "name": "ref_images",
           "shape": 7,
           "type": "IMAGE",
-          "link": 348
+          "link": 368
         },
         {
           "name": "frames",
@@ -2620,7 +2374,7 @@
         }
       },
       "widgets_values": [
-        "[{\"on\":true,\"name\":\"Box 1\",\"type\":\"box_layer\",\"interpolation\":\"box\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.3474681352975962,\\\"y\\\":0.8035198065615633,\\\"highlighted\\\":false,\\\"boxScale\\\":0.49486250274459376,\\\"pointScale\\\":0.49486250274459376,\\\"scale\\\":0.49486250274459376,\\\"rotation\\\":0,\\\"boxRotation\\\":0}]\",\"coordinates\":\"[]\",\"box_keys\":[{\"frame\":1,\"x\":0.17509084505505768,\"y\":0.8303768607157191,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":3,\"x\":0.16230817242646217,\"y\":0.8434348208345157,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":8,\"x\":0.16230817242646217,\"y\":0.8434348208345157,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":17,\"x\":0.37061313065648793,\"y\":0.7985304297774442,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":22,\"x\":0.3101511961248443,\"y\":0.7530653147096042,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":25,\"x\":0.30787570430834565,\"y\":0.8420188007118998,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":30,\"x\":0.25489021568489956,\"y\":0.8325304530018323,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":35,\"x\":0.363786853610673,\"y\":0.8368793142254553,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":40,\"x\":0.2805702985195647,\"y\":0.8436002925393168,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":44,\"x\":0.3407072478218575,\"y\":0.8281817124290963,\"scale\":0.45690062408212573,\"rotation\":0}],\"box_timeline_point\":16,\"box_interpolation\":\"linear\",\"ref_attachment\":{\"entries\":[{\"path\":\"bg/ref_image_0.png\",\"type\":\"image/png\",\"width\":300,\"height\":546,\"name\":\"ref_image_0.png\"},{\"path\":\"bg/ref_image_1.png\",\"type\":\"image/png\",\"width\":457,\"height\":586,\"name\":\"ref_image_1.png\"},{\"path\":\"bg/ref_image_2.png\",\"type\":\"image/png\",\"width\":512,\"height\":768,\"name\":\"ref_image_2.png\"}]},\"ref_selection\":\"ref_2\"},{\"on\":true,\"name\":\"Box 1_1\",\"type\":\"box_layer\",\"interpolation\":\"box\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"driven\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.6806348749052255,\\\"y\\\":0.7474313451231609,\\\"highlighted\\\":false,\\\"boxScale\\\":0.6940336804011772,\\\"pointScale\\\":0.6940336804011772,\\\"scale\\\":0.6940336804011772,\\\"rotation\\\":0,\\\"boxRotation\\\":0,\\\"uid\\\":16981}]\",\"coordinates\":\"[]\",\"box_keys\":[{\"frame\":1,\"x\":0.6302263722980433,\"y\":0.7737771727381784,\"scale\":0.312739506683858,\"rotation\":0},{\"frame\":9,\"x\":0.7801197829741051,\"y\":0.7550457649727679,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":16,\"x\":0.6806348749052255,\"y\":0.7474313451231609,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":21,\"x\":0.7156002654484349,\"y\":0.6992066860756498,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":24,\"x\":0.7384942877962534,\"y\":0.7692594416414953,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":36,\"x\":0.688959973940796,\"y\":0.7697671006146228,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":46,\"x\":0.8155014538752791,\"y\":0.7885493982099611,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":52,\"x\":0.7476519475477528,\"y\":0.7860112582600921,\"scale\":1.0468844700694617,\"rotation\":0}],\"box_timeline_point\":16,\"box_interpolation\":\"linear\",\"ref_attachment\":{\"entries\":[{\"path\":\"bg/ref_image_0.png\",\"type\":\"image/png\",\"width\":400,\"height\":471,\"name\":\"ref_image_0.png\"},{\"path\":\"bg/ref_image_1.png\",\"type\":\"image/png\",\"width\":457,\"height\":586,\"name\":\"ref_image_1.png\"},{\"path\":\"bg/ref_image_2.png\",\"type\":\"image/png\",\"width\":300,\"height\":546,\"name\":\"ref_image_2.png\"}]},\"ref_selection\":\"ref_1\"}]",
+        "[{\"on\":true,\"name\":\"Box 1\",\"type\":\"box_layer\",\"interpolation\":\"box\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.3474681352975962,\\\"y\\\":0.8035198065615633,\\\"highlighted\\\":false,\\\"boxScale\\\":0.49486250274459376,\\\"pointScale\\\":0.49486250274459376,\\\"scale\\\":0.49486250274459376,\\\"rotation\\\":0,\\\"boxRotation\\\":0}]\",\"coordinates\":\"[]\",\"box_keys\":[{\"frame\":1,\"x\":0.17509084505505768,\"y\":0.8303768607157191,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":3,\"x\":0.16230817242646217,\"y\":0.8434348208345157,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":8,\"x\":0.16230817242646217,\"y\":0.8434348208345157,\"scale\":0.7985575320443379,\"rotation\":0},{\"frame\":17,\"x\":0.37061313065648793,\"y\":0.7985304297774442,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":22,\"x\":0.3101511961248443,\"y\":0.7530653147096042,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":25,\"x\":0.30787570430834565,\"y\":0.8420188007118998,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":30,\"x\":0.25489021568489956,\"y\":0.8325304530018323,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":35,\"x\":0.363786853610673,\"y\":0.8368793142254553,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":40,\"x\":0.2805702985195647,\"y\":0.8436002925393168,\"scale\":0.45690062408212573,\"rotation\":0},{\"frame\":44,\"x\":0.3407072478218575,\"y\":0.8281817124290963,\"scale\":0.45690062408212573,\"rotation\":0}],\"box_timeline_point\":16,\"box_interpolation\":\"linear\",\"ref_attachment\":{\"entries\":[{\"path\":\"bg/ref_image_0.png\",\"type\":\"image/png\",\"width\":400,\"height\":471,\"name\":\"ref_image_0.png\"},{\"path\":\"bg/ref_image_1.png\",\"type\":\"image/png\",\"width\":457,\"height\":586,\"name\":\"ref_image_1.png\"},{\"path\":\"bg/ref_image_2.png\",\"type\":\"image/png\",\"width\":300,\"height\":546,\"name\":\"ref_image_2.png\"}]},\"ref_selection\":\"ref_2\"},{\"on\":true,\"name\":\"Box 1_1\",\"type\":\"box_layer\",\"interpolation\":\"box\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"driven\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.6806348749052255,\\\"y\\\":0.7474313451231609,\\\"highlighted\\\":false,\\\"boxScale\\\":0.6940336804011772,\\\"pointScale\\\":0.6940336804011772,\\\"scale\\\":0.6940336804011772,\\\"rotation\\\":0,\\\"boxRotation\\\":0,\\\"uid\\\":16981}]\",\"coordinates\":\"[]\",\"box_keys\":[{\"frame\":1,\"x\":0.6302263722980433,\"y\":0.7737771727381784,\"scale\":0.312739506683858,\"rotation\":0},{\"frame\":9,\"x\":0.7801197829741051,\"y\":0.7550457649727679,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":16,\"x\":0.6806348749052255,\"y\":0.7474313451231609,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":21,\"x\":0.7156002654484349,\"y\":0.6992066860756498,\"scale\":0.6940336804011772,\"rotation\":0},{\"frame\":24,\"x\":0.7384942877962534,\"y\":0.7692594416414953,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":36,\"x\":0.688959973940796,\"y\":0.7697671006146228,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":46,\"x\":0.8155014538752791,\"y\":0.7885493982099611,\"scale\":0.5705899451391455,\"rotation\":0},{\"frame\":52,\"x\":0.7476519475477528,\"y\":0.7860112582600921,\"scale\":1.0468844700694617,\"rotation\":0}],\"box_timeline_point\":16,\"box_interpolation\":\"linear\",\"ref_attachment\":{\"entries\":[{\"path\":\"bg/ref_image_0.png\",\"type\":\"image/png\",\"width\":400,\"height\":471,\"name\":\"ref_image_0.png\"},{\"path\":\"bg/ref_image_1.png\",\"type\":\"image/png\",\"width\":457,\"height\":586,\"name\":\"ref_image_1.png\"},{\"path\":\"bg/ref_image_2.png\",\"type\":\"image/png\",\"width\":300,\"height\":546,\"name\":\"ref_image_2.png\"}]},\"ref_selection\":\"ref_1\"}]",
         null,
         "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
         640,
@@ -2733,8 +2487,8 @@
               {
                 "path": "bg/ref_image_0.png",
                 "type": "image/png",
-                "width": 300,
-                "height": 546,
+                "width": 400,
+                "height": 471,
                 "name": "ref_image_0.png"
               },
               {
@@ -2747,8 +2501,8 @@
               {
                 "path": "bg/ref_image_2.png",
                 "type": "image/png",
-                "width": 512,
-                "height": 768,
+                "width": 300,
+                "height": 546,
                 "name": "ref_image_2.png"
               }
             ]
@@ -3267,7 +3021,7 @@
         472.44472370929736
       ],
       "flags": {},
-      "order": 16,
+      "order": 15,
       "mode": 0,
       "inputs": [
         {
@@ -3331,7 +3085,7 @@
         139.1564075673432
       ],
       "flags": {},
-      "order": 17,
+      "order": 16,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -3364,6 +3118,263 @@
       ],
       "color": "#323",
       "bgcolor": "#535"
+    },
+    {
+      "id": 155,
+      "type": "PreviewImage",
+      "pos": [
+        -502.6022947118135,
+        646.6730215383718
+      ],
+      "size": [
+        210,
+        667.7696706327888
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 367
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.71",
+        "Node name for S&R": "PreviewImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 158,
+      "type": "MaskPreview+",
+      "pos": [
+        -261.5592877332859,
+        646.6730215383718
+      ],
+      "size": [
+        210,
+        668.6430337189952
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 370
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfyui_essentials",
+        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
+        "Node name for S&R": "MaskPreview+",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 124,
+      "type": "LoadImage",
+      "pos": [
+        -484.35588731056015,
+        -95.80907240982795
+      ],
+      "size": [
+        274.080078125,
+        314.0000000000001
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            218,
+            372
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.71",
+        "Node name for S&R": "LoadImage",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": [
+        "bg.png",
+        "image"
+      ],
+      "color": "#432",
+      "bgcolor": "#653",
+      "shape": 1
+    },
+    {
+      "id": 121,
+      "type": "GetImageRangeFromBatch",
+      "pos": [
+        723.1343342581331,
+        178.8695429625597
+      ],
+      "size": [
+        340.3267578125,
+        102
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 211
+        },
+        {
+          "name": "masks",
+          "shape": 7,
+          "type": "MASK",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            212,
+            362
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "6ee278aa7d802c03ad713a7c5fbc02861b6773a8",
+        "Node name for S&R": "GetImageRangeFromBatch",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "num_frames": true
+          },
+          "version": "7.3",
+          "input_ue_unconnectable": {}
+        },
+        "aux_id": "kijai/ComfyUI-KJNodes"
+      },
+      "widgets_values": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": 168,
+      "type": "CreateImageList",
+      "pos": [
+        -504.06366922322417,
+        335.96684961673895
+      ],
+      "size": [
+        270,
+        210
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 364
+        },
+        {
+          "name": "image2",
+          "type": "IMAGE",
+          "link": 365
+        },
+        {
+          "name": "image3",
+          "type": "IMAGE",
+          "link": 366
+        },
+        {
+          "name": "image4",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image_ref",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 372
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            367,
+            368,
+            369
+          ]
+        },
+        {
+          "name": "masks",
+          "type": "MASK",
+          "links": [
+            370,
+            371
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "wanvideowrapper_qq",
+        "ver": "b5fc414118021a88c7e70f178794fe8e2ac00225",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "CreateImageList"
+      },
+      "widgets_values": [
+        true,
+        "mkl",
+        0.4,
+        true
+      ]
     }
   ],
   "links": [
@@ -3824,67 +3835,11 @@
       "IMAGE"
     ],
     [
-      345,
-      118,
-      0,
-      161,
-      0,
-      "IMAGE"
-    ],
-    [
-      346,
-      117,
-      0,
-      161,
-      1,
-      "IMAGE"
-    ],
-    [
-      347,
-      161,
-      0,
-      155,
-      0,
-      "IMAGE"
-    ],
-    [
-      348,
-      161,
-      0,
-      137,
-      1,
-      "IMAGE"
-    ],
-    [
-      349,
-      161,
-      0,
-      123,
-      2,
-      "IMAGE"
-    ],
-    [
-      350,
-      161,
-      1,
-      158,
-      0,
-      "MASK"
-    ],
-    [
-      351,
-      161,
-      1,
-      123,
-      3,
-      "MASK"
-    ],
-    [
       352,
       146,
       0,
       161,
-      2,
+      5,
       "IMAGE"
     ],
     [
@@ -3926,6 +3881,78 @@
       104,
       2,
       "MASK"
+    ],
+    [
+      364,
+      118,
+      0,
+      168,
+      0,
+      "IMAGE"
+    ],
+    [
+      365,
+      117,
+      0,
+      168,
+      1,
+      "IMAGE"
+    ],
+    [
+      366,
+      146,
+      0,
+      168,
+      2,
+      "IMAGE"
+    ],
+    [
+      367,
+      168,
+      0,
+      155,
+      0,
+      "IMAGE"
+    ],
+    [
+      368,
+      168,
+      0,
+      137,
+      1,
+      "IMAGE"
+    ],
+    [
+      369,
+      168,
+      0,
+      123,
+      2,
+      "IMAGE"
+    ],
+    [
+      370,
+      168,
+      1,
+      158,
+      0,
+      "MASK"
+    ],
+    [
+      371,
+      168,
+      1,
+      123,
+      3,
+      "MASK"
+    ],
+    [
+      372,
+      124,
+      0,
+      168,
+      4,
+      "IMAGE"
     ]
   ],
   "groups": [
@@ -3946,10 +3973,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.5559917313492839,
+      "scale": 0.6303940863128492,
       "offset": [
-        895.7180320253976,
-        656.250667639637
+        1548.6123884557073,
+        209.80359321404143
       ]
     },
     "frontendVersion": "1.33.5",
