@@ -538,8 +538,8 @@ class PrepareRefs:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK", "PREPAREREFS")
-    RETURN_NAMES = ("bg_image", "ref_images", "ref_masks", "prepare_refs_data")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK")
+    RETURN_NAMES = ("bg_image", "ref_images", "ref_masks")
     FUNCTION = "prepare"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """
@@ -586,7 +586,7 @@ class PrepareRefs:
                     ui_out["bg_image_path"] = ["bg/bg_image.png"]
                 except Exception as exc:
                     print(f"[PrepareRefs WARNING] Failed to save bg preview: {exc}")
-            return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks, [])}
+            return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks)}
 
         # Extract per-layer images and masks (full-size)
         ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, width, height, valid_ref_layers, export_alpha)
@@ -795,7 +795,7 @@ class PrepareRefs:
         except Exception as e:
             print(f"[PrepareRefs ERROR] failed to save ref masks: {e}")
 
-        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks, valid_ref_layers)}
+        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks)}
 
     # -------------------------
     # Internal helper

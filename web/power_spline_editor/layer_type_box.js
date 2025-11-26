@@ -592,6 +592,9 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             const next = selection || 'no_ref';
             this.value.ref_selection = next;
 
+            // Activate this layer first so the attachment goes to the correct widget
+            this._activateLayer(host);
+
             // Clear ref image cache to force reload with new data
             host.editor?.layerRenderer?.clearRefImageCache?.();
 
