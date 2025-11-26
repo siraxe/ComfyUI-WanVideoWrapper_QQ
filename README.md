@@ -1,18 +1,18 @@
 # ComfyUI-WanVideoWrapper_QQ
 
 **Version 1.1.0** - 2025-11-26
-- Added to `Prepare Refs` to cut out parts for `Power Spline Editor`
+- Added to `Prepare Refs` to cut out parts for `Power Spline Editor` [Example](examples/ttm_ref_cutout/ttm_ref_cutout_example.json)
 - `Power Spline Editor` can trigger ref preparation with Canvas button in backend without starting comfyui run
 
 <table>
 <tr>
 <td width="40%">
 
-https://github.com/user-attachments/assets/16f0da4c-38f1-4789-97dc-c331ad8a6d92
+https://github.com/user-attachments/assets/7c3d1c3a-4777-432b-997e-eafa678f7e64
 </td>
 <td width="60%">
 
-https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
+https://github.com/user-attachments/assets/f518e469-d3dc-4066-9750-fdbf70ba823b
 </td>
 </tr>
 </table>
