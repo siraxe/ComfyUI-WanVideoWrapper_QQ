@@ -483,21 +483,92 @@ app.registerExtension({
                     const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
                     const bg_img = bgImgWidget ? bgImgWidget.value : "None";
 
-                    // Try to pull a fresh ref image from connected node silently
-                    const base64Image = await getReferenceImageFromConnectedNode(this);
-                    if (base64Image) {
-                        this.originalRefImageData = {
-                            name: 'ref_image_from_connection.jpg',
-                            base64: base64Image.split(',')[1],
-                            type: 'image/jpeg'
-                        };
-                        try { await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png'); } catch {}
-                        if (this.uuid) {
-                            sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                    // Check if connected to PrepareRefs - if so, load bg_image_cl.png from ref folder instead
+                    const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
+
+                    if (isConnectedToPrepareRefs) {
+                        console.log('Connected to PrepareRefs, loading bg_image_cl.png from ref folder');
+                        try {
+                            const timestamp = Date.now();
+                            const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
+                            const response = await fetch(refImageUrl);
+                            if (response.ok) {
+                                const blob = await response.blob();
+                                const base64Data = await new Promise((resolve, reject) => {
+                                    const reader = new FileReader();
+                                    reader.onload = () => resolve(reader.result.split(',')[1]);
+                                    reader.onerror = reject;
+                                    reader.readAsDataURL(blob);
+                                });
+
+                                this.originalRefImageData = {
+                                    name: 'bg_image_cl.png',
+                                    base64: base64Data,
+                                    type: 'image/png'
+                                };
+
+                                // Process the image immediately based on bg_img selection
+                                if (bg_img === "None") {
+                                    // Apply darkening for "None" selection
+                                    const img = new Image();
+                                    img.onload = () => {
+                                        const canvas = document.createElement('canvas');
+                                        canvas.width = img.width;
+                                        canvas.height = img.height;
+                                        const ctx = canvas.getContext('2d');
+                                        ctx.drawImage(img, 0, 0);
+                                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                                        const darkenedDataUrl = canvas.toDataURL('image/png');
+                                        this.imgData = {
+                                            name: 'bg_image_cl.png',
+                                            base64: darkenedDataUrl.split(',')[1],
+                                            type: 'image/png'
+                                        };
+                                        if (this.editor) {
+                                            this.editor.refreshBackgroundImage();
+                                        }
+                                    };
+                                    img.src = `data:image/png;base64,${base64Data}`;
+                                } else {
+                                    // For A/B/C selections, set imgData directly for now
+                                    this.imgData = {
+                                        name: 'bg_image_cl.png',
+                                        base64: base64Data,
+                                        type: 'image/png'
+                                    };
+                                    if (this.editor) {
+                                        this.editor.refreshBackgroundImage();
+                                    }
+                                    // Also trigger updateBackgroundImage for proper overlay handling
+                                    this.updateBackgroundImage(bg_img);
+                                }
+
+                                if (this.uuid) {
+                                    sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                                }
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('Failed to load bg_image_cl.png from ref folder:', e);
                         }
-                        this.updateBackgroundImage(bg_img);
-                        this.editor?.refreshBackgroundImage?.();
-                        return;
+                    } else {
+                        // Try to pull a fresh ref image from connected node silently
+                        const base64Image = await getReferenceImageFromConnectedNode(this);
+                        if (base64Image) {
+                            this.originalRefImageData = {
+                                name: 'ref_image_from_connection.jpg',
+                                base64: base64Image.split(',')[1],
+                                type: 'image/jpeg'
+                            };
+                            try { await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png'); } catch {}
+                            if (this.uuid) {
+                                sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                            }
+                            this.updateBackgroundImage(bg_img);
+                            this.editor?.refreshBackgroundImage?.();
+                            return;
+                        }
                     }
                 } catch {}
                 // Fallback: just apply current selection to force overlay/cached handling
@@ -617,6 +688,35 @@ app.registerExtension({
             // Set initial node size
             this.updateNodeHeight();
 
+            // Helper method to load the correct cached ref image based on PrepareRefs connection
+            this.loadCorrectCachedRefImage = async function() {
+                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
+
+                if (isConnectedToPrepareRefs) {
+                    // Load bg_image_cl.png from ref folder
+                    try {
+                        const timestamp = Date.now();
+                        const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
+                        const response = await fetch(refImageUrl);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            return new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Failed to load bg_image_cl.png from ref folder:', e);
+                    }
+                    return null;
+                } else {
+                    // Load bg_image.png from bg folder (standard behavior)
+                    return await loadCachedRefImageAsBase64();
+                }
+            }.bind(this);
+
             // Add method to update background image immediately based on bg_img selection
             this.updateBackgroundImage = async function(bg_img) {
                 // First check if we have saved dimensions to maintain proportions
@@ -661,7 +761,7 @@ app.registerExtension({
                         };
                         img.onerror = () => {
                             // Fallback: try to load cached bg_image first, then default A.jpg
-                            loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                            this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                                 if (cachedImageUrl) {
                                     const fallbackImg = new Image();
                                     fallbackImg.onload = () => {
@@ -717,7 +817,7 @@ app.registerExtension({
                         img.src = `data:image/jpeg;base64,${this.originalRefImageData.base64}`;
                     } else {
                         // If no original ref image data, try to load cached bg_image first, then fallback to default
-                        loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                        this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                             if (cachedImageUrl) {
                                 const img = new Image();
                                 img.onload = () => {
@@ -781,10 +881,11 @@ app.registerExtension({
                     
                     if (this.originalRefImageData && this.originalRefImageData.base64) {
                         // Use original ref image if available (from refresh button)
-                        refImageForOverlay = `data:image/jpeg;base64,${this.originalRefImageData.base64}`;
+                        const imgType = this.originalRefImageData.type || 'image/jpeg';
+                        refImageForOverlay = `data:${imgType};base64,${this.originalRefImageData.base64}`;
                     } else {
                         // Otherwise, load from cached
-                        loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                        this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                             if (cachedImageUrl) {
                                 // Create a properly scaled overlay using the original cached ref image
                                 this.createScaledImageOverlay(cachedImageUrl, bg_img, imageUrl);
@@ -815,6 +916,58 @@ app.registerExtension({
                 console.log('Attempting to update reference image from connected node...');
 
                 try {
+                    // Check if we're connected to PrepareRefs node
+                    const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
+
+                    if (isConnectedToPrepareRefs) {
+                        console.log('Connected to PrepareRefs node, loading bg_image_cl.png from ref folder');
+                        try {
+                            const timestamp = Date.now();
+                            const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
+                            const response = await fetch(refImageUrl);
+                            if (!response.ok) {
+                                console.error('Failed to load bg_image_cl.png from ref folder');
+                                alert('Could not load bg_image_cl.png from ref folder. Make sure the file exists.');
+                                return;
+                            }
+
+                            const blob = await response.blob();
+                            const base64Data = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result.split(',')[1]);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+
+                            this.originalRefImageData = {
+                                name: 'bg_image_cl.png',
+                                base64: base64Data,
+                                type: 'image/png'
+                            };
+
+                            // Clear session storage cache for this node's image to force refresh
+                            if (this.uuid) {
+                                sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                            }
+
+                            // Get current bg_img selection to update background accordingly
+                            const bgImgWidget = this.widgets.find(w => w.name === "bg_img");
+                            const bg_img = bgImgWidget ? bgImgWidget.value : "None";
+
+                            // Update background based on current bg_img selection
+                            this.updateBackgroundImage(bg_img);
+
+                            // Wait for the image processing to complete
+                            await new Promise(resolve => setTimeout(resolve, 200));
+
+                            console.log('Successfully loaded bg_image_cl.png from ref folder');
+                        } catch (error) {
+                            console.error('Error loading bg_image_cl.png:', error);
+                            alert('Error loading bg_image_cl.png: ' + error.message);
+                        }
+                        return;
+                    }
+
                     // Get reference image from connected bg_image input
                     const base64Image = await getReferenceImageFromConnectedNode(this, 'bg_image');
                     if (!base64Image) {
@@ -861,6 +1014,15 @@ app.registerExtension({
                 const activeWidget = this.layerManager?.getActiveWidget?.();
                 if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
                     alert('Activate a box layer first to attach a ref image.');
+                    return;
+                }
+
+                // Check if we're connected to PrepareRefs node
+                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
+                
+                if (isConnectedToPrepareRefs) {
+                    // When connected to PrepareRefs, load ref images from ref folder instead
+                    await this.loadRefImagesFromRefFolder(activeWidget, desiredSelection);
                     return;
                 }
 
@@ -978,6 +1140,17 @@ app.registerExtension({
                 // Clear ref image cache to force reload of all images
                 if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
                     this.layerRenderer.clearRefImageCache();
+                }
+
+                // Check if we're connected to PrepareRefs node
+                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
+                
+                if (isConnectedToPrepareRefs) {
+                    // When connected to PrepareRefs, load ref images from ref folder for all box layers
+                    for (const boxWidget of boxWidgets) {
+                        await this.loadRefImagesFromRefFolder(boxWidget, boxWidget.value.ref_selection || 'ref_1');
+                    }
+                    return;
                 }
 
                 // Fetch images from ref_images input (first frame used)
@@ -1372,6 +1545,142 @@ app.registerExtension({
                 }
             }.bind(this);
 
+            // Helper method to check if connected to PrepareRefs node
+            this.checkIfConnectedToPrepareRefs = function() {
+                // Check if any of our inputs is connected to a PrepareRefs node
+                const graph = app.graph;
+                if (!graph || !graph.links || !this.inputs) {
+                    return false;
+                }
+                
+                for (let i = 0; i < this.inputs.length; i++) {
+                    const input = this.inputs[i];
+                    if (!input || !input.name) continue;
+                    
+                    // Look for connections to this input
+                    let link = null;
+                    if (graph.links instanceof Map) {
+                        for (const [linkId, linkObj] of graph.links) {
+                            if (linkObj && linkObj.target_id === this.id && linkObj.target_slot === i) {
+                                link = linkObj;
+                                break;
+                            }
+                        }
+                    } else if (Array.isArray(graph.links)) {
+                        link = graph.links.find(linkObj =>
+                            linkObj && linkObj.target_id === this.id && linkObj.target_slot === i
+                        );
+                    }
+                    
+                    if (link) {
+                        const sourceNode = graph._nodes?.find(n => n.id === link.origin_id);
+                        if (sourceNode && sourceNode.type === 'PrepareRefs') {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }.bind(this);
+
+            // Helper method to load ref images from ref folder
+            this.loadRefImagesFromRefFolder = async function(boxWidget, desiredSelection = 'ref_1') {
+                try {
+                    // Load ALL available ref images (ref_1.png through ref_5.png) from ref folder
+                    const attachments = [];
+                    const maxRefs = 5;
+                    const timestamp = Date.now();
+
+                    for (let i = 1; i <= maxRefs; i++) {
+                        try {
+                            const refImageUrl = new URL(`ref/ref_${i}.png?t=${timestamp}`, import.meta.url).href;
+                            const response = await fetch(refImageUrl);
+
+                            if (!response.ok) {
+                                console.log(`ref_${i}.png not found in ref folder, skipping`);
+                                continue;
+                            }
+
+                            const blob = await response.blob();
+                            const base64Data = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result.split(',')[1]);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+
+                            // Load dimensions to fit box without stretching
+                            const dims = await new Promise((resolve) => {
+                                const img = new Image();
+                                img.onload = () => resolve({ width: img.width, height: img.height });
+                                img.onerror = () => resolve({ width: 1, height: 1 });
+                                img.src = `data:image/png;base64,${base64Data}`;
+                            });
+
+                            // Save image to disk and store path
+                            const filename = `ref_${i}.png`;
+                            await saveRefImageToCache(base64Data, filename);
+
+                            // Create attachment
+                            attachments.push({
+                                path: `ref/${filename}`,
+                                type: 'image/png',
+                                width: dims.width,
+                                height: dims.height,
+                                name: filename
+                            });
+
+                            console.log(`Successfully loaded ref_${i}.png from ref folder`);
+                        } catch (error) {
+                            console.error(`Error loading ref_${i}.png:`, error);
+                        }
+                    }
+
+                    if (attachments.length === 0) {
+                        console.error('No ref images found in ref folder');
+                        return;
+                    }
+
+                    // Set all attachments on the box widget
+                    boxWidget.value.ref_attachment = { entries: attachments };
+
+                    // Set the desired selection if valid, otherwise set to first available
+                    const availableOptions = boxWidget._getRefOptions ? boxWidget._getRefOptions() : ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
+                    const desiredIdx = desiredSelection && availableOptions.includes(desiredSelection)
+                        ? Math.max(0, (parseInt(desiredSelection.split('_')[1], 10) || 1) - 1)
+                        : 0;
+
+                    if (desiredIdx >= attachments.length) {
+                        boxWidget.value.ref_selection = 'no_ref';
+                    } else {
+                        const clampedIndex = Math.min(attachments.length - 1, desiredIdx);
+                        boxWidget.value.ref_selection = `ref_${clampedIndex + 1}`;
+                    }
+
+                    // Persist to sessionStorage
+                    try {
+                        const keyId = this.id ?? this.uuid;
+                        const key = keyId ? `spline-editor-boxref-${keyId}-${boxWidget.value.name || boxWidget.name || 'box'}` : null;
+                        if (key) {
+                            sessionStorage.setItem(key, JSON.stringify({
+                                attachment: boxWidget.value.ref_attachment,
+                                selection: boxWidget.value.ref_selection,
+                            }));
+                        }
+                    } catch (e) {
+                        console.warn('Failed to persist box ref attachment to session:', e);
+                    }
+
+                    // Clear ref image cache to force reload
+                    if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
+                        this.layerRenderer.clearRefImageCache();
+                    }
+
+                    console.log(`Successfully loaded ${attachments.length} ref images from ref folder for box layer`);
+                } catch (error) {
+                    console.error('Error loading ref images from ref folder:', error);
+                }
+            }.bind(this);
+
             // context menu
             this.contextMenu = document.createElement("div");
             this.contextMenu.className = 'spline-editor-context-menu';
@@ -1488,9 +1797,10 @@ app.registerExtension({
                 }
 
                 // Try to load cached bg_image first
-                loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                     if (cachedImageUrl) {
-                        this.loadBackgroundImageFromUrl(cachedImageUrl, 'bg_image.png', targetWidth, targetHeight);
+                        const filename = this.checkIfConnectedToPrepareRefs() ? 'bg_image_cl.png' : 'bg_image.png';
+                        this.loadBackgroundImageFromUrl(cachedImageUrl, filename, targetWidth, targetHeight);
                     } else {
                         // Fallback to default A.jpg
                         const timestamp = Date.now();
@@ -1685,7 +1995,7 @@ app.registerExtension({
                   // Determine which image to load based on the bg_img selection
                   if (bg_img === "None") {
                       // Try to load cached bg_image first, then fallback to default
-                      loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                      this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                           if (cachedImageUrl) {
                               // Apply darkening effect to match onExecuted behavior
                               const img = new Image();
@@ -1726,9 +2036,9 @@ app.registerExtension({
                       // Load the selected background image (A, B, or C) from the bg folder
                       const timestamp = Date.now();
                       const imageUrl = new URL(`bg/${bg_img}.jpg?t=${timestamp}`, import.meta.url).href;
-                      
+
                       // Use the overlay function from image_overlay.js
-                      loadCachedRefImageAsBase64().then(cachedImageUrl => {
+                      this.loadCorrectCachedRefImage().then(cachedImageUrl => {
                           if (cachedImageUrl) {
                               createImageOverlayForConfigure(
                                   cachedImageUrl,

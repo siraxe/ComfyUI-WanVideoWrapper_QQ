@@ -6,598 +6,685 @@ import { RefLayerWidget } from './layer_type_ref.js';
 import { attachLassoHelpers } from './canvas_lasso.js';
 import RefCanvas from './canvas_main_ref.js';
 
+// ===================================================================
+// Session Storage Helpers
+// ===================================================================
+function safeSetSessionItem(key, value) {
+  try { sessionStorage.setItem(key, value); } catch (e) { /* ignore */ }
+}
+
+function safeGetSessionItem(key) {
+  try { return sessionStorage.getItem(key); } catch (e) { return null; }
+}
+
+// ===================================================================
+// Image Loading Utilities
+// ===================================================================
+async function loadImageFromUrl(url, canvasEditor) {
+  console.log('[loadImageFromUrl] Loading:', url);
+  const timestampedUrl = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      canvasEditor.loadBackgroundImage(img);
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      console.error('[loadImageFromUrl] Failed to load image:', url, err);
+      reject(err);
+    };
+    img.src = timestampedUrl;
+  });
+}
+
+async function loadRefImagesFromPaths(paths, node) {
+  if (!Array.isArray(paths) || paths.length === 0) return [];
+
+  const images = [];
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i];
+    try {
+      const url = new URL(path, import.meta.url).href + `?t=${Date.now()}`;
+      const img = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = reject;
+        image.src = url;
+      });
+      images.push(img);
+    } catch (err) {
+      console.error(`[loadRefImagesFromPaths] Failed to load ref image ${i}:`, path, err);
+    }
+  }
+  return images;
+}
+
+// ===================================================================
+// Node Lifecycle: PrepareRefs
+// ===================================================================
 app.registerExtension({
   name: 'WanVideoWrapper_QQ.PrepareRefs',
 
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData?.name !== 'PrepareRefs') return;
 
+    // =================================================================
+    // onNodeCreated – Main Setup
+    // =================================================================
     chainCallback(nodeType.prototype, 'onNodeCreated', function () {
       this.serialize_widgets = true;
       this.resizable = false;
       this.properties = this.properties || {};
       this.properties.userAdjustedDims = this.properties.userAdjustedDims || false;
 
-      const widthWidget = this.widgets.find((w) => w.name === 'mask_width');
-      const heightWidget = this.widgets.find((w) => w.name === 'mask_height');
+      this.uuid = this.uuid || makeUUID();
 
-      const setUserAdjusted = () => {
-        this.properties.userAdjustedDims = true;
-      };
+      // Hide original dimension widgets
+      const widthWidget = this.widgets.find(w => w.name === 'mask_width');
+      const heightWidget = this.widgets.find(w => w.name === 'mask_height');
 
-      if (!this.addCustomWidget) {
-        this.addCustomWidget = function (widget) {
-          widget.parent = this;
-          this.widgets = this.widgets || [];
-          this.widgets.push(widget);
-          const originalMouse = widget.mouse;
-          widget.mouse = function (event, pos, node) {
-            const localPos = [pos[0], pos[1] - (widget.last_y || 0)];
-            return originalMouse?.call(this, event, localPos, node);
-          };
-          return widget;
-        };
-      }
+      const markUserAdjusted = () => { this.properties.userAdjustedDims = true; };
 
-      if (widthWidget) {
-        const original = widthWidget.callback;
-        widthWidget.callback = (value) => {
-          original?.call(widthWidget, value);
-          setUserAdjusted();
-          this.updateCanvasSizeFromWidgets?.();
-          return value;
-        };
-        hideWidgetForGood(this, widthWidget);
-      }
+      [widthWidget, heightWidget].forEach(w => {
+        if (w) {
+          const orig = w.callback;
+          w.callback = (v) => { orig?.call(w, v); markUserAdjusted(); this.updateCanvasSizeFromWidgets?.(); };
+          hideWidgetForGood(this, w);
+        }
+      });
 
-      if (heightWidget) {
-        const original = heightWidget.callback;
-        heightWidget.callback = (value) => {
-          original?.call(heightWidget, value);
-          setUserAdjusted();
-          this.updateCanvasSizeFromWidgets?.();
-          return value;
-        };
-        hideWidgetForGood(this, heightWidget);
-      }
-
+      // Size manager for consistent canvas/node sizing
       this.sizeManager = new NodeSizeManager(this, {
         spacingAfterCanvas: 36,
-        canvasWidth: widthWidget ? widthWidget.value : 640,
-        canvasHeight: heightWidget ? heightWidget.value : 480,
+        canvasWidth: widthWidget?.value ?? 640,
+        canvasHeight: heightWidget?.value ?? 480,
         minNodeWidth: 640,
         minNodeHeight: 480,
       });
 
-      this.onResize = function (size) {
-      const constrained = this.sizeManager.onNodeResized(size);
-      size[0] = constrained[0];
-      size[1] = constrained[1];
-    };
+      this.onResize = (size) => {
+        const constrained = this.sizeManager.onNodeResized(size);
+        size[0] = constrained[0];
+        size[1] = constrained[1];
+      };
 
-      // Reuse the existing top row widget (refresh + width/height controls)
-      const topRow = new TopRowWidget('prepare_refs_top_row', {
+      // Top row controls
+      this.addCustomWidget(new TopRowWidget('prepare_refs_top_row', {
         refreshCanvasButton: true,
         refreshFramesButton: false,
         bgImgControl: false,
         animToggleButton: false,
+      }));
+
+      this.setupUI();
+      this.setupCanvas();
+      this.setupRefLayers();
+      this.restoreSessionImages();
+    });
+
+    // =================================================================
+    // UI Construction
+    // =================================================================
+    nodeType.prototype.setupUI = function () {
+      const container = this.createMainContainer();
+      this.domWidget = this.addDOMWidget('PrepareRefs', 'PrepareRefsCanvas', container, {
+        serialize: false,
+        hideOnZoom: false,
       });
-      this.addCustomWidget(topRow);
 
+      this.domWidget.computeSize = () => {
+        const h = this.widgets.find(w => w.name === 'mask_height')?.value ?? 480;
+        return [0, h];
+      };
+    };
+
+    nodeType.prototype.createMainContainer = function () {
       const container = document.createElement('div');
-      this.uuid = this.uuid || makeUUID();
       container.id = `prepare-refs-${this.uuid}`;
-      container.style.margin = '0';
-      container.style.padding = '0';
-      container.style.display = 'flex';
-      container.style.flexDirection = 'column';
-      container.style.gap = '0px';
+      container.style.cssText = `
+        display: flex;
+        flex-direction: column;
+        margin: 0; padding: 0; gap: 0;
+      `;
 
-      // Two-column layout: sidebar + canvas
       const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.flexDirection = 'row';
-      row.style.flexWrap = 'nowrap';
-      row.style.gap = '8px';
-      row.style.alignItems = 'stretch';
+      row.style.cssText = `
+        display: flex; gap: 8px; align-items: stretch;
+      `;
       container.appendChild(row);
 
+      this.sidebar = this.createSidebar();
+      row.appendChild(this.sidebar);
+
+      this.canvasWrap = this.createCanvasWrapper();
+      row.appendChild(this.canvasWrap);
+
+      return container;
+    };
+
+    nodeType.prototype.createSidebar = function () {
       const sidebar = document.createElement('div');
-      sidebar.style.width = '120px';
-      sidebar.style.minWidth = '120px';
-      sidebar.style.maxWidth = '120px';
-      sidebar.style.flex = '0 0 120px';
-      sidebar.style.display = 'flex';
-      sidebar.style.flexDirection = 'column';
-      sidebar.style.alignItems = 'stretch';
-      sidebar.style.justifyContent = 'flex-start';
-      sidebar.style.gap = '8px';
-      sidebar.style.padding = '8px';
-      sidebar.style.color = '#b5b5b5';
-      sidebar.style.fontSize = '12px';
-      sidebar.style.border = '1px solid #3a3a3a';
-      sidebar.style.background = 'transparent';
-      sidebar.style.overflow = 'hidden';
-      sidebar.style.boxSizing = 'border-box';
+      sidebar.style.cssText = `
+        width: 120px; flex: 0 0 120px; display: flex; flex-direction: column;
+        gap: 8px; padding: 8px; background: transparent; border: 1px solid #3a3a3a;
+        color: #b5b5b5; font-size: 12px; box-sizing: border-box;
+      `;
 
-      const addRefBtn = document.createElement('button');
-      addRefBtn.textContent = '+ Add ref';
-      addRefBtn.style.cursor = 'pointer';
-      addRefBtn.style.padding = '8px 12px';
-      addRefBtn.style.border = '0.75px solid #00000044';
-      addRefBtn.style.background = '#1e1e1e';
-      addRefBtn.style.color = '#ddd';
-      addRefBtn.style.borderRadius = '4px';
-      addRefBtn.style.fontSize = '12px';
-      addRefBtn.style.fontWeight = '500';
-      addRefBtn.style.textAlign = 'center';
-      addRefBtn.style.position = 'relative';
-      addRefBtn.style.boxShadow = '0 1px 0 #000000aa, inset 0 0.75px 0 #ffffff22, inset 0.75px 0 0 #ffffff11, inset -0.75px 0 0 #00000044';
-      addRefBtn.style.transition = 'all 0.05s ease';
-      addRefBtn.onmousedown = () => {
-        addRefBtn.style.background = '#444';
-        addRefBtn.style.transform = 'translateY(1px)';
-        addRefBtn.style.boxShadow = 'inset 0 0.75px 0 #00000088';
-        addRefBtn.style.border = '0.75px solid #00000088';
-      };
-      addRefBtn.onmouseup = () => {
-        addRefBtn.style.background = '#1e1e1e';
-        addRefBtn.style.transform = 'translateY(0)';
-        addRefBtn.style.boxShadow = '0 1px 0 #000000aa, inset 0 0.75px 0 #ffffff22, inset 0.75px 0 0 #ffffff11, inset -0.75px 0 0 #00000044';
-        addRefBtn.style.border = '0.75px solid #00000044';
-      };
-      addRefBtn.onmouseleave = () => {
-        addRefBtn.style.background = '#1e1e1e';
-        addRefBtn.style.transform = 'translateY(0)';
-        addRefBtn.style.boxShadow = '0 1px 0 #000000aa, inset 0 0.75px 0 #ffffff22, inset 0.75px 0 0 #ffffff11, inset -0.75px 0 0 #00000044';
-        addRefBtn.style.border = '0.75px solid #00000044';
-      };
-      addRefBtn.onclick = () => this.addRefLayer?.();
-      sidebar.appendChild(addRefBtn);
+      const addBtn = this.createAddRefButton();
+      sidebar.appendChild(addBtn);
 
-      // Container for ref layers
-      const refLayersContainer = document.createElement('div');
-      refLayersContainer.style.display = 'flex';
-      refLayersContainer.style.flexDirection = 'column';
-      refLayersContainer.style.gap = '4px';
-      refLayersContainer.style.marginTop = '4px';
-      refLayersContainer.style.overflowY = 'auto';
-      refLayersContainer.style.flex = '1';
-      sidebar.appendChild(refLayersContainer);
+      this.refLayersContainer = document.createElement('div');
+      this.refLayersContainer.style.cssText = `
+        flex: 1; display: flex; flex-direction: column; gap: 4px;
+        overflow-y: auto; margin-top: 4px;
+      `;
+      sidebar.appendChild(this.refLayersContainer);
 
-      // Initialize ref layer management
-      this.refLayers = [];
-      this.refLayerCount = 0;
-      this.refLayersContainer = refLayersContainer;
-      this.sidebar = sidebar;
-      this.selectedRefLayer = null;
+      return sidebar;
+    };
 
-      row.appendChild(sidebar);
+    nodeType.prototype.createAddRefButton = function () {
+      const btn = document.createElement('button');
+      btn.textContent = '+ Add ref';
+      btn.style.cssText = `
+        padding: 8px 12px; background: #1e1e1e; color: #ddd; border: 0.75px solid #00000044;
+        border-radius: 4px; font-size: 12px; font-weight: 500; cursor: pointer;
+        box-shadow: 0 1px 0 #000000aa, inset 0 0.75px 0 #ffffff22;
+        transition: all 0.05s ease;
+      `;
+      ['mousedown', 'mouseleave', 'mouseup'].forEach(ev => {
+        btn.addEventListener(ev, () => {
+          btn.style.background = ev === 'mousedown' ? '#444' : '#1e1e1e';
+          btn.style.transform = ev === 'mousedown' ? 'translateY(1px)' : 'translateY(0)';
+        });
+      });
+      btn.onclick = () => this.addRefLayer();
+      return btn;
+    };
 
-      const canvasWrap = document.createElement('div');
-      canvasWrap.style.flex = '1 1 0';
-      canvasWrap.style.minWidth = '0';
-      canvasWrap.style.display = 'flex';
-      canvasWrap.style.alignItems = 'center';
-      canvasWrap.style.justifyContent = 'center';
-      canvasWrap.style.paddingTop = '0';
-      canvasWrap.style.overflow = 'hidden';
-      canvasWrap.style.boxSizing = 'border-box';
-      row.appendChild(canvasWrap);
+    nodeType.prototype.createCanvasWrapper = function () {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = `
+        flex: 1; display: flex; align-items: center; justify-content: center;
+        overflow: hidden; padding-top: 0; box-sizing: border-box;
+      `;
 
-      const canvas = document.createElement('canvas');
-      canvas.style.borderRadius = '0px';
-      canvas.style.background = '#222';
-      canvas.style.border = '1px solid gray';
-      canvas.style.boxShadow = 'none';
-      canvas.style.display = 'block';
-      canvas.style.maxWidth = '100%';
-      canvas.style.maxHeight = '100%';
-      canvas.style.width = 'auto';
-      canvas.style.height = 'auto';
-      canvasWrap.appendChild(canvas);
+      this.refsCanvas = document.createElement('canvas');
+      this.refsCanvas.style.cssText = `
+        background: #222; border: 1px solid gray; max-width: 100%; max-height: 100%;
+        display: block; border-radius: 0;
+      `;
+      wrap.appendChild(this.refsCanvas);
 
-      this.refsCanvas = canvas;
-      this.canvasWrap = canvasWrap;
+      return wrap;
+    };
 
-      // Initialize RefCanvas (uses PowerSplineEditor coordinate system)
-      this.refCanvasEditor = new RefCanvas(canvas, this);
-
-      // Attach lasso drawing helpers
+    // =================================================================
+    // Canvas & RefCanvas Setup
+    // =================================================================
+    nodeType.prototype.setupCanvas = function () {
+      this.refCanvasEditor = new RefCanvas(this.refsCanvas, this);
       attachLassoHelpers(this);
 
       this.refreshCanvas = () => {
-        if (!this.refCanvasEditor) return;
-
-        // Render the canvas (background + grid)
         this.refCanvasEditor.render();
 
-        // Add border
         const ctx = this.refsCanvas.getContext('2d');
         const { width, height } = this.refsCanvas;
         ctx.strokeStyle = 'gray';
         ctx.lineWidth = 1;
         ctx.strokeRect(0, 0, width, height);
 
-        // Draw placeholder if no bg_image
         if (!this.refCanvasEditor.backgroundImage) {
           ctx.fillStyle = '#787878';
           ctx.font = '12px sans-serif';
-          ctx.textAlign = 'left';
-          ctx.fillText('PrepareRefs canvas', 12 + 8, 18 + 8);
+          ctx.fillText('PrepareRefs canvas', 20, 26);
         }
 
-        // Render lasso shapes for each layer using refCanvasEditor's coordinate system
-        if (this.refLayers && this.renderLayerLassoShapes) {
-          this.refLayers.forEach(refLayer => {
-            if (refLayer.value.lassoShape) {
-              // Show green only for selected layer, gray for others
-              const isSelected = this.selectedRefLayer === refLayer;
-              this.renderLayerLassoShapes(ctx, refLayer.value.lassoShape, width, height, isSelected, this.refCanvasEditor);
-            }
-          });
-        }
+        this.refLayers?.forEach(layer => {
+          if (layer.value.lassoShape) {
+            const isSelected = this.selectedRefLayer === layer;
+            this.renderLayerLassoShapes?.(ctx, layer.value.lassoShape, width, height, isSelected, this.refCanvasEditor);
+          }
+        });
 
-        // Render preview if currently drawing
-        if (this.renderLassoPreview) {
-          this.renderLassoPreview();
-        }
-      };
-
-      this.setDimensionValue = (widgetName, value) => {
-        const widget = this.widgets.find((w) => w.name === widgetName);
-        if (!widget) return;
-        const clamp =
-          widgetName === 'mask_width'
-            ? this.sizeManager?.constrainCanvasWidth?.bind(this.sizeManager)
-            : this.sizeManager?.constrainCanvasHeight?.bind(this.sizeManager);
-        const clamped = clamp ? clamp(Math.round(value)) : Math.round(value);
-        widget.value = clamped;
-        widget.callback?.call(widget, clamped);
-        this.setDirtyCanvas(true, true);
-      };
-
-      this.adjustDimension = (widgetName, delta) => {
-        const widget = this.widgets.find((w) => w.name === widgetName);
-        if (!widget) return;
-        const next = Number(widget.value || 0) + delta;
-        this.setDimensionValue(widgetName, next);
-        this.updateCanvasSizeFromWidgets();
-      };
-
-      this.promptDimension = (widgetName, label) => {
-        const widget = this.widgets.find((w) => w.name === widgetName);
-        if (!widget) return;
-        const next = prompt(`Set ${label}`, widget.value);
-        if (next === null) return;
-        const parsed = parseInt(next, 10);
-        if (Number.isNaN(parsed)) return;
-        this.setDimensionValue(widgetName, parsed);
-        this.updateCanvasSizeFromWidgets();
-        this.properties.userAdjustedDims = true;
+        this.renderLassoPreview?.();
       };
 
       this.forceCanvasRefresh = () => {
         this.refreshCanvas();
         this.setDirtyCanvas(true, true);
       };
+    };
 
-      // Wire the TopRow refresh button to pull the connected bg_image and paint it
-      this.updateReferenceImageFromConnectedNode = async () => {
-        try {
-          const base64 = await getReferenceImageFromConnectedNode(this, 'bg_image');
-          if (!base64) {
-            console.warn('PrepareRefs: no bg_image found on refresh');
-            this.forceCanvasRefresh();
-            return;
-          }
+    // =================================================================
+    // Ref Layer Management
+    // =================================================================
+    nodeType.prototype.setupRefLayers = function () {
+      this.refLayers = [];
+      this.selectedRefLayer = null;
 
-          await new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              // Use RefCanvas to load bg_image (sets up coordinate system automatically)
-              this.refCanvasEditor.loadBackgroundImage(img);
-              this.loadedBgImage = img;
-              // Keep user-selected canvas size, only refresh the visual preview
-              this.forceCanvasRefresh();
-              resolve();
-            };
-            img.onerror = reject;
-            img.src = base64;
-          });
-        } catch (e) {
-          console.error('PrepareRefs: failed to refresh bg_image', e);
-          this.forceCanvasRefresh();
-        }
-      };
-      this.handleFramesRefresh = () => {
-        this.forceCanvasRefresh();
-      };
+      this.addSerializedRefDataWidget();
+    };
 
-      this.updateCanvasSizeFromWidgets = () => {
-        const width = widthWidget ? widthWidget.value : 640;
-        const height = heightWidget ? heightWidget.value : 480;
-        // Use RefCanvas to update size (handles canvas resize and image recentering)
-        this.refCanvasEditor.setSize(width, height);
-        // Remove CSS dimensions - let it scale naturally
-        this.refsCanvas.style.width = '';
-        this.refsCanvas.style.height = '';
-        this.sizeManager.setCanvasSize(width, height);
-        this.refreshCanvas();
-        this.sizeManager.updateSize(true);
-      };
-
-      // Add a method to get ref layer data for serialization
-      this.getRefLayerData = () => {
-        if (!this.refLayers || !Array.isArray(this.refLayers)) {
-            return [];
-        }
-
-        // Filter and return only layers that have shapes (non-empty additivePaths)
-        return this.refLayers
-          .filter(layer => {
-            // Check if the layer has lasso shapes with actual paths
-            const lassoShape = layer.value?.lassoShape;
-            const additivePaths = lassoShape?.additivePaths;
-            return lassoShape && additivePaths && Array.isArray(additivePaths) && additivePaths.length > 0;
-          })
-          .map(layer => ({ ...layer.value }));
-      };
-
-      // Add the ref layer data widget early in the process
-      if (!this.widgets) this.widgets = [];
-      const refDataWidget = {
+    nodeType.prototype.addSerializedRefDataWidget = function () {
+      const widget = {
         type: "custom",
         name: "ref_layer_data",
-        value: this.getRefLayerData(),
-        callback: (value) => {
-          // Update the value when needed
-          this.widgets.find(w => w.name === "ref_layer_data").value = this.getRefLayerData();
-        }
+        value: [],
+        serialize: true,
+        callback: () => { widget.value = this.getRefLayerData(); }
       };
-      // Mark this widget for serialization
-      refDataWidget.serialize = true;
-      this.widgets.push(refDataWidget);
+      this.widgets.push(widget);
+    };
 
-      this.domWidget = this.addDOMWidget(nodeData.name, 'PrepareRefsCanvas', container, {
-        serialize: false,
-        hideOnZoom: false,
+    nodeType.prototype.getRefLayerData = function () {
+      return (this.refLayers || [])
+        .filter(l => l.value?.lassoShape?.additivePaths?.length > 0)
+        .map(l => ({ ...l.value }));
+    };
+
+    nodeType.prototype.restoreRefLayers = function (layerDataArray) {
+      if (!Array.isArray(layerDataArray) || layerDataArray.length === 0) return;
+
+      console.log('[PrepareRefs] Restoring', layerDataArray.length, 'layers from saved data');
+
+      // Clear existing layers
+      this.refLayers.forEach(layer => {
+        if (layer.domElement?.parentNode) {
+          layer.domElement.parentNode.removeChild(layer.domElement);
+        }
+      });
+      this.refLayers = [];
+      this.selectedRefLayer = null;
+
+      // Recreate layers from saved data
+      layerDataArray.forEach((layerData, index) => {
+        const layer = new RefLayerWidget(layerData.name || `ref_${index + 1}`);
+        layer.value = { ...layerData };
+        layer.node = this;
+        this.refLayers.push(layer);
+
+        const el = this.createRefLayerElement(layer);
+        this.refLayersContainer.appendChild(el);
+        layer.domElement = el;
       });
 
-      this.domWidget.computeSize = function (width) {
-        const heightWidget = this.node?.widgets?.find((w) => w.name === 'mask_height');
-        const canvasHeight = heightWidget ? heightWidget.value : 480;
-        return [width, canvasHeight];
-      }.bind(this.domWidget);
+      // Save to session storage for quick restore
+      try {
+        const sessionKey = `prepare-refs-layers-${this.uuid}`;
+        safeSetSessionItem(sessionKey, JSON.stringify(layerDataArray));
+      } catch (e) {
+        console.warn('[PrepareRefs] Failed to save layers to session:', e);
+      }
+
+      this.forceCanvasRefresh();
+    };
+
+    nodeType.prototype.addRefLayer = function () {
+      const nextNum = (this.refLayers.reduce((m, l) => {
+        const n = parseInt(l.value.name.match(/ref_(\d+)/)?.[1] || 0);
+        return Math.max(m, n);
+      }, 0)) + 1;
+
+      const layer = new RefLayerWidget(`ref_${nextNum}`);
+      layer.value = { on: true, name: `ref_${nextNum}` };
+      layer.node = this;
+      this.refLayers.push(layer);
+
+      const el = this.createRefLayerElement(layer);
+      this.refLayersContainer.appendChild(el);
+      layer.domElement = el;
+
+      this.selectRefLayer(layer);
+      this.enterLassoMode?.(layer);
+      this.updateRefDataWidget();
+      this.forceCanvasRefresh();
+    };
+
+    nodeType.prototype.createRefLayerElement = function (layer) {
+      const el = document.createElement('div');
+      el.style.cssText = `
+        display: flex; align-items: center; padding: 4px 6px; background: #262626;
+        border: 1px solid #3a3a3a; border-radius: 3px; font-size: 11px; color: #e0e0e0;
+        cursor: pointer; user-select: none; transition: background 0.1s ease;
+      `;
+
+      const name = document.createElement('span');
+      name.textContent = layer.value.name;
+      name.style.flex = '1';
+      el.appendChild(name);
+
+      const editBtn = this.createIconButton('Edit', '✎', () => {
+        this.selectRefLayer(layer);
+        if (this._lassoDrawingActive && this._lassoActiveLayer === layer) {
+          this.exitLassoMode?.();
+        } else {
+          this.enterLassoMode?.(layer);
+        }
+      });
+      el.appendChild(editBtn);
+      
+      // Store reference to edit button for color updates
+      layer.editButton = editBtn;
+
+      const delBtn = this.createIconButton('Delete', '✕', () => this.removeRefLayer(layer));
+      el.appendChild(delBtn);
+
+      el.onclick = (e) => {
+        if (e.target.tagName === 'BUTTON') return;
+        if (this.selectedRefLayer === layer) {
+          this.deselectRefLayer();
+        } else {
+          this.selectRefLayer(layer);
+        }
+      };
+
+      return el;
+    };
+
+    nodeType.prototype.createIconButton = function (title, symbol, callback) {
+      const btn = document.createElement('button');
+      btn.innerHTML = symbol;
+      btn.title = title;
+      btn.style.cssText = `
+        width: 18px; height: 18px; padding: 0; background: transparent;
+        border: none; color: #888; cursor: pointer; font-size: 12px;
+        display: flex; align-items: center; justify-content: center;
+      `;
+      btn.onmousedown = (e) => { e.stopPropagation(); btn.style.color = '#fff'; };
+      btn.onmouseleave = () => {
+        // Only reset to gray if not in edit mode
+        const isInEditMode = this._lassoDrawingActive && this._lassoActiveLayer &&
+                           this._lassoActiveLayer.editButton === btn;
+        if (!isInEditMode) {
+          btn.style.color = '#888';
+        }
+      };
+      btn.onmouseup = () => {
+        // Only reset to gray if not in edit mode
+        const isInEditMode = this._lassoDrawingActive && this._lassoActiveLayer &&
+                           this._lassoActiveLayer.editButton === btn;
+        if (!isInEditMode) {
+          btn.style.color = '#888';
+        }
+      };
+      btn.onclick = (e) => { e.stopPropagation(); callback(); };
+      return btn;
+    };
+
+    nodeType.prototype.selectRefLayer = function (layer) {
+      if (this.selectedRefLayer?.domElement) {
+        this.selectedRefLayer.domElement.style.background = '#262626';
+      }
+      this.selectedRefLayer = layer;
+      if (layer.domElement) layer.domElement.style.background = '#0c0c0c';
+      this.exitLassoMode?.();
+      this.updateLayerButtonStates();
+      this.forceCanvasRefresh();
+    };
+
+    nodeType.prototype.deselectRefLayer = function () {
+      if (this.selectedRefLayer?.domElement) {
+        this.selectedRefLayer.domElement.style.background = '#262626';
+      }
+      this.selectedRefLayer = null;
+      this.exitLassoMode?.();
+      this.updateLayerButtonStates();
+      this.forceCanvasRefresh();
+    };
+
+    nodeType.prototype.removeRefLayer = function (layer) {
+      const idx = this.refLayers.indexOf(layer);
+      if (idx === -1) return;
+
+      if (this.selectedRefLayer === layer) this.selectedRefLayer = null;
+      this.refLayers.splice(idx, 1);
+      if (layer.domElement?.parentNode) layer.domElement.parentNode.removeChild(layer.domElement);
+
+      this.renumberRefLayers();
+      this.updateRefDataWidget();
+      this.forceCanvasRefresh();
+    };
+
+    nodeType.prototype.renumberRefLayers = function () {
+      this.refLayers.forEach((l, i) => {
+        l.value.name = `ref_${i + 1}`;
+        if (l.domElement) l.domElement.querySelector('span').textContent = l.value.name;
+      });
+    };
+
+    nodeType.prototype.updateRefDataWidget = function () {
+      const w = this.widgets.find(w => w.name === "ref_layer_data");
+      if (w) {
+        w.value = this.getRefLayerData();
+
+        // Also save to sessionStorage for quick restore on page refresh
+        try {
+          const sessionKey = `prepare-refs-layers-${this.uuid}`;
+          safeSetSessionItem(sessionKey, JSON.stringify(w.value));
+        } catch (e) {
+          console.warn('[PrepareRefs] Failed to save layers to session:', e);
+        }
+      }
+    };
+    
+    nodeType.prototype.updateLayerButtonStates = function () {
+      this.refLayers?.forEach(layer => {
+        if (layer.editButton) {
+          // Make pen icon green if this layer is in edit mode
+          const isInEditMode = this._lassoDrawingActive && this._lassoActiveLayer === layer;
+          layer.editButton.style.color = isInEditMode ? '#4CAF50' : '#888';
+        }
+      });
+    };
+
+    // =================================================================
+    // Dimension & Canvas Size Helpers
+    // =================================================================
+    nodeType.prototype.updateCanvasSizeFromWidgets = function () {
+      const w = this.widgets.find(w => w.name === 'mask_width')?.value ?? 640;
+      const h = this.widgets.find(w => w.name === 'mask_height')?.value ?? 480;
+
+      this.refCanvasEditor.setSize(w, h);
+      this.refsCanvas.style.width = this.refsCanvas.style.height = '';
+      this.sizeManager.setCanvasSize(w, h);
+      this.refreshCanvas();
+      this.sizeManager.updateSize(true);
+    };
+
+    // =================================================================
+    // Image Refresh & Persistence
+    // =================================================================
+    nodeType.prototype.updateReferenceImageFromConnectedNode = async function () {
+      try {
+        const base64 = await getReferenceImageFromConnectedNode(this, 'bg_image');
+        if (!base64) return this.forceCanvasRefresh();
+
+        const img = await new Promise((resolve, reject) => {
+          const i = new Image();
+          i.onload = () => { this.refCanvasEditor.loadBackgroundImage(i); resolve(i); };
+          i.onerror = reject;
+          i.src = base64;
+        });
+
+        this.loadedBgImage = img;
+
+        // Save via backend
+        await fetch('/wanvideowrapper_qq/save_prepare_refs_images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bg_image: base64, ref_images: [] })
+        })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success && res.paths?.bg_image_path) {
+            this.properties.bg_image_path = res.paths.bg_image_path;
+            safeSetSessionItem(`prepare-refs-bg-${this.uuid}`, res.paths.bg_image_path);
+          }
+        })
+        .catch(console.error);
+
+        this.forceCanvasRefresh();
+      } catch (err) {
+        console.error('[PrepareRefs] Failed to refresh background:', err);
+        this.forceCanvasRefresh();
+      }
+    };
+
+    // =================================================================
+    // Session Restore on Load
+    // =================================================================
+    nodeType.prototype.restoreSessionImages = function () {
+      // Restore layers from sessionStorage
+      const sessionLayers = safeGetSessionItem(`prepare-refs-layers-${this.uuid}`);
+      if (sessionLayers) {
+        try {
+          const layerData = JSON.parse(sessionLayers);
+          if (Array.isArray(layerData) && layerData.length > 0) {
+            this.restoreRefLayers(layerData);
+            console.log('[PrepareRefs] Restored', layerData.length, 'layers from session');
+          }
+        } catch (e) {
+          console.warn('[PrepareRefs] Failed to restore layers from session:', e);
+        }
+      }
+
+      const bgPath = safeGetSessionItem(`prepare-refs-bg-${this.uuid}`);
+      const refPathsJson = safeGetSessionItem(`prepare-refs-images-${this.uuid}`);
+
+      if (bgPath) {
+        try {
+          // CRITICAL: Resolve relative path correctly using import.meta.url
+          const url = new URL(bgPath, import.meta.url).href;
+          loadImageFromUrl(url, this.refCanvasEditor)
+            .then(() => {
+              console.log('[PrepareRefs] Restored bg_image from session:', bgPath);
+              this.forceCanvasRefresh();
+            })
+            .catch(err => console.error('[PrepareRefs] Failed to restore bg_image:', err));
+        } catch (e) {
+          console.error('[PrepareRefs] Invalid bg_image path in session:', bgPath, e);
+        }
+      }
+
+      if (refPathsJson) {
+        try {
+          const paths = JSON.parse(refPathsJson);
+          if (Array.isArray(paths) && paths.length > 0) {
+            const resolvedPaths = paths.map(p => new URL(p, import.meta.url).href);
+            loadRefImagesFromPaths(resolvedPaths, this).then(imgs => {
+              this.loadedRefImages = imgs;
+              this.forceCanvasRefresh();
+            });
+          }
+        } catch (e) {
+          console.error('[PrepareRefs] Failed to parse/restore ref images from session:', e);
+        }
+      }
 
       this.updateCanvasSizeFromWidgets();
+    };
 
-      // Add ref layer methods
-      this.addRefLayer = () => {
-        // Find the highest existing ref number
-        let maxNum = 0;
-        this.refLayers.forEach(layer => {
-          const match = layer.value.name.match(/ref_(\d+)/);
-          if (match) {
-            const num = parseInt(match[1], 10);
-            if (num > maxNum) maxNum = num;
-          }
-        });
-        const nextNum = maxNum + 1;
+    // =================================================================
+    // Lifecycle Callbacks
+    // =================================================================
+    chainCallback(nodeType.prototype, 'onExecuted', async function (message) {
+      // Auto-size from incoming image if user hasn't manually adjusted
+      if (!this.properties.userAdjustedDims && message?.ui?.bg_image_dims?.[0]) {
+        const { width, height } = message.ui.bg_image_dims[0];
+        this.setDimensionValue?.('mask_width', Math.round(width));
+        this.setDimensionValue?.('mask_height', Math.round(height));
+        this.updateCanvasSizeFromWidgets();
+      }
 
-        const refWidget = new RefLayerWidget(`ref_${nextNum}`);
-        refWidget.value = { on: true, name: `ref_${nextNum}` };
-        refWidget.node = this;
-        this.refLayers.push(refWidget);
+      // Refresh canvas with connected bg_image
+      await this.updateReferenceImageFromConnectedNode();
 
-        // Create DOM element for the ref layer
-        const refElement = document.createElement('div');
-        refElement.style.display = 'flex';
-        refElement.style.alignItems = 'center';
-        refElement.style.padding = '4px 6px';
-        refElement.style.background = '#262626';
-        refElement.style.border = '1px solid #3a3a3a';
-        refElement.style.borderRadius = '3px';
-        refElement.style.fontSize = '11px';
-        refElement.style.color = '#e0e0e0';
-        refElement.style.cursor = 'pointer';
-        refElement.style.userSelect = 'none';
-        refElement.style.transition = 'background 0.1s ease';
+      // Restore bg/ref images from execution message
+      if (message?.ui?.bg_image_path?.[0]) {
+        const path = message.ui.bg_image_path[0];
+        this.properties.bg_image_path = path;
+        safeSetSessionItem(`prepare-refs-bg-${this.uuid}`, path);
+        const url = new URL(path, import.meta.url).href;
+        await loadImageFromUrl(url, this.refCanvasEditor);
+      }
 
-        // Layer name
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = refWidget.value.name;
-        nameSpan.style.flex = '1';
-        refElement.appendChild(nameSpan);
+      if (message?.ui?.ref_images_paths?.length) {
+        const paths = message.ui.ref_images_paths;
+        this.properties.ref_images_paths = paths;
+        safeSetSessionItem(`prepare-refs-images-${this.uuid}`, JSON.stringify(paths));
+        const resolvedPaths = paths.map(p => new URL(p, import.meta.url).href);
+        this.loadedRefImages = await loadRefImagesFromPaths(resolvedPaths, this);
+      }
 
-        // Edit button
-        const editBtn = document.createElement('button');
-        editBtn.textContent = '✎';
-        editBtn.style.width = '18px';
-        editBtn.style.height = '18px';
-        editBtn.style.padding = '0';
-        editBtn.style.border = 'none';
-        editBtn.style.background = 'transparent';
-        editBtn.style.color = '#888888';
-        editBtn.style.cursor = 'pointer';
-        editBtn.style.fontSize = '12px';
-        editBtn.style.transition = 'color 0.1s ease';
-        editBtn.onmousedown = (e) => {
-          e.stopPropagation();
-          editBtn.style.color = '#ffffff';
-        };
-        editBtn.onmouseup = () => {
-          editBtn.style.color = '#888888';
-        };
-        editBtn.onmouseleave = () => {
-          editBtn.style.color = '#888888';
-        };
-        editBtn.onclick = (e) => {
-          e.stopPropagation();
-          // Select this layer when edit is clicked
-          if (this.selectedRefLayer && this.selectedRefLayer.domElement) {
-            this.selectedRefLayer.domElement.style.background = '#262626';
-          }
-          this.selectedRefLayer = refWidget;
-          refElement.style.background = '#0c0c0c';
-
-          // Toggle lasso mode
-          if (this._lassoDrawingActive && this._lassoActiveLayer === refWidget) {
-            this.exitLassoMode?.();
-          } else {
-            this.enterLassoMode?.(refWidget);
-          }
-
-          this.setDirtyCanvas(true, true);
-        };
-        refElement.appendChild(editBtn);
-
-        // Delete button (X)
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = '✕';
-        deleteBtn.style.width = '18px';
-        deleteBtn.style.height = '18px';
-        deleteBtn.style.padding = '0';
-        deleteBtn.style.border = 'none';
-        deleteBtn.style.background = 'transparent';
-        deleteBtn.style.color = '#888888';
-        deleteBtn.style.cursor = 'pointer';
-        deleteBtn.style.fontSize = '12px';
-        deleteBtn.style.transition = 'color 0.1s ease';
-        deleteBtn.onmousedown = (e) => {
-          e.stopPropagation();
-          deleteBtn.style.color = '#ffffff';
-        };
-        deleteBtn.onmouseup = () => {
-          deleteBtn.style.color = '#888888';
-        };
-        deleteBtn.onmouseleave = () => {
-          deleteBtn.style.color = '#888888';
-        };
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          this.removeRefLayer(refWidget, refElement);
-        };
-        refElement.appendChild(deleteBtn);
-
-        // Store reference to element on widget
-        refWidget.domElement = refElement;
-
-        // Click handler to select/deselect layer
-        refElement.onclick = () => {
-          // If clicking on already selected layer, deselect it
-          if (this.selectedRefLayer === refWidget) {
-            this.selectedRefLayer = null;
-            refElement.style.background = '#262626';
-            // Exit lasso mode when deselecting
-            if (this._lassoDrawingActive) {
-              this.exitLassoMode?.();
-            }
-            this.refreshCanvas();
-            this.setDirtyCanvas(true, true);
-            return;
-          }
-          // Deselect previous layer
-          if (this.selectedRefLayer && this.selectedRefLayer.domElement) {
-            this.selectedRefLayer.domElement.style.background = '#262626';
-          }
-          // Exit lasso mode when switching layers
-          if (this._lassoDrawingActive) {
-            this.exitLassoMode?.();
-          }
-          // Select this layer
-          this.selectedRefLayer = refWidget;
-          refElement.style.background = '#0c0c0c';
-          this.refreshCanvas();
-          this.setDirtyCanvas(true, true);
-        };
-
-        this.refLayersContainer.appendChild(refElement);
-
-        // Auto-select the newly added layer
-        if (this.selectedRefLayer && this.selectedRefLayer.domElement) {
-          this.selectedRefLayer.domElement.style.background = '#262626';
-        }
-        this.selectedRefLayer = refWidget;
-        refElement.style.background = '#0c0c0c';
-
-        // Auto-enter lasso mode for the new layer
-        if (this.enterLassoMode) {
-          this.enterLassoMode(refWidget);
-        }
-
-        // Update the serialized ref layer data widget
-        const refDataWidget = this.widgets.find(w => w.name === "ref_layer_data");
-        if (refDataWidget) {
-          refDataWidget.value = this.getRefLayerData();
-        }
-
-        this.refreshCanvas();
-        this.setDirtyCanvas(true, true);
-      };
-
-      this.removeRefLayer = (refWidget, refElement) => {
-        const idx = this.refLayers.indexOf(refWidget);
-        if (idx > -1) {
-          // Clear selection if this was the selected layer
-          if (this.selectedRefLayer === refWidget) {
-            this.selectedRefLayer = null;
-          }
-
-          this.refLayers.splice(idx, 1);
-          // Remove from widgets
-          const widgetIdx = this.widgets.indexOf(refWidget);
-          if (widgetIdx > -1) {
-            this.widgets.splice(widgetIdx, 1);
-          }
-          // Remove from DOM
-          if (refElement && refElement.parentNode) {
-            refElement.parentNode.removeChild(refElement);
-          } else if (refWidget.domElement && refWidget.domElement.parentNode) {
-            refWidget.domElement.parentNode.removeChild(refWidget.domElement);
-          }
-          // Renumber remaining layers
-          this.refLayers.forEach((layer, i) => {
-            layer.value.name = `ref_${i + 1}`;
-            if (layer.domElement) {
-              layer.domElement.querySelector('span').textContent = `ref_${i + 1}`;
-            }
-          });
-
-          // Update the serialized ref layer data widget
-          const refDataWidget = this.widgets.find(w => w.name === "ref_layer_data");
-          if (refDataWidget) {
-            refDataWidget.value = this.getRefLayerData();
-          }
-
-          this.refreshCanvas();
-          this.setDirtyCanvas(true, true);
-        }
-      };
+      this.forceCanvasRefresh();
     });
 
-    chainCallback(nodeType.prototype, 'onExecuted', function (message) {
-      const dims = message?.ui?.bg_image_dims;
-      if (!this.properties.userAdjustedDims && Array.isArray(dims) && dims.length > 0) {
-        const first = dims[0];
-        if (first?.width && first?.height) {
-          this.setDimensionValue('mask_width', Math.round(first.width));
-          this.setDimensionValue('mask_height', Math.round(first.height));
-          this.updateCanvasSizeFromWidgets();
+    chainCallback(nodeType.prototype, 'onConfigure', async function (info) {
+      // Restore ref layers from widget data
+      const refDataWidget = this.widgets?.find(w => w.name === 'ref_layer_data');
+      if (refDataWidget && Array.isArray(refDataWidget.value) && refDataWidget.value.length > 0) {
+        this.restoreRefLayers(refDataWidget.value);
+      } else {
+        // Try to restore from session storage as fallback
+        const sessionLayers = safeGetSessionItem(`prepare-refs-layers-${this.uuid}`);
+        if (sessionLayers) {
+          try {
+            const layerData = JSON.parse(sessionLayers);
+            if (Array.isArray(layerData) && layerData.length > 0) {
+              this.restoreRefLayers(layerData);
+            }
+          } catch (e) {
+            console.warn('[onConfigure] Failed to restore layers from session:', e);
+          }
         }
       }
-      this.setDirtyCanvas(true, true);
+
+      const savedBgPath = this.properties.bg_image_path;
+      const savedRefPaths = this.properties.ref_images_paths;
+
+      const sessionBgPath = safeGetSessionItem(`prepare-refs-bg-${this.uuid}`);
+      const sessionRefPaths = safeGetSessionItem(`prepare-refs-images-${this.uuid}`);
+
+      const finalBgPath = savedBgPath || sessionBgPath;
+      const finalRefPaths = savedRefPaths || (sessionRefPaths ? JSON.parse(sessionRefPaths) : null);
+
+      if (finalBgPath) {
+        try {
+          const url = new URL(finalBgPath, import.meta.url).href;
+          await loadImageFromUrl(url, this.refCanvasEditor);
+          console.log('[onConfigure] Restored background image:', finalBgPath);
+        } catch (e) {
+          console.error('[onConfigure] Failed to load bg_image:', finalBgPath, e);
+        }
+      }
+
+      if (finalRefPaths && Array.isArray(finalRefPaths) && finalRefPaths.length > 0) {
+        try {
+          const urls = finalRefPaths.map(p => new URL(p, import.meta.url).href);
+          this.loadedRefImages = await loadRefImagesFromPaths(urls, this);
+          console.log('[onConfigure] Restored', this.loadedRefImages.length, 'ref images');
+        } catch (e) {
+          console.error('[onConfigure] Failed to restore ref images:', e);
+        }
+      }
+
+      this.forceCanvasRefresh();
     });
 
-    // Update the ref layer data widget when node is serialized
-    const originalOnSerialize = nodeType.prototype.onSerialize;
+    // Ensure ref data and paths are serialized
+    const origSerialize = nodeType.prototype.onSerialize;
     nodeType.prototype.onSerialize = function (o) {
-      // Update the ref layer data widget before serialization
-      const refDataWidget = this.widgets?.find(w => w.name === "ref_layer_data");
-      if (refDataWidget) {
-        refDataWidget.value = this.getRefLayerData?.() || [];
-      }
-      originalOnSerialize?.apply(this, arguments);
+      const refWidget = this.widgets?.find(w => w.name === "ref_layer_data");
+      if (refWidget) refWidget.value = this.getRefLayerData();
+
+      o.properties = o.properties || {};
+      if (this.properties.bg_image_path) o.properties.bg_image_path = this.properties.bg_image_path;
+      if (this.properties.ref_images_paths) o.properties.ref_images_paths = this.properties.ref_images_paths;
+
+      origSerialize?.call(this, o);
     };
   },
 });

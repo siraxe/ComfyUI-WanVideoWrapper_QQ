@@ -32,6 +32,7 @@ from .nodes.cache_samples import *
 # Import API endpoints to register routes
 from . import api
 from .utility.rgthree_api import routes_model_info
+from .nodes import trigger_ref_refresh  # Register PrepareRefs backend trigger endpoint
 
 NODE_CONFIG = {}
 

@@ -494,6 +494,9 @@ function enterLassoMode(node, refLayer) {
     canvas.style.cursor = 'crosshair';
   }
 
+  // Update button states to show green pen for active layer
+  node.updateLayerButtonStates?.();
+
   console.log(`Lasso mode activated for ${refLayer.value.name}`);
 }
 
@@ -517,6 +520,9 @@ function exitLassoMode(node) {
   if (canvas) {
     canvas.style.cursor = 'default';
   }
+
+  // Update button states to reset pen colors
+  node.updateLayerButtonStates?.();
 
   console.log('Lasso mode deactivated');
 }

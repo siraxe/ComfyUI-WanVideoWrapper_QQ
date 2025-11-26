@@ -7,14 +7,521 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 import cv2
+from typing import List, Tuple, Optional, Dict, Any
 
 
+# -------------------------
+# Module-level constants
+# -------------------------
+DEFAULT_BG_CHANNELS = 3
+MASK_FEATHER_SIGMA = 1.5  # gaussian sigma used to feather masks
+MASK_THRESHOLD = 0.01     # threshold to consider a mask pixel "active"
+
+
+# -------------------------
+# Utility helpers
+# -------------------------
+def ensure_dir(path: Path) -> None:
+    """Ensure a directory exists."""
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def tensor_to_pil(image_tensor: torch.Tensor) -> Image.Image:
+    """
+    Convert a torch image tensor to PIL Image.
+    Accepts HWC or CHW or single-channel (grayscale) tensors.
+    Expects float tensors in 0..1 or uint8 0..255.
+    """
+    if torch.is_floating_point(image_tensor):
+        img = torch.clamp(image_tensor, 0.0, 1.0)
+        img = (img * 255.0).byte()
+    else:
+        img = image_tensor.byte()
+
+    # Convert to CHW if HWC provided with channels last
+    if img.ndim == 3 and img.shape[2] in (1, 3, 4):
+        img = img.permute(2, 0, 1)
+
+    # torchvision transform expects CHW and byte or float
+    pil = transforms.ToPILImage()(img)
+    return pil
+
+
+def pil_to_tensor(img: Image.Image) -> torch.Tensor:
+    """Convert a PIL Image to a torch float tensor in 0..1 HWC format."""
+    tensor = transforms.ToTensor()(img)  # CHW float 0..1
+    tensor = tensor.permute(1, 2, 0)     # HWC
+    return tensor
+
+
+def clamp_float_tensor(t: torch.Tensor) -> torch.Tensor:
+    """Clamp float tensor to 0..1."""
+    if torch.is_floating_point(t):
+        return torch.clamp(t, 0.0, 1.0)
+    return t
+
+
+def safe_device(tensor: torch.Tensor) -> str:
+    """Return a short string describing tensor's device for debug."""
+    return str(tensor.device) if isinstance(tensor, torch.Tensor) else "n/a"
+
+
+# -------------------------
+# Parsing / validation
+# -------------------------
+def parse_ref_layer_data_from_prompt(prompt: Optional[Dict], unique_id: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    Extract ref_layer_data from the serialized prompt structure that the front-end provides.
+    Supports multiple possible serialization shapes (list/dict/value/__value__).
+    """
+    if not prompt or not unique_id or str(unique_id) not in prompt:
+        return []
+
+    node_data = prompt[str(unique_id)]
+    inputs = node_data.get("inputs", {}) if isinstance(node_data, dict) else {}
+    raw_data = inputs.get("ref_layer_data")
+
+    if raw_data is None:
+        return []
+
+    # Normalize different container shapes into a list of dicts
+    if isinstance(raw_data, list):
+        return raw_data
+    if isinstance(raw_data, dict):
+        # prefer '__value__' then 'value'
+        if "__value__" in raw_data and isinstance(raw_data["__value__"], list):
+            return raw_data["__value__"]
+        if "value" in raw_data:
+            val = raw_data["value"]
+            if isinstance(val, list):
+                return val
+            if isinstance(val, (tuple,)):
+                return list(val)
+            # single value
+            return [val] if val else []
+        # fallback: wrap dict
+        return [raw_data]
+
+    # fallback: unknown type
+    return []
+
+
+def filter_layers_with_shapes(ref_layer_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Validate and filter out layers that do not contain lasso shapes or have no additivePaths.
+    Only layers that are dicts and contain 'lassoShape' with 'additivePaths' will be returned.
+    """
+    valid_layers = []
+    if not isinstance(ref_layer_data, list):
+        return valid_layers
+
+    for idx, layer in enumerate(ref_layer_data):
+        if not isinstance(layer, dict):
+            print(f"[PrepareRefs WARNING] Layer {idx} is not a dict: {type(layer)} - skipping")
+            continue
+
+        lasso = layer.get("lassoShape")
+        if not lasso:
+            print(f"[PrepareRefs WARNING] Layer {idx} ({layer.get('name','unknown')}) missing lassoShape - skipping")
+            continue
+
+        additive_paths = lasso.get("additivePaths", [])
+        if not additive_paths:
+            print(f"[PrepareRefs WARNING] Layer {idx} ({layer.get('name','unknown')}) additivePaths empty - skipping")
+            continue
+
+        # optional: only include layers explicitly turned "on" if present
+        if "on" in layer and not layer.get("on", False):
+            print(f"[PrepareRefs INFO] Layer {idx} ({layer.get('name','unknown')}) 'on' flag is False - skipping")
+            continue
+
+        valid_layers.append(layer)
+
+    if len(valid_layers) < len(ref_layer_data):
+        print(f"[PrepareRefs INFO] Filtered layers: {len(ref_layer_data)} → {len(valid_layers)} (removed {len(ref_layer_data)-len(valid_layers)} empty/invalid)")
+    return valid_layers
+
+
+# -------------------------
+# Mask & image creation
+# -------------------------
+def create_mask_from_additive_paths(additive_paths: List[List[Dict[str, float]]], width: int, height: int,
+                                    feather_sigma: float = MASK_FEATHER_SIGMA) -> np.ndarray:
+    """
+    Build a feathered mask (numpy float32 HxW) from an array of additive paths.
+    Each path is a list of {'x': float, 'y': float} where coordinates are normalized 0..1.
+    """
+    mask_img = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(mask_img)
+
+    for path in additive_paths:
+        if not path or not isinstance(path, list):
+            continue
+        pts = []
+        for p in path:
+            if isinstance(p, dict) and "x" in p and "y" in p:
+                x = int(p["x"] * width)
+                y = int(p["y"] * height)
+                pts.append((x, y))
+        if len(pts) >= 3:
+            draw.polygon(pts, fill=255)
+
+    mask_np = np.array(mask_img).astype(np.float32) / 255.0
+    if feather_sigma and feather_sigma > 0:
+        mask_np = gaussian_filter(mask_np, sigma=feather_sigma)
+
+    mask_np = np.clip(mask_np, 0.0, 1.0)
+    return mask_np
+
+
+def create_image_and_mask_from_layer(base_image: torch.Tensor,
+                                     layer: Dict[str, Any],
+                                     width: int,
+                                     height: int,
+                                     export_alpha: bool) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    """
+    Given a base image tensor (B,H,W,C), create a per-layer image tensor and mask tensor.
+    Returns:
+        image_tensor: HWC float tensor in 0..1 (RGB or RGBA depending on export_alpha)
+        mask_tensor: HW float tensor in 0..1 (feathered)
+    """
+    try:
+        lasso_shape = layer.get("lassoShape", {})
+        additive_paths = lasso_shape.get("additivePaths", [])
+        if not additive_paths:
+            return None, None
+
+        # Construct feathered mask (numpy) and convert to torch
+        mask_np = create_mask_from_additive_paths(additive_paths, width, height)
+        mask_tensor = torch.from_numpy(mask_np).float().to(base_image.device)
+
+        # Use the first image in the base batch as source
+        source_image = base_image[0]  # [H,W,C]
+
+        if export_alpha:
+            # Original RGB channels plus mask as alpha
+            rgb = source_image[..., :3]
+            img_tensor = torch.cat((rgb, mask_tensor.unsqueeze(-1)), dim=-1)
+        else:
+            img_tensor = source_image[..., :3]
+
+        return img_tensor, mask_tensor
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] create_image_and_mask_from_layer failed: {e}")
+        return None, None
+
+
+def extract_lasso_shapes_as_images(base_image: torch.Tensor,
+                                   width: int,
+                                   height: int,
+                                   ref_layers: List[Dict[str, Any]],
+                                   export_alpha: bool) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    """
+    For each valid layer in ref_layers, create an image and mask tensor.
+    Returns stacked tensors: images [N, H, W, C], masks [N, H, W] or (None, None) if none found.
+    """
+    if not ref_layers:
+        return None, None
+
+    images = []
+    masks = []
+    for layer in ref_layers:
+        img, m = create_image_and_mask_from_layer(base_image, layer, width, height, export_alpha)
+        if img is not None and m is not None:
+            images.append(img)
+            masks.append(m)
+
+    if not images:
+        return None, None
+
+    images_tensor = torch.stack(images, dim=0)
+    masks_tensor = torch.stack(masks, dim=0)
+    return images_tensor, masks_tensor
+
+
+# -------------------------
+# Mask combining & preview
+# -------------------------
+def combine_masks_union(ref_masks: torch.Tensor) -> torch.Tensor:
+    """
+    Combine multiple mask tensors (N,H,W) into a single HxW mask using max (union).
+    Result is float32 0..1.
+    """
+    if ref_masks is None or ref_masks.numel() == 0:
+        return None
+    return torch.clamp(torch.max(ref_masks, dim=0)[0], 0.0, 1.0)
+
+
+def save_combined_mask_preview(combined_mask: torch.Tensor, save_path: Path) -> None:
+    """
+    Save a preview of the combined mask as an RGB PNG for debugging/previewing.
+    combined_mask is a float tensor HxW with values 0..1
+    """
+    try:
+        pil = tensor_to_pil(combined_mask.cpu())
+        pil = pil.convert("RGB")
+        ensure_dir(save_path.parent)
+        pil.save(str(save_path))
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] save_combined_mask_preview failed: {e}")
+
+
+def apply_mask_to_bg_with_cv2_preview(combined_mask: torch.Tensor, bg_image_path: Path, out_path: Path) -> None:
+    """
+    If a bg_image exists on disk, apply the combined mask and save a masked bg preview using cv2.
+    This mirrors the original behavior that produced bg_image_masked.png for frontend debugging.
+    """
+    if not bg_image_path.exists():
+        return
+
+    try:
+        bg_np = cv2.imread(str(bg_image_path))
+        if bg_np is None:
+            return
+
+        mask_np = (combined_mask.cpu().numpy() * 255).astype(np.uint8)
+        if mask_np.shape != (bg_np.shape[0], bg_np.shape[1]):
+            mask_np = cv2.resize(mask_np, (bg_np.shape[1], bg_np.shape[0]))
+
+        mask_3c = cv2.cvtColor(mask_np, cv2.COLOR_GRAY2BGR)
+        masked = cv2.bitwise_and(bg_np, mask_3c)
+        ensure_dir(out_path.parent)
+        cv2.imwrite(str(out_path), masked)
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] apply_mask_to_bg_with_cv2_preview failed: {e}")
+
+
+# -------------------------
+# Inpainting
+# -------------------------
+def inpaint_background_torch(image_tensor: torch.Tensor, mask_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Inpaint image_tensor using OpenCV inpainting based on mask_tensor.
+    image_tensor: [1,H,W,C] float 0..1 (RGB)
+    mask_tensor: HxW float 0..1
+    Returns inpainted [1,H,W,C] tensor float 0..1
+    """
+    if image_tensor is None:
+        return image_tensor
+
+    # Expect B=1; if not, operate on first
+    img_np = image_tensor[0].mul(255).byte().cpu().numpy()  # HWC uint8
+    # ensure image is contiguous with channels last
+    if img_np.ndim != 3 or img_np.shape[2] not in (3, 4):
+        # try to permute if CHW provided
+        try:
+            img_np = np.transpose(img_np, (1, 2, 0))
+        except Exception:
+            pass
+
+    mask_np = (mask_tensor.cpu().numpy() > MASK_THRESHOLD).astype(np.uint8) * 255
+
+    try:
+        img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        inpainted_bgr = cv2.inpaint(img_bgr, mask_np, 3, cv2.INPAINT_TELEA)
+        inpainted_rgb = cv2.cvtColor(inpainted_bgr, cv2.COLOR_BGR2RGB)
+        out_tensor = torch.from_numpy(inpainted_rgb).float().div(255.0).unsqueeze(0).to(image_tensor.device)
+        return out_tensor
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] inpaint_background_torch failed: {e}")
+        return image_tensor
+
+
+# -------------------------
+# Bounding box / squaring helpers
+# -------------------------
+def find_bounding_box(image_tensor: torch.Tensor, mask_tensor: Optional[torch.Tensor] = None) -> Tuple[int, int, int, int]:
+    """
+    Find the bounding box of non-transparent/active pixels.
+    Returns min_x, min_y, max_x, max_y.
+    """
+    if mask_tensor is not None:
+        mask = mask_tensor > MASK_THRESHOLD
+    elif image_tensor.shape[-1] == 4:
+        mask = image_tensor[..., 3] > MASK_THRESHOLD
+    else:
+        rgb_sum = torch.sum(image_tensor[..., :3], dim=-1)
+        mask = rgb_sum > MASK_THRESHOLD
+
+    if not mask.any():
+        return 0, 0, image_tensor.shape[1], image_tensor.shape[0]
+
+    ys, xs = torch.where(mask)
+    min_x = int(xs.min().item())
+    max_x = int(xs.max().item())
+    min_y = int(ys.min().item())
+    max_y = int(ys.max().item())
+    return min_x, min_y, max_x, max_y
+
+
+def create_square_canvas(max_dim: int, channels: int = 4) -> torch.Tensor:
+    """Create a zero-initialized square canvas tensor HxWxC (float32)."""
+    return torch.zeros((max_dim, max_dim, channels), dtype=torch.float32)
+
+
+def place_image_in_square(source_image: torch.Tensor,
+                          target_canvas: torch.Tensor,
+                          bbox: Tuple[int, int, int, int],
+                          has_alpha: bool = True) -> torch.Tensor:
+    """
+    Center the visible content from source_image (HWC) inside target_canvas (square HWC).
+    Handles alpha if present.
+    """
+    min_x, min_y, max_x, max_y = bbox
+    src_w = max_x - min_x + 1
+    src_h = max_y - min_y + 1
+    visible = source_image[min_y:max_y + 1, min_x:max_x + 1, :]
+
+    canvas_size = target_canvas.shape[0]
+    offset_x = (canvas_size - src_w) // 2
+    offset_y = (canvas_size - src_h) // 2
+    end_x = offset_x + src_w
+    end_y = offset_y + src_h
+
+    if has_alpha and visible.shape[-1] == 4:
+        target_canvas[offset_y:end_y, offset_x:end_x, :] = visible
+    else:
+        target_canvas[offset_y:end_y, offset_x:end_x, :visible.shape[-1]] = visible
+    return target_canvas
+
+
+def scale_and_center_in_square(source_image: torch.Tensor,
+                                bbox: Tuple[int, int, int, int],
+                                square_size: int = 768,
+                                has_alpha: bool = True) -> torch.Tensor:
+    """
+    Crop to bounding box, scale to fill as much of square_size as possible (maintaining aspect ratio),
+    and center in a square canvas.
+
+    Args:
+        source_image: Input image tensor (H, W, C)
+        bbox: Bounding box (min_x, min_y, max_x, max_y)
+        square_size: Target square size (default 768)
+        has_alpha: Whether image has alpha channel
+
+    Returns:
+        Square canvas with scaled and centered image
+    """
+    min_x, min_y, max_x, max_y = bbox
+    src_w = max_x - min_x + 1
+    src_h = max_y - min_y + 1
+
+    # Crop to bounding box
+    visible = source_image[min_y:max_y + 1, min_x:max_x + 1, :]
+
+    # Calculate scale factor to fill square as much as possible
+    scale = min(square_size / src_w, square_size / src_h)
+
+    new_w = int(src_w * scale)
+    new_h = int(src_h * scale)
+
+    # Resize the cropped content using bilinear interpolation
+    # Convert to CHW format for interpolation
+    visible_chw = visible.permute(2, 0, 1).unsqueeze(0)  # (1, C, H, W)
+    resized_chw = F.interpolate(visible_chw, size=(new_h, new_w), mode='bilinear', align_corners=False)
+    resized = resized_chw.squeeze(0).permute(1, 2, 0)  # Back to HWC
+
+    # Create square canvas
+    channels = visible.shape[-1]
+    canvas = torch.zeros((square_size, square_size, channels), dtype=torch.float32)
+
+    # Center the scaled content
+    offset_x = (square_size - new_w) // 2
+    offset_y = (square_size - new_h) // 2
+
+    canvas[offset_y:offset_y + new_h, offset_x:offset_x + new_w, :] = resized
+
+    return canvas
+
+
+# -------------------------
+# File saving helpers
+# -------------------------
+def save_bg_preview(bg_image: torch.Tensor, out_folder: Path) -> None:
+    """
+    Save bg_image tensor (B,H,W,C) to out_folder/bg_image.png for UI preview.
+    """
+    try:
+        if bg_image.device != torch.device("cpu"):
+            bg_image = bg_image.cpu()
+
+        img_tensor = bg_image[0]
+        # convert to CHW if necessary
+        if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
+            img_tensor = img_tensor.permute(2, 0, 1)
+        elif img_tensor.dim() == 2:
+            img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
+
+        img_tensor = clamp_float_tensor(img_tensor)
+        pil = tensor_to_pil(img_tensor)
+        ensure_dir(out_folder)
+        pil.save(str(out_folder / "bg_image.png"), format="PNG")
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] save_bg_preview failed: {e}")
+
+
+def save_image_to_ref_folder(image: Image.Image, layer_name: str, ref_folder: Path) -> Optional[str]:
+    """
+    Save a PIL image to ref_folder/<layer_name>.png and return its relative path (ref/...).
+    """
+    try:
+        ensure_dir(ref_folder)
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGB")
+        out_path = ref_folder / f"{layer_name}.png"
+        image.save(str(out_path), format="PNG")
+        return f"ref/{layer_name}.png"
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] save_image_to_ref_folder failed for {layer_name}: {e}")
+        return None
+
+
+def save_masks_to_folder(masks: torch.Tensor, ref_layer_data: List[Dict[str, Any]], ref_folder: Path) -> None:
+    """
+    Save mask tensors (N,H,W) to <ref_folder>/<layer_name>_mask.png
+    """
+    try:
+        ensure_dir(ref_folder)
+        if masks.device != torch.device("cpu"):
+            masks_cpu = masks.cpu()
+        else:
+            masks_cpu = masks
+
+        for idx in range(masks_cpu.shape[0]):
+            if idx < len(ref_layer_data):
+                layer_name = ref_layer_data[idx].get("name", f"ref_{idx + 1}")
+            else:
+                layer_name = f"ref_{idx + 1}"
+
+            mask_tensor = masks_cpu[idx]
+            if mask_tensor.ndim == 2:
+                mask_np = (mask_tensor.numpy() * 255).astype("uint8")
+            elif mask_tensor.ndim == 3 and mask_tensor.shape[2] == 1:
+                mask_np = (mask_tensor[:, :, 0].numpy() * 255).astype("uint8")
+            else:
+                # Unexpected shape: try to pick first channel
+                try:
+                    mask_np = (mask_tensor[0, :, :].numpy() * 255).astype("uint8")
+                except Exception:
+                    print(f"[PrepareRefs WARNING] Unexpected mask dims for {layer_name}: {mask_tensor.shape}")
+                    continue
+
+            pil = Image.fromarray(mask_np, mode="L")
+            pil.save(str(ref_folder / f"{layer_name}_mask.png"), format="PNG")
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] save_masks_to_folder failed: {e}")
+
+
+# -------------------------
+# Main class (PrepareRefs)
+# -------------------------
 class PrepareRefs:
     """
     Canvas-enabled node for preparing background/ref images with drawn shapes.
     Exports ref images with lasso shapes as masks.
     """
 
+    # Node metadata (kept as original)
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -24,8 +531,6 @@ class PrepareRefs:
             },
             "optional": {
                 "bg_image": ("IMAGE", {"forceInput": True}),
-                "export_alpha": ("BOOLEAN", {"default": True}),
-                "to_bounding_box": ("BOOLEAN", {"default": True}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -42,496 +547,278 @@ class PrepareRefs:
     Can export ref images with lasso shapes as masks.
     """
 
-    def prepare(self, mask_width, mask_height, bg_image=None, export_alpha=True, to_bounding_box=True, unique_id=None, prompt=None):
-        # Determine the final output width and height
-        # If bg_image is provided, use its dimensions. Otherwise, use mask_width/height as fallback.
-        final_width = int(mask_width)
-        final_height = int(mask_height)
+    def prepare(self, mask_width: int, mask_height: int, bg_image: Optional[torch.Tensor] = None,
+                unique_id: Optional[str] = None, prompt: Optional[Dict] = None):
+        """
+        Main entry point. High-level orchestration:
+          - Resolve base dimensions and images
+          - Parse & validate ref layer data
+          - Short-circuit if no valid layers
+          - Create per-layer images and masks
+          - Create combined mask preview and inpaint background
+          - Crop to 768x768 bounding boxes and scale images
+          - Save preview/ref images/masks to disk and return UI metadata + tensors
+
+        Note: export_alpha and to_bounding_box are always True now (hardcoded).
+        """
+
+        # Hardcoded settings: always export alpha and use 768x768 bounding boxes
+        export_alpha = True
+        to_bounding_box = True
+
+        # Resolve final dims and base images
+        width, height, output_bg_image, internal_processing_image = self._resolve_base_images(mask_width, mask_height, bg_image)
+
+        # Parse and validate ref_layer_data early
+        raw_ref_data = parse_ref_layer_data_from_prompt(prompt, unique_id)
+        valid_ref_layers = filter_layers_with_shapes(raw_ref_data)
+
+        # EARLY GUARD: if no valid layers, warn and return empty outputs (no further processing)
+        if not valid_ref_layers:
+            # Build empty outputs matching expected shapes
+            empty_ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
+            empty_ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
+            ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
+            # Persist bg preview only if original bg_image was provided
+            if bg_image is not None:
+                try:
+                    save_bg_preview(bg_image, Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg")
+                    ui_out["bg_image_path"] = ["bg/bg_image.png"]
+                except Exception as exc:
+                    print(f"[PrepareRefs WARNING] Failed to save bg preview: {exc}")
+            return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks, [])}
+
+        # Extract per-layer images and masks (full-size)
+        ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, width, height, valid_ref_layers, export_alpha)
+
+        # Ensure we always have tensors for downstream logic
+        if ref_images is None or ref_images.shape[0] == 0:
+            ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
+            ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
+
+        # Optionally save a combined mask preview and create masked BG preview
+        if ref_masks is not None and ref_masks.shape[0] > 0 and to_bounding_box:
+            combined_mask = combine_masks_union(ref_masks)
+            preview_mask_path = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "combined_ref_mask.png"
+            save_combined_mask_preview(combined_mask, preview_mask_path)
+
+            bg_image_path = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "bg_image.png"
+            masked_bg_out = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "bg_image_masked.png"
+            apply_mask_to_bg_with_cv2_preview(combined_mask, bg_image_path, masked_bg_out)
+
+        # Combine all masks at original dims for inpainting BEFORE any cropping
+        if ref_masks is not None and ref_masks.shape[0] > 0:
+            combined_original_dims_mask = combine_masks_union(ref_masks)
+        else:
+            combined_original_dims_mask = torch.zeros((height, width), dtype=torch.float32, device=output_bg_image.device)
+
+        # Apply inpainting if combined mask has active areas
+        if torch.any(combined_original_dims_mask > MASK_THRESHOLD):
+            output_bg_image = inpaint_background_torch(output_bg_image, combined_original_dims_mask)
+
+        # Determine bounding boxes and optionally crop to square images
+        # Always use 768x768 squares and scale each layer to fill as much space as possible
+        FIXED_SQUARE_SIZE = 768
+        max_dim = max(width, height)
+
+        if ref_images.shape[0] > 0 and to_bounding_box:
+            all_bboxes = []
+            for i in range(ref_images.shape[0]):
+                bbox = find_bounding_box(ref_images[i], mask_tensor=ref_masks[i] if ref_masks is not None else None)
+                all_bboxes.append(bbox)
+
+            # Build 768x768 square canvases with scaled and centered images + masks
+            square_images = []
+            square_masks = []
+
+            for i in range(ref_images.shape[0]):
+                img = ref_images[i]
+                mask = ref_masks[i] if ref_masks is not None else torch.zeros((height, width), dtype=torch.float32)
+                bbox = all_bboxes[i]
+
+                # Scale and center image in 768x768 canvas
+                sq_img = scale_and_center_in_square(img, bbox, square_size=FIXED_SQUARE_SIZE, has_alpha=export_alpha)
+                square_images.append(sq_img)
+
+                # Scale and center mask in 768x768 canvas
+                min_x, min_y, max_x, max_y = bbox
+                src_w = max_x - min_x + 1
+                src_h = max_y - min_y + 1
+                visible_mask = mask[min_y:max_y + 1, min_x:max_x + 1]
+
+                # Calculate same scale factor as for image
+                scale = min(FIXED_SQUARE_SIZE / src_w, FIXED_SQUARE_SIZE / src_h)
+                new_w = int(src_w * scale)
+                new_h = int(src_h * scale)
+
+                # Resize mask
+                mask_chw = visible_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+                resized_mask_chw = F.interpolate(mask_chw, size=(new_h, new_w), mode='bilinear', align_corners=False)
+                resized_mask = resized_mask_chw.squeeze(0).squeeze(0)  # (H, W)
+
+                # Create square mask canvas and center
+                sq_mask = torch.zeros((FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE), dtype=torch.float32)
+                offset_x = (FIXED_SQUARE_SIZE - new_w) // 2
+                offset_y = (FIXED_SQUARE_SIZE - new_h) // 2
+                sq_mask[offset_y:offset_y + new_h, offset_x:offset_x + new_w] = resized_mask
+
+                square_masks.append(sq_mask)
+
+            # Replace with square versions
+            ref_images = torch.stack(square_images, dim=0)
+            ref_masks = torch.stack(square_masks, dim=0)
+            max_dim = FIXED_SQUARE_SIZE  # Update max_dim for subsequent operations
+
+        # Align batch sizes: if base batch size greater than refs, pad refs
+        ref_batch_size = ref_images.shape[0]
+        base_batch_size = internal_processing_image.shape[0]
+        if base_batch_size > ref_batch_size:
+            extra_count = base_batch_size - ref_batch_size
+            extra_channels = ref_images.shape[-1]
+            extra_images = torch.zeros((extra_count, max_dim, max_dim, extra_channels), dtype=ref_images.dtype, device=ref_images.device)
+            ref_images = torch.cat([ref_images, extra_images], dim=0)
+
+            extra_masks = torch.zeros((extra_count, max_dim, max_dim), dtype=ref_masks.dtype, device=ref_masks.device)
+            ref_masks = torch.cat([ref_masks, extra_masks], dim=0)
+
+        # Build ui_out
+        ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
+
+        # Save bg preview if bg_image provided
+        if bg_image is not None:
+            try:
+                save_bg_preview(bg_image, Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg")
+                ui_out["bg_image_path"] = ["bg/bg_image.png"]
+            except Exception as exc:
+                print(f"[PrepareRefs WARNING] Failed to save bg preview: {exc}")
+
+        # Save input-like ref images (converted to PIL) and record ui paths
+        ref_paths = []
+        try:
+            # ensure CPU for PIL conversion
+            if ref_images.device != torch.device("cpu"):
+                ref_images_cpu = ref_images.cpu()
+            else:
+                ref_images_cpu = ref_images
+
+            transform_to_pil = transforms.ToPILImage()
+            ref_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "ref"
+            ensure_dir(ref_folder)
+
+            for idx in range(ref_images_cpu.shape[0]):
+                if idx < len(valid_ref_layers):
+                    layer_name = valid_ref_layers[idx].get("name", f"ref_{idx + 1}")
+                else:
+                    layer_name = f"ref_{idx + 1}"
+
+                img_tensor = ref_images_cpu[idx]
+
+                # Normalize and permute CHW/HWC as needed for torchvision
+                if img_tensor.dim() == 3:
+                    # If channels last (HWC) and last dim is channels, torchvision expects CHW
+                    if img_tensor.shape[0] not in (3, 4) and img_tensor.shape[2] in (3, 4):
+                        img_tensor = img_tensor.permute(2, 0, 1)
+                    elif img_tensor.shape[0] in (3, 4) and img_tensor.shape[2] not in (3, 4):
+                        # already CHW
+                        pass
+                elif img_tensor.dim() == 2:
+                    img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
+
+                img_tensor = clamp_float_tensor(img_tensor)
+                pil_img = transform_to_pil(img_tensor)
+                rel_path = save_image_to_ref_folder(pil_img, layer_name, ref_folder)
+                if rel_path:
+                    ref_paths.append(rel_path)
+
+            if ref_paths:
+                ui_out["ref_images_paths"] = ref_paths
+        except Exception as e:
+            print(f"[PrepareRefs ERROR] saving input ref images failed: {e}")
+
+        # Save output images (clean bg_image) and ref images/masks per-layer
+        try:
+            # Save output bg_image_cl.png
+            if output_bg_image is not None:
+                out_ref_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "ref"
+                ensure_dir(out_ref_folder)
+                # prepare a PIL image
+                bg_img = output_bg_image
+                if bg_img.device != torch.device("cpu"):
+                    bg_img = bg_img.cpu()
+                transform_to_pil = transforms.ToPILImage()
+                img_tensor = bg_img[0]
+                if img_tensor.dim() == 3 and img_tensor.shape[2] == 3:
+                    img_tensor = img_tensor.permute(2, 0, 1)
+                img_tensor = clamp_float_tensor(img_tensor)
+                pil = transform_to_pil(img_tensor)
+                if pil.mode not in ("RGB", "RGBA"):
+                    pil = pil.convert("RGB")
+                pil.save(str(out_ref_folder / "bg_image_cl.png"), format="PNG")
+        except Exception as e:
+            print(f"[PrepareRefs ERROR] failed to save bg_image_cl: {e}")
+
+        # Save final per-layer ref images and masks (named by layer)
+        try:
+            ref_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "ref"
+            ensure_dir(ref_folder)
+
+            # Save ref_images outputs with layer names
+            if ref_images.device != torch.device("cpu"):
+                ref_imgs_cpu = ref_images.cpu()
+            else:
+                ref_imgs_cpu = ref_images
+
+            transform_to_pil = transforms.ToPILImage()
+            for idx in range(ref_imgs_cpu.shape[0]):
+                if idx < len(valid_ref_layers):
+                    layer_name = valid_ref_layers[idx].get("name", f"ref_{idx + 1}")
+                else:
+                    layer_name = f"ref_{idx + 1}"
+
+                img_tensor = ref_imgs_cpu[idx]
+                # ensure CHW for ToPILImage
+                if img_tensor.dim() == 3 and img_tensor.shape[2] == 3:
+                    img_tensor = img_tensor.permute(2, 0, 1)
+
+                img_tensor = clamp_float_tensor(img_tensor)
+                pil_img = transform_to_pil(img_tensor)
+                if pil_img.mode not in ("RGB", "RGBA"):
+                    pil_img = pil_img.convert("RGB")
+                pil_img.save(str(ref_folder / f"{layer_name}.png"), format="PNG")
+        except Exception as e:
+            print(f"[PrepareRefs ERROR] failed to save final ref images: {e}")
+
+        # Save masks
+        try:
+            ref_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "ref"
+            save_masks_to_folder(ref_masks, valid_ref_layers, ref_folder)
+        except Exception as e:
+            print(f"[PrepareRefs ERROR] failed to save ref masks: {e}")
+
+        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks, valid_ref_layers)}
+
+    # -------------------------
+    # Internal helper
+    # -------------------------
+    def _resolve_base_images(self, mask_width: int, mask_height: int, bg_image: Optional[torch.Tensor]):
+        """
+        Determine final width/height and internal images used during processing.
+        Returns (width, height, output_bg_image, internal_processing_image)
+        """
+        final_w = int(mask_width)
+        final_h = int(mask_height)
 
         output_bg_image = None
         internal_processing_image = None
 
         if bg_image is not None:
-            final_height = bg_image.shape[1]
-            final_width = bg_image.shape[2]
+            # bg_image expected shape: [B,H,W,C] or [1,H,W,C]
+            final_h = bg_image.shape[1]
+            final_w = bg_image.shape[2]
             output_bg_image = bg_image
             internal_processing_image = bg_image
         else:
-            output_bg_image = torch.zeros((1, final_height, final_width, 3), dtype=torch.float32)
+            output_bg_image = torch.zeros((1, final_h, final_w, DEFAULT_BG_CHANNELS), dtype=torch.float32)
             internal_processing_image = output_bg_image
 
-        # Use final_width and final_height consistently
-        width = final_width
-        height = final_height
-
-        ref_layer_data = None
-        if prompt and unique_id and str(unique_id) in prompt:
-            node_data = prompt[str(unique_id)]
-            inputs = node_data.get("inputs", {})
-            # The ref_layer_data should be in the inputs from the serialized widget
-            if "ref_layer_data" in inputs:
-                raw_data = inputs["ref_layer_data"]
-
-                # Handle the case where ref_layer_data might be a dict or list
-                if isinstance(raw_data, list):
-                    ref_layer_data = raw_data
-                elif isinstance(raw_data, dict):
-                    # If it's a dict, it might contain the data in a nested structure
-                    # Try to extract the actual ref layer data from the dict
-                    if '__value__' in raw_data and isinstance(raw_data['__value__'], list):
-                        ref_layer_data = raw_data['__value__']
-                    elif 'value' in raw_data and isinstance(raw_data['value'], list):
-                        ref_layer_data = raw_data['value']
-                    elif 'value' in raw_data:
-                        # If value isn't a list, check if it's the data itself
-                        if isinstance(raw_data['value'], (list, tuple)):
-                            ref_layer_data = list(raw_data['value'])
-                        else:
-                            ref_layer_data = [raw_data['value']] if raw_data['value'] else []
-                    else:
-                        # If not in 'value' or '__value__' key, check if the dict itself contains the list
-                        # This might happen if the widget serialization works differently
-                        ref_layer_data = [raw_data]  # Wrap in list if it's a single dict item
-
-        # Create ref images and masks from lasso shapes
-        ref_images, ref_masks = self._extract_lasso_shapes_as_images(
-            internal_processing_image, width, height, ref_layer_data, export_alpha, unique_id, prompt)
-        
-        # Combined masks
-        if ref_masks is not None and ref_masks.shape[0] > 0 and to_bounding_box:
-            self._process_combined_mask_before_crop(ref_masks, output_bg_image)
-
-        # If no ref images from lasso shapes, use empty tensor
-        if ref_images is None or ref_images.shape[0] == 0:
-            # Create a single empty image/mask if no shapes exist
-            if export_alpha:
-                ref_images = torch.zeros((1, height, width, 4), dtype=torch.float32)
-            else:
-                ref_images = torch.zeros((1, height, width, 3), dtype=torch.float32)
-            ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
-        
-        # --- NEW LOGIC START (Mask Combining and Inpainting at Original Dims) ---
-        # Combine all reference masks (at original dimensions) into a single mask for inpainting the background
-        combined_original_dims_mask = None
-        if ref_masks.shape[0] > 0:
-            combined_original_dims_mask = torch.max(ref_masks, dim=0)[0]
-        else:
-            combined_original_dims_mask = torch.zeros((height, width), dtype=torch.float32, device=output_bg_image.device)
-        
-        # Store the original combined mask for later use after cropping
-        original_combined_mask = combined_original_dims_mask.clone() if combined_original_dims_mask is not None else None
-        
-        # Apply inpainting to the output_bg_image if a combined mask exists and has active areas
-        if torch.any(combined_original_dims_mask > 0.01):
-            output_bg_image = self._inpaint_background_torch(output_bg_image, combined_original_dims_mask)
-        # --- NEW LOGIC END ---
-
-        # Initialize max_dim for potential use in padding later, ensuring it's always defined.
-        # This will be overridden if to_bounding_box is true and ref_images are present.
-        max_dim = max(width, height)
-
-        # Now proceed with to_bounding_box logic for ref_images and ref_masks outputs
-        if ref_images.shape[0] > 0 and to_bounding_box: # Only apply if there are actual ref_images and to_bounding_box is true
-            # Find the largest bounding box among all images using their masks
-            max_dim = 0 # Reset to calculate based on bounding boxes
-            all_bboxes = []
-            
-            for i in range(ref_images.shape[0]):
-                image_tensor = ref_images[i]
-                mask_tensor = ref_masks[i]
-                bbox = self._find_bounding_box(image_tensor, mask_tensor=mask_tensor)
-                all_bboxes.append(bbox)
-                
-                # Calculate the dimensions of this bounding box
-                bbox_width = bbox[2] - bbox[0] + 1
-                bbox_height = bbox[3] - bbox[1] + 1
-                max_dim = max(max_dim, bbox_width, bbox_height)
-                
-            
-            # Create square images for each reference image
-            square_images = []
-            square_masks = []
-            
-            for i in range(ref_images.shape[0]):
-                image_tensor = ref_images[i]
-                mask_tensor = ref_masks[i]
-                bbox = all_bboxes[i]
-                
-                # Create a square canvas
-                channels = 4 if export_alpha else 3
-                square_canvas = self._create_square_canvas(max_dim, channels)
-                
-                # Place the image content in the square canvas
-                square_image = self._place_image_in_square(image_tensor, square_canvas, bbox, has_alpha=export_alpha)
-                square_images.append(square_image)
-                
-                # Create a corresponding mask for the square image
-                square_mask = torch.zeros((max_dim, max_dim), dtype=torch.float32)
-                
-                # Calculate the position where the image was placed
-                bbox_width = bbox[2] - bbox[0] + 1
-                bbox_height = bbox[3] - bbox[1] + 1
-                offset_x = (max_dim - bbox_width) // 2
-                offset_y = (max_dim - bbox_height) // 2
-                end_x = offset_x + bbox_width
-                end_y = offset_y + bbox_height
-                
-                # Copy the mask content to the square mask
-                # Extract only the visible part of the mask based on the bounding box
-                visible_mask = mask_tensor[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1]
-                square_mask[offset_y:end_y, offset_x:end_x] = visible_mask
-                square_masks.append(square_mask)
-            
-            # Replace the original ref_images and ref_masks with the square versions
-            ref_images = torch.stack(square_images, dim=0)
-            ref_masks = torch.stack(square_masks, dim=0)
-        
-        # The batch size adjustment logic follows, unchanged.
-        # This part still ensures ref_images/ref_masks align with internal_processing_image's batch size
-        # (which is 1) for downstream compatibility.
-        ref_batch_size = ref_images.shape[0]
-        base_batch_size = internal_processing_image.shape[0] # Use internal_processing_image
-
-        # We explicitly do NOT pad internal_processing_image based on ref_batch_size,
-        # as the user wants the output bg_image to be singular.
-        # If internal_processing_image needs to be batched for other purposes,
-        # it should be handled internally or by subsequent nodes.
-
-        if base_batch_size > ref_batch_size:
-            # If there are more internal_processing_image items than ref_images,
-            # pad the ref_images batch with empty images.
-            extra_count = base_batch_size - ref_batch_size
-            extra_channels = ref_images.shape[-1]
-            extra_images = torch.zeros((extra_count, max_dim, max_dim, extra_channels),
-                                       dtype=ref_images.dtype, device=ref_images.device)
-            ref_images = torch.cat([ref_images, extra_images], dim=0)
-
-            extra_masks = torch.zeros((extra_count, max_dim, max_dim),
-                                      dtype=ref_masks.dtype, device=ref_masks.device)
-            ref_masks = torch.cat([ref_masks, extra_masks], dim=0)
-
-        # Note: We don't need to recombine masks here since we already applied inpainting before cropping
-        # The masks have been cropped to bounding boxes, so they're no longer at the original dimensions
-        # We'll use the original_combined_mask that was saved before cropping
-
-        ui_out = {
-            "bg_image_dims": [{"width": float(width), "height": float(height)}],
-        }
-
-        # Persist preview to disk so the frontend can pull it without bloating UI payloads
-        if bg_image is not None:
-            try:
-                self._save_bg_preview(bg_image)
-                ui_out["bg_image_path"] = ["bg/bg_image.png"]
-            except Exception as exc:  # pragma: no cover - UI helper
-                print(f"PrepareRefs: failed to save bg preview: {exc}")
-
-        # Return the ref layer data as well for the export node
-        # Use our extracted ref_layer_data which is already properly formatted
-
-        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks, ref_layer_data or [])}
-
-    def _to_image_tensor(self, image, width, height):
-        if image is not None:
-            # Ensure image has proper dimensions
-            if image.shape[1] != height or image.shape[2] != width:
-                # Resize image to match specified dimensions
-                img_bchw = image.permute(0, 3, 1, 2)  # [B, C, H, W]
-                resized_bchw = F.interpolate(img_bchw, size=(height, width), mode='bilinear', align_corners=False)
-                image = resized_bchw.permute(0, 2, 3, 1)  # [B, H, W, C]
-            return image
-        return torch.zeros((1, height, width, 3), dtype=torch.float32)
-    
-    def _process_combined_mask_before_crop(self, ref_masks, bg_image=None):
-        """
-        Called right after masks are created, but BEFORE bounding-box cropping/squaring.
-        At this point all masks are still full-size (width x height) and perfectly aligned.
-        
-        Use this for:
-        - Previewing the union of all refs
-        - Running extra logic on combined mask
-        - Saving a "total reference mask" for debugging
-        - Applying the combined mask to bg_image using cv2
-        """
-        if ref_masks.shape[0] == 0:
-            return
-        
-        # Combine all masks (union)
-        combined_mask = torch.clamp(torch.sum(ref_masks, dim=0), 0, 1)  # or torch.max()
-        
-        # Example: Save preview of combined mask
-        mask_pil = transforms.ToPILImage()(combined_mask.cpu())
-        mask_pil = mask_pil.convert("RGB")
-        save_path = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "combined_ref_mask.png"
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        mask_pil.save(save_path)
-        
-        # Apply the combined mask to bg_image using cv2
-        # Get the bg_image path
-        bg_image_path = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "bg_image.png"
-        
-        # Check if bg_image exists
-        if bg_image_path.exists():
-            # Load the bg_image
-            bg_image_cv2 = cv2.imread(str(bg_image_path))
-            if bg_image_cv2 is not None:
-                # Convert mask to numpy for cv2
-                mask_np = (combined_mask.cpu().numpy() * 255).astype(np.uint8)
-                
-                # Resize mask if it doesn't match bg_image dimensions
-                if mask_np.shape != (bg_image_cv2.shape[0], bg_image_cv2.shape[1]):
-                    mask_np = cv2.resize(mask_np, (bg_image_cv2.shape[1], bg_image_cv2.shape[0]))
-                
-                # Apply the mask to create a masked version of bg_image
-                # Convert mask to 3-channel for proper masking
-                mask_3ch = cv2.cvtColor(mask_np, cv2.COLOR_GRAY2BGR)
-                masked_bg_image = cv2.bitwise_and(bg_image_cv2, mask_3ch)
-                
-                # Save the masked bg_image
-                masked_bg_path = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg" / "bg_image_masked.png"
-                cv2.imwrite(str(masked_bg_path), masked_bg_image)
-        
-        # Return it if downstream nodes want it
-        return combined_mask
-
-    def _extract_lasso_shapes_as_images(self, base_image, width, height, ref_layer_data, export_alpha, unique_id=None, prompt=None):
-        """
-        Extract lasso shapes from the frontend and convert them to image tensors with masks.
-        This method processes the serialized ref layer data containing the lasso shapes.
-        """
-        # Process the ref layer data to create images with masks
-        if not ref_layer_data or not isinstance(ref_layer_data, list):
-            return None, None
-
-        # Filter out layers that don't have shapes (empty additivePaths)
-        layers_with_shapes = []
-        for layer_data in ref_layer_data:
-            if isinstance(layer_data, dict) and layer_data.get('on', False):
-                lasso_shape = layer_data.get('lassoShape', {})
-                additive_paths = lasso_shape.get('additivePaths', [])
-                if additive_paths and len(additive_paths) > 0:
-                    # This layer has shapes, add it to our list
-                    layers_with_shapes.append(layer_data)
-
-        if not layers_with_shapes:
-            # No layers with shapes found
-            return None, None
-
-        # Create images and masks for each layer with shapes
-        images = []
-        masks = []
-
-        for layer_data in layers_with_shapes:
-            # Create an image with the shape filled in
-            image, mask = self._create_image_from_lasso_shape(base_image, layer_data, width, height, export_alpha)
-            if image is not None and mask is not None:
-                images.append(image)
-                masks.append(mask)
-
-        if not images:
-            return None, None
-
-        # Stack all images and masks into tensors
-        images_tensor = torch.stack(images, dim=0)
-        masks_tensor = torch.stack(masks, dim=0)
-
-        return images_tensor, masks_tensor
-
-    def _create_image_from_lasso_shape(self, base_image, layer_data, width, height, export_alpha):
-        """
-        Create an image and mask from a single lasso shape.
-        This version extracts the content from the base_image using the mask.
-        """
-        try:
-            lasso_shape = layer_data.get('lassoShape', {})
-            additive_paths = lasso_shape.get('additivePaths', [])
-
-            if not additive_paths:
-                return None, None
-
-            # Create a PIL image and mask
-            mask_img = Image.new('L', (width, height), 0)
-            mask_draw = ImageDraw.Draw(mask_img)
-
-            # Draw all paths on the mask
-            for path in additive_paths:
-                if not path or not isinstance(path, list):
-                    continue
-                actual_points = []
-                for point in path:
-                    if isinstance(point, dict) and 'x' in point and 'y' in point:
-                        x = int(point['x'] * width)
-                        y = int(point['y'] * height)
-                        actual_points.append((x, y))
-                if len(actual_points) >= 3:
-                    mask_draw.polygon(actual_points, fill=255)
-
-            # Apply 3-pixel feather to the mask using a Gaussian blur
-            mask_np = np.array(mask_img).astype(np.float32) / 255.0
-            mask_np = gaussian_filter(mask_np, sigma=1.5)
-            
-            mask_tensor = torch.from_numpy(mask_np).to(base_image.device)
-
-            # Use the first image from the base_image batch as the source
-            source_image = base_image[0]  # Shape: [H, W, C]
-
-            if export_alpha:
-                # Take the original RGB channels of the source_image
-                original_rgb = source_image[..., :3]
-                # Concatenate the original RGB with the feathered mask as the alpha channel
-                image_tensor = torch.cat((original_rgb, mask_tensor.unsqueeze(-1)), dim=-1)
-            else:
-                # If not exporting alpha, just return the original RGB of the source within the mask area.
-                # The feathering in mask_tensor is still present, but won't be explicitly used as alpha
-                # in the output image_tensor if it's RGB.
-                image_tensor = source_image[..., :3]
-
-            return image_tensor, mask_tensor
-        except Exception as e:
-            print(f"Error creating image from lasso shape: {e}")
-            return None, None
-
-    def _save_bg_preview(self, bg_image):
-        if bg_image.device != torch.device("cpu"):
-            bg_image = bg_image.cpu()
-
-        transform = transforms.ToPILImage()
-        img_tensor = bg_image[0]
-        if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
-            img_tensor = img_tensor.permute(2, 0, 1)
-        elif img_tensor.dim() == 2:
-            img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
-
-        if torch.is_floating_point(img_tensor):
-            img_tensor = torch.clamp(img_tensor, 0, 1)
-
-        image = transform(img_tensor)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-
-        bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
-        bg_folder.mkdir(parents=True, exist_ok=True)
-        bg_path = bg_folder / "bg_image.png"
-        image.save(str(bg_path), format="PNG")
-
-    def _inpaint_background_torch(self, image_tensor: torch.Tensor, mask_tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Applies OpenCV's inpainting to a torch tensor image using a torch tensor mask.
-        image_tensor: [B, H, W, C] (float32, 0-1)
-        mask_tensor: [H, W] (float32, 0-1), where 1 indicates masked areas
-        """
-        if image_tensor.shape[0] != 1:
-            # Handle batching: apply inpaint to each image in batch if necessary.
-            # For this use case, we expect B=1 for the bg_image
-            pass # We'll handle a single image for now based on the problem description.
-
-        # Convert image to numpy (H, W, C) for OpenCV, assuming B=1
-        img_np = image_tensor[0].mul(255).byte().cpu().numpy() # Convert from 0-1 float to 0-255 uint8
-
-        # Convert mask to numpy (H, W), boolean to uint8 (0 or 255)
-        mask_np = (mask_tensor.cpu().numpy() > 0.01).astype(np.uint8) * 255
-
-
-        # Perform inpainting
-        # cv2.inpaint expects BGR format, so we need to convert if image_tensor is RGB
-        # ComfyUI typically uses RGB. Let's assume input is RGB and convert to BGR for inpaint.
-        img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-        inpainted_bgr_np = cv2.inpaint(img_bgr, mask_np, 3, cv2.INPAINT_TELEA)
-        inpainted_rgb_np = cv2.cvtColor(inpainted_bgr_np, cv2.COLOR_BGR2RGB)
-
-        # Convert back to torch tensor, (B, H, W, C)
-        inpainted_tensor = torch.from_numpy(inpainted_rgb_np).float().div(255.0).unsqueeze(0).to(image_tensor.device)
-
-        return inpainted_tensor
-
-    def _find_bounding_box(self, image_tensor, mask_tensor=None):
-        """
-        Find the bounding box of non-transparent pixels in an image tensor.
-        
-        Args:
-            image_tensor: Image tensor of shape [H, W, C]
-            mask_tensor: Optional mask tensor of shape [H, W] indicating visible pixels
-            
-        Returns:
-            Tuple of (min_x, min_y, max_x, max_y) representing the bounding box
-        """
-        if mask_tensor is not None:
-            # Use the provided mask to find visible pixels
-            mask = mask_tensor > 0.01  # Threshold for considering a pixel visible
-        elif image_tensor.shape[-1] == 4:
-            # Use alpha channel to find non-transparent pixels
-            alpha = image_tensor[..., 3]
-            mask = alpha > 0.01  # Threshold for considering a pixel non-transparent
-        else:
-            # For RGB images, check if pixels are not black (have some color)
-            # Sum the RGB channels and check if they have any value
-            rgb_sum = torch.sum(image_tensor[..., :3], dim=-1)
-            mask = rgb_sum > 0.01  # Threshold for considering a pixel non-black
-        
-        if not mask.any():
-            # No non-transparent pixels found
-            return (0, 0, image_tensor.shape[1], image_tensor.shape[0])
-        
-        # Find coordinates of non-transparent pixels
-        y_indices, x_indices = torch.where(mask)
-        
-        min_x = x_indices.min().item()
-        max_x = x_indices.max().item()
-        min_y = y_indices.min().item()
-        max_y = y_indices.max().item()
-        
-        return (min_x, min_y, max_x, max_y)
-    
-    def _create_square_canvas(self, max_dim, channels=4):
-        """
-        Create a square canvas with the specified dimensions.
-        
-        Args:
-            max_dim: The size of the square canvas (width and height)
-            channels: Number of channels (3 for RGB, 4 for RGBA)
-            
-        Returns:
-            A square tensor of shape [max_dim, max_dim, channels]
-        """
-        return torch.zeros((max_dim, max_dim, channels), dtype=torch.float32)
-    
-    def _place_image_in_square(self, source_image, target_canvas, bbox, has_alpha=True):
-        """
-        Place the visible content of the source image into the target square canvas.
-        
-        Args:
-            source_image: Source image tensor
-            target_canvas: Target square canvas tensor
-            bbox: Bounding box of the source image (min_x, min_y, max_x, max_y)
-            has_alpha: Whether the source image has an alpha channel
-            
-        Returns:
-            Modified target_canvas with the source image placed in it
-        """
-        min_x, min_y, max_x, max_y = bbox
-        source_width = max_x - min_x + 1
-        source_height = max_y - min_y + 1
-        
-        # Extract the visible content from the source image
-        if has_alpha:
-            visible_content = source_image[min_y:max_y+1, min_x:max_x+1, :]
-        else:
-            visible_content = source_image[min_y:max_y+1, min_x:max_x+1, :]
-        
-        # Calculate position to center the content in the square canvas
-        canvas_size = target_canvas.shape[0]
-        offset_x = (canvas_size - source_width) // 2
-        offset_y = (canvas_size - source_height) // 2
-        
-        # Place the visible content in the center of the square canvas
-        end_x = offset_x + source_width
-        end_y = offset_y + source_height
-        
-        if has_alpha and visible_content.shape[-1] == 4:
-            # Handle alpha channel properly
-            alpha = visible_content[..., 3:4]
-            target_canvas[offset_y:end_y, offset_x:end_x, :] = visible_content
-        else:
-            target_canvas[offset_y:end_y, offset_x:end_x, :visible_content.shape[-1]] = visible_content
-        
-        return target_canvas
+        return final_w, final_h, output_bg_image, internal_processing_image

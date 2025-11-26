@@ -26,6 +26,17 @@ def get_bg_folder_path():
     
     return str(bg_path)
 
+def get_ref_folder_path():
+    """Get the path to the ref folder where reference images are stored"""
+    import pathlib
+    current_dir = pathlib.Path(__file__).parent
+    ref_path = current_dir / "web" / "power_spline_editor" / "ref"
+
+    # Create the directory if it doesn't exist
+    ref_path.mkdir(parents=True, exist_ok=True)
+
+    return str(ref_path)
+
 @PromptServer.instance.routes.post("/wanvideowrapper_qq/save_ref_image")
 async def save_ref_image(request):
     """API endpoint to save ref_image to the bg folder"""
@@ -33,15 +44,15 @@ async def save_ref_image(request):
         post = await request.post()
         image_data = post.get("image")
         image_name = post.get("name", "bg_image.png")
-        
+
         if not image_data:
             return web.json_response({"error": "No image data provided"}, status=400)
-        
+
         # Derive filename safely
         safe_name = os.path.basename(image_name) or "bg_image.png"
         if "." not in safe_name:
             safe_name += ".png"
-        
+
         # Decode base64 image data
         if image_data.startswith('data:image'):
             # Remove data URL prefix (e.g., "data:image/png;base64,")
@@ -50,10 +61,10 @@ async def save_ref_image(request):
         else:
             encoded = image_data
             image_format = safe_name.split(".")[-1]
-        
+
         # Decode the base64 string
         image_bytes = base64.b64decode(encoded)
-        
+
         # Verify it's a valid image
         try:
             img = Image.open(BytesIO(image_bytes))
@@ -61,11 +72,11 @@ async def save_ref_image(request):
             img = Image.open(BytesIO(image_bytes))  # Reopen after verify
         except Exception as e:
             return web.json_response({"error": f"Invalid image data: {str(e)}"}, status=400)
-        
+
         # Get the bg folder path
         bg_folder = get_bg_folder_path()
         ref_image_path = os.path.join(bg_folder, safe_name)
-        
+
         # Decide format (prefer PNG to preserve alpha)
         fmt = (image_format or "png").upper()
         save_kwargs = {}
@@ -78,13 +89,93 @@ async def save_ref_image(request):
             if img.mode not in ("RGBA", "LA"):
                 img = img.convert("RGBA")
             fmt = "PNG"
-        
+
         img.save(ref_image_path, format=fmt, **save_kwargs)
-        
+
         return web.json_response({"success": True, "path": ref_image_path, "message": "Reference image saved successfully"})
 
     except Exception as e:
         print(f"Error saving ref image: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
+@PromptServer.instance.routes.post("/wanvideowrapper_qq/save_prepare_refs_images")
+async def save_prepare_refs_images(request):
+    """API endpoint to save ALL images from PrepareRefs node to the REF folder"""
+    try:
+        data = await request.json()
+        bg_image_data = data.get("bg_image")
+        ref_images_data = data.get("ref_images", [])
+
+        print(f"[API save_prepare_refs_images] === Received request ===")
+        print(f"[API save_prepare_refs_images] bg_image present: {bg_image_data is not None}")
+        print(f"[API save_prepare_refs_images] ref_images count: {len(ref_images_data) if isinstance(ref_images_data, list) else 0}")
+
+        saved_paths = {
+            "bg_image_path": None,
+            "ref_images_paths": []
+        }
+
+        # Get ref folder (ALL images go to ref folder for PrepareRefs!)
+        ref_folder = get_ref_folder_path()
+        print(f"[API save_prepare_refs_images] Using ref folder: {ref_folder}")
+
+        # Save background image to REF folder (not bg folder!)
+        if bg_image_data:
+            try:
+                print(f"[API save_prepare_refs_images] Saving bg_image to REF folder...")
+                # Decode base64 image data
+                if bg_image_data.startswith('data:image'):
+                    header, encoded = bg_image_data.split(',', 1)
+                else:
+                    encoded = bg_image_data
+
+                image_bytes = base64.b64decode(encoded)
+                img = Image.open(BytesIO(image_bytes))
+
+                # Save to REF folder as bg_image.png
+                bg_image_path = os.path.join(ref_folder, "bg_image.png")
+                img.save(bg_image_path, format="PNG")
+                saved_paths["bg_image_path"] = "ref/bg_image.png"
+                print(f"[API save_prepare_refs_images] ✓ Saved bg_image to {bg_image_path}")
+            except Exception as e:
+                print(f"[API save_prepare_refs_images] ERROR saving bg_image: {e}")
+                import traceback
+                traceback.print_exc()
+
+        # Save ref images to ref folder
+        if ref_images_data and isinstance(ref_images_data, list):
+            for idx, ref_image_data in enumerate(ref_images_data):
+                try:
+                    print(f"[API save_prepare_refs_images] Saving ref_image {idx} to REF folder...")
+                    # Decode base64 image data
+                    if ref_image_data.startswith('data:image'):
+                        header, encoded = ref_image_data.split(',', 1)
+                    else:
+                        encoded = ref_image_data
+
+                    image_bytes = base64.b64decode(encoded)
+                    img = Image.open(BytesIO(image_bytes))
+
+                    # Save to ref folder
+                    ref_image_path = os.path.join(ref_folder, f"ref_image_{idx}.png")
+                    img.save(ref_image_path, format="PNG")
+                    saved_paths["ref_images_paths"].append(f"ref/ref_image_{idx}.png")
+                    print(f"[API save_prepare_refs_images] ✓ Saved ref_image_{idx} to {ref_image_path}")
+                except Exception as e:
+                    print(f"[API save_prepare_refs_images] ERROR saving ref_image {idx}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+        print(f"[API save_prepare_refs_images] === COMPLETE ===")
+        print(f"[API save_prepare_refs_images] Saved bg_image: {saved_paths['bg_image_path']}")
+        print(f"[API save_prepare_refs_images] Saved {len(saved_paths['ref_images_paths'])} ref images")
+
+        return web.json_response({"success": True, "paths": saved_paths})
+
+    except Exception as e:
+        print(f"[API save_prepare_refs_images] ERROR: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)

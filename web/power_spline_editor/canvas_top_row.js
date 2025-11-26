@@ -4,6 +4,7 @@ import {
     drawNumberWidgetPart,
     RgthreeBaseWidget
 } from './drawing_utils.js';
+import { triggerPrepareRefsBackend } from './trigger_ref_refresh.js';
 
 // === TOP ROW WIDGET (Combined refresh button, bg_image dropdown, and width/height controls) ===
 export class TopRowWidget extends RgthreeBaseWidget {
@@ -268,28 +269,65 @@ export class TopRowWidget extends RgthreeBaseWidget {
         // Set up event handlers for refresh button
         if (this.visibility.refreshCanvasButton) {
             this.hitAreas.refreshCanvasButton.onClick = async () => {
-                // Update all box layer ref images from connected ref_images
-                if (node.updateAllBoxLayerRefs) {
-                    try {
-                        await node.updateAllBoxLayerRefs();
-                    } catch (e) {
-                        console.warn('Failed to update box layer refs:', e);
+                // Check if ref_images input is connected to PrepareRefs
+                let isPrepareRefsConnected = false;
+                let prepareRefsNode = null;
+                try {
+                    // Import the graph query function at the top of the file
+                    const { findConnectedSourceNode } = await import('./graph_query.js');
+                    const sourceNodeObj = findConnectedSourceNode(node, 'ref_images');
+                    if (sourceNodeObj && sourceNodeObj.node) {
+                        if (sourceNodeObj.node.type === 'PrepareRefs') {
+                            console.log('[Refresh] PowerSplineEditor connected to PrepareRefs');
+                            isPrepareRefsConnected = true;
+                            prepareRefsNode = sourceNodeObj.node;
+                        }
                     }
+                } catch (e) {
+                    console.warn('Failed to check ref_images connection:', e);
                 }
 
-                // Wait for reference image update and scale recalculation to complete
-                if (node.updateReferenceImageFromConnectedNode) {
-                    try {
-                        // This now properly awaits the image loading and scale recalculation
-                        await node.updateReferenceImageFromConnectedNode();
+                if (isPrepareRefsConnected && prepareRefsNode) {
+                    // Trigger backend PrepareRefs processing
+                    console.log('[Refresh] Triggering backend PrepareRefs processing...');
+                    const result = await triggerPrepareRefsBackend(prepareRefsNode);
 
-                        // Force a final render with the correct scale
-                        // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
-                        if (node.editor && node.editor.layerRenderer) {
-                            node.editor.layerRenderer.render();
+                    if (result.success) {
+                        console.log('[Refresh] Backend processing complete, loading results...');
+
+                        // Load the newly generated images from ref folder
+                        await this.loadImagesFromRefFolder(node);
+
+                        console.log('[Refresh] Canvas refresh complete');
+                    } else {
+                        // Silent error handling - log only, no user interruption
+                        console.error('[Refresh] Backend processing failed:', result.error);
+                    }
+                } else {
+                    // Original behavior: fetch from connected nodes
+                    // Update all box layer ref images from connected ref_images
+                    if (node.updateAllBoxLayerRefs) {
+                        try {
+                            await node.updateAllBoxLayerRefs();
+                        } catch (e) {
+                            console.warn('Failed to update box layer refs:', e);
                         }
-                    } catch (e) {
-                        console.warn('Failed to update reference image:', e);
+                    }
+
+                    // Wait for reference image update and scale recalculation to complete
+                    if (node.updateReferenceImageFromConnectedNode) {
+                        try {
+                            // This now properly awaits the image loading and scale recalculation
+                            await node.updateReferenceImageFromConnectedNode();
+
+                            // Force a final render with the correct scale
+                            // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
+                            if (node.editor && node.editor.layerRenderer) {
+                                node.editor.layerRenderer.render();
+                            }
+                        } catch (e) {
+                            console.warn('Failed to update reference image:', e);
+                        }
                     }
                 }
 
@@ -435,6 +473,155 @@ export class TopRowWidget extends RgthreeBaseWidget {
         }
     }
 
+    // Load images from ref folder when PrepareRefs is connected
+    async loadImagesFromRefFolder(node) {
+        const { loadImageAsBase64 } = await import('./graph_query.js');
+        const timestamp = Date.now();
+
+        // 1. Load bg_image_cl.png from ref folder
+        try {
+            const bgImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
+            const bgImageData = await loadImageAsBase64(bgImageUrl);
+
+            if (bgImageData) {
+                // Store the background image
+                node.originalRefImageData = {
+                    name: 'bg_image_cl.png',
+                    base64: bgImageData.split(',')[1],
+                    type: 'image/png'
+                };
+
+                // Update background image display based on current bg_img selection
+                const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
+                const bg_img = bgImgWidget ? bgImgWidget.value : "None";
+                await node.updateBackgroundImage(bg_img);
+
+                console.log('Successfully loaded bg_image_cl.png from ref folder');
+            }
+        } catch (e) {
+            console.warn('Failed to load bg_image_cl.png from ref folder:', e);
+        }
+
+        // 2. Find and load all ref_*.png files from ref folder
+        const refImages = [];
+        const maxRefs = 5; // Try to load up to 5 reference images
+
+        for (let i = 1; i <= maxRefs; i++) {
+            try {
+                const refImageUrl = new URL(`ref/ref_${i}.png?t=${timestamp}`, import.meta.url).href;
+                const refImageData = await loadImageAsBase64(refImageUrl);
+
+                if (refImageData) {
+                    refImages.push(refImageData);
+                    console.log(`Successfully loaded ref_${i}.png from ref folder`);
+                } else {
+                    // Stop trying if we can't load this image
+                    break;
+                }
+            } catch (e) {
+                // Stop trying if we encounter an error (file doesn't exist)
+                console.log(`No more ref images found after ref_${i - 1}.png`);
+                break;
+            }
+        }
+
+        // 3. Update box layer refs with loaded images
+        if (refImages.length > 0) {
+            const activeWidget = node.layerManager?.getActiveWidget?.();
+            if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
+                console.log('No active box layer to attach ref images');
+                // Try to update all box layers instead
+                await this.updateAllBoxLayersFromRefFolder(node, refImages);
+            } else {
+                // Update active box layer
+                await this.updateBoxLayerWithRefImages(node, activeWidget, refImages);
+            }
+        }
+
+        // Force a final render
+        if (node.editor && node.editor.layerRenderer) {
+            node.editor.layerRenderer.render();
+        }
+    }
+
+    // Update a specific box layer with ref images from folder
+    async updateBoxLayerWithRefImages(node, boxWidget, refImages) {
+        const attachments = [];
+
+        for (let i = 0; i < refImages.length; i++) {
+            const imgData = refImages[i];
+            const base64Data = imgData.startsWith('data:')
+                ? imgData.split(',')[1]
+                : imgData;
+            const dataUrl = imgData.startsWith('data:')
+                ? imgData
+                : `data:image/png;base64,${base64Data}`;
+
+            // Load dimensions
+            const dims = await new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => resolve({ width: img.width, height: img.height });
+                img.onerror = () => resolve({ width: 1, height: 1 });
+                img.src = dataUrl;
+            });
+
+            const filename = `ref_${i + 1}.png`;
+            attachments.push({
+                path: `ref/${filename}`,
+                type: 'image/png',
+                width: dims.width,
+                height: dims.height,
+                name: filename
+            });
+        }
+
+        boxWidget.value.ref_attachment = { entries: attachments };
+
+        // Preserve existing ref_selection if valid, otherwise default to first ref
+        const currentSelection = boxWidget.value.ref_selection;
+        if (attachments.length > 0) {
+            // Check if current selection is still valid
+            if (currentSelection && currentSelection !== 'no_ref') {
+                const refIndex = parseInt(currentSelection.split('_')[1], 10);
+                if (refIndex > 0 && refIndex <= attachments.length) {
+                    // Keep the current selection as it's still valid
+                    boxWidget.value.ref_selection = currentSelection;
+                } else {
+                    // Current selection is out of range, default to ref_1
+                    boxWidget.value.ref_selection = 'ref_1';
+                }
+            } else {
+                // No current selection or it was 'no_ref', default to ref_1
+                boxWidget.value.ref_selection = 'ref_1';
+            }
+        } else {
+            boxWidget.value.ref_selection = 'no_ref';
+        }
+
+        // Clear ref image cache to force reload
+        if (node.editor?.layerRenderer?.clearRefImageCache) {
+            node.editor.layerRenderer.clearRefImageCache();
+        }
+
+        node.setDirtyCanvas(true, true);
+    }
+
+    // Update all box layers with ref images from folder
+    async updateAllBoxLayersFromRefFolder(node, refImages) {
+        const widgets = node.layerManager?.getSplineWidgets?.() || [];
+        const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
+
+        if (!boxWidgets.length) {
+            console.log('No box layers found to update');
+            return;
+        }
+
+        for (const boxWidget of boxWidgets) {
+            await this.updateBoxLayerWithRefImages(node, boxWidget, refImages);
+        }
+
+        console.log(`Updated ${boxWidgets.length} box layer(s) with ref images from folder`);
+    }
 
     // Mouse event handlers
     mouse(event, pos, node) {
