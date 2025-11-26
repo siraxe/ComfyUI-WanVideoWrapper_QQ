@@ -1,5 +1,22 @@
 # ComfyUI-WanVideoWrapper_QQ
 
+**Version 1.1.0** - 2025-11-26
+- Added to `Prepare Refs` to cut out parts for `Power Spline Editor`
+- `Power Spline Editor` can trigger ref preparation with Canvas button in backend without starting comfyui run
+
+<table>
+<tr>
+<td width="40%">
+
+https://github.com/user-attachments/assets/16f0da4c-38f1-4789-97dc-c331ad8a6d92
+</td>
+<td width="60%">
+
+https://github.com/user-attachments/assets/5689c666-924a-4362-9788-d8f662c0d925
+</td>
+</tr>
+</table>
+
 **Version 1.0.92** - 2025-11-25
 - Optional color match added to `Create Image List` batch node (if no ref_image connected it's not used)
 - Bugfixes , Canvas refresh now can read ImageResizeKJv2 resize and match its parameters to be able to draw on same aspect ratio/crop etc. 
