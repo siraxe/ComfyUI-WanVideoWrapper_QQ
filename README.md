@@ -12,7 +12,9 @@ https://github.com/user-attachments/assets/7c3d1c3a-4777-432b-997e-eafa678f7e64
 </td>
 <td width="60%">
 
-https://github.com/user-attachments/assets/f518e469-d3dc-4066-9750-fdbf70ba823b
+
+
+https://github.com/user-attachments/assets/72f46a94-a3f3-4f66-9962-c87c5c02c987
 </td>
 </tr>
 </table>
