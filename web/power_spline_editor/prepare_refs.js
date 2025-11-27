@@ -82,9 +82,12 @@ app.registerExtension({
       this.uuid = this.properties.uuid || this.uuid || makeUUID();
       console.log('[PrepareRefs onNodeCreated] Using UUID:', this.uuid);
 
-      // Hide original dimension widgets
+      // Hide widgets that shouldn't be visible in UI
       const widthWidget = this.widgets.find(w => w.name === 'mask_width');
       const heightWidget = this.widgets.find(w => w.name === 'mask_height');
+      const internalStateWidget = this.widgets.find(w => w.name === 'internal_state');
+      const exportFilenameWidget = this.widgets.find(w => w.name === 'export_filename');
+      const refLayerDataWidget = this.widgets.find(w => w.name === 'ref_layer_data');
 
       const markUserAdjusted = () => { this.properties.userAdjustedDims = true; };
 
@@ -94,6 +97,11 @@ app.registerExtension({
           w.callback = (v) => { orig?.call(w, v); markUserAdjusted(); this.updateCanvasSizeFromWidgets?.(); };
           hideWidgetForGood(this, w);
         }
+      });
+
+      // Hide the persistence widgets (they're managed by the node, not user-editable)
+      [internalStateWidget, exportFilenameWidget, refLayerDataWidget].forEach(w => {
+        if (w) hideWidgetForGood(this, w);
       });
 
       // Size manager for consistent canvas/node sizing
@@ -267,23 +275,20 @@ app.registerExtension({
       this.refLayers = [];
       this.selectedRefLayer = null;
 
-      this.addSerializedRefDataWidget();
-    };
-
-    nodeType.prototype.addSerializedRefDataWidget = function () {
-      const widget = {
-        type: "custom",
-        name: "ref_layer_data",
-        value: [],
-        serialize: true,
-        callback: () => { widget.value = this.getRefLayerData(); }
-      };
-      this.widgets.push(widget);
+      // ref_layer_data widget is now created by Python INPUT_TYPES, not here
+      // Just ensure its callback updates the layer data
+      const refDataWidget = this.widgets?.find(w => w.name === 'ref_layer_data');
+      if (refDataWidget) {
+        const origCallback = refDataWidget.callback;
+        refDataWidget.callback = () => {
+          origCallback?.call(refDataWidget);
+          this.updateRefDataWidget();
+        };
+      }
     };
 
     nodeType.prototype.getRefLayerData = function () {
       return (this.refLayers || [])
-        .filter(l => l.value?.lassoShape?.additivePaths?.length > 0)
         .map(l => ({ ...l.value }));
     };
 
@@ -464,13 +469,15 @@ app.registerExtension({
       if (w) {
         const layerData = this.getRefLayerData();
         console.log('[PrepareRefs updateRefDataWidget] Layer data from getRefLayerData():', layerData);
-        w.value = layerData;
+
+        // Widget is STRING type in Python, so serialize to JSON
+        w.value = JSON.stringify(layerData);
 
         // Also save to sessionStorage for quick restore on page refresh
         try {
           const sessionKey = `prepare-refs-layers-${this.uuid}`;
           console.log('[PrepareRefs updateRefDataWidget] Saving to session storage with key:', sessionKey);
-          safeSetSessionItem(sessionKey, JSON.stringify(w.value));
+          safeSetSessionItem(sessionKey, JSON.stringify(layerData));
           console.log('[PrepareRefs updateRefDataWidget] Saved to session storage successfully');
         } catch (e) {
           console.warn('[PrepareRefs] Failed to save layers to session:', e);
@@ -687,6 +694,8 @@ app.registerExtension({
       console.log('[PrepareRefs onConfigure] Starting configuration restore');
       console.log('[PrepareRefs onConfigure] Current UUID:', this.uuid);
       console.log('[PrepareRefs onConfigure] Properties UUID:', this.properties?.uuid);
+      console.log('[PrepareRefs onConfigure] Info object:', info);
+      console.log('[PrepareRefs onConfigure] All widgets:', this.widgets?.map(w => ({name: w.name, value: w.value})));
 
       // CRITICAL: Restore UUID from properties if available
       // onConfigure runs AFTER onNodeCreated, so we need to update UUID here
@@ -695,26 +704,54 @@ app.registerExtension({
         this.uuid = this.properties.uuid;
       }
 
-      // Restore ref layers from widget data
+      // Find the ref_layer_data widget
       const refDataWidget = this.widgets?.find(w => w.name === 'ref_layer_data');
-      console.log('[PrepareRefs onConfigure] ref_layer_data widget:', refDataWidget);
-      console.log('[PrepareRefs onConfigure] widget value:', refDataWidget?.value);
+      console.log('[PrepareRefs onConfigure] ref_layer_data widget found:', !!refDataWidget);
 
-      if (refDataWidget && Array.isArray(refDataWidget.value) && refDataWidget.value.length > 0) {
-        console.log('[PrepareRefs onConfigure] Restoring from widget data:', refDataWidget.value.length, 'layers');
-        this.restoreRefLayers(refDataWidget.value);
+      // ComfyUI's configure applies widget values from widgets_values array to widgets BEFORE onConfigure runs
+      // The widget value is a JSON string (STRING type in Python), so parse it
+      let layerData = null;
+      if (refDataWidget && refDataWidget.value) {
+        try {
+          // Parse JSON string to get layer data array
+          layerData = typeof refDataWidget.value === 'string' ? JSON.parse(refDataWidget.value) : refDataWidget.value;
+          console.log('[PrepareRefs onConfigure] Parsed layer data from widget:', layerData);
+        } catch (e) {
+          console.warn('[PrepareRefs onConfigure] Failed to parse ref_layer_data:', e);
+          layerData = [];
+        }
+      }
+      console.log('[PrepareRefs onConfigure] Layer data:', layerData);
+
+      // If we have layer data from the workflow (even empty array), use it and DON'T restore from session
+      // This ensures loading a workflow with no layers doesn't restore old session data
+      if (layerData !== null && layerData !== undefined && Array.isArray(layerData)) {
+        if (layerData.length > 0) {
+          console.log('[PrepareRefs onConfigure] Restoring from workflow data:', layerData.length, 'layers');
+          this.restoreRefLayers(layerData);
+        } else {
+          console.log('[PrepareRefs onConfigure] Workflow has empty layer array - clearing existing layers');
+          // Clear existing layers since the workflow has none
+          this.refLayers?.forEach(layer => {
+            if (layer.domElement?.parentNode) {
+              layer.domElement.parentNode.removeChild(layer.domElement);
+            }
+          });
+          this.refLayers = [];
+          this.selectedRefLayer = null;
+        }
       } else {
-        console.log('[PrepareRefs onConfigure] No widget data, trying session storage...');
-        // Try to restore from session storage as fallback
+        // Only restore from session if no workflow data exists (undefined/null)
+        console.log('[PrepareRefs onConfigure] No workflow layer data, trying session storage...');
         const sessionLayers = safeGetSessionItem(`prepare-refs-layers-${this.uuid}`);
         console.log('[PrepareRefs onConfigure] Session storage data:', sessionLayers);
         if (sessionLayers) {
           try {
-            const layerData = JSON.parse(sessionLayers);
-            console.log('[PrepareRefs onConfigure] Parsed session data:', layerData);
-            if (Array.isArray(layerData) && layerData.length > 0) {
-              console.log('[PrepareRefs onConfigure] Restoring from session:', layerData.length, 'layers');
-              this.restoreRefLayers(layerData);
+            const parsedData = JSON.parse(sessionLayers);
+            console.log('[PrepareRefs onConfigure] Parsed session data:', parsedData);
+            if (Array.isArray(parsedData) && parsedData.length > 0) {
+              console.log('[PrepareRefs onConfigure] Restoring from session:', parsedData.length, 'layers');
+              this.restoreRefLayers(parsedData);
             }
           } catch (e) {
             console.warn('[onConfigure] Failed to restore layers from session:', e);
@@ -763,7 +800,8 @@ app.registerExtension({
       if (refWidget) {
         const layerData = this.getRefLayerData();
         console.log('[PrepareRefs onSerialize] Saving layers:', layerData);
-        refWidget.value = layerData;
+        // Widget is STRING type in Python, so serialize to JSON
+        refWidget.value = JSON.stringify(layerData);
       }
 
       o.properties = o.properties || {};

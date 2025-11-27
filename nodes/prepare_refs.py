@@ -528,6 +528,9 @@ class PrepareRefs:
             "required": {
                 "mask_width": ("INT", {"default": 640, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 480, "min": 8, "max": 4096, "step": 8}),
+                "internal_state": ("STRING", {"default": "{}", "multiline": False}),  # Internal canvas state
+                "export_filename": ("STRING", {"default": "", "multiline": False}),    # Export path (hidden in UI)
+                "ref_layer_data": ("STRING", {"default": "[]", "multiline": False}),   # Ref layer data for persistence
             },
             "optional": {
                 "bg_image": ("IMAGE", {"forceInput": True}),
@@ -549,7 +552,9 @@ class PrepareRefs:
     Can export ref images with lasso shapes as masks.
     """
 
-    def prepare(self, mask_width: int, mask_height: int, bg_image: Optional[torch.Tensor] = None,
+    def prepare(self, mask_width: int, mask_height: int, internal_state: str = "{}",
+                export_filename: str = "", ref_layer_data: str = "[]",
+                bg_image: Optional[torch.Tensor] = None,
                 extra_refs: Optional[torch.Tensor] = None, extra_masks: Optional[torch.Tensor] = None,
                 unique_id: Optional[str] = None, prompt: Optional[Dict] = None):
         """
@@ -573,7 +578,18 @@ class PrepareRefs:
         width, height, output_bg_image, internal_processing_image = self._resolve_base_images(mask_width, mask_height, bg_image)
 
         # Parse and validate ref_layer_data early
-        raw_ref_data = parse_ref_layer_data_from_prompt(prompt, unique_id)
+        # ref_layer_data is now a direct parameter (JSON string), parse it
+        raw_ref_data = []
+        if ref_layer_data:
+            try:
+                import json
+                raw_ref_data = json.loads(ref_layer_data) if isinstance(ref_layer_data, str) else ref_layer_data
+                if not isinstance(raw_ref_data, list):
+                    raw_ref_data = []
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f"[PrepareRefs WARNING] Failed to parse ref_layer_data: {e}")
+                raw_ref_data = []
+
         valid_ref_layers = filter_layers_with_shapes(raw_ref_data)
 
         # EARLY GUARD: if no valid layers AND no extra_refs, warn and return empty outputs (no further processing)
