@@ -754,4 +754,4 @@ function isImageNode(node) {
 }
 
 // Export functions for use in other modules
-export { findConnectedSourceNode, findDeepSourceNode, extractImageFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode, getReferenceImagesFromConnectedNode };
+export { findConnectedSourceNode, findDeepSourceNode, extractImageFromSourceNode, extractImagesFromSourceNode, loadImageAsBase64, getReferenceImageFromConnectedNode, getReferenceImagesFromConnectedNode };

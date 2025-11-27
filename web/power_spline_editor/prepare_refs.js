@@ -78,7 +78,9 @@ app.registerExtension({
       this.properties = this.properties || {};
       this.properties.userAdjustedDims = this.properties.userAdjustedDims || false;
 
-      this.uuid = this.uuid || makeUUID();
+      // Restore UUID from properties if available (for persistence), otherwise create new one
+      this.uuid = this.properties.uuid || this.uuid || makeUUID();
+      console.log('[PrepareRefs onNodeCreated] Using UUID:', this.uuid);
 
       // Hide original dimension widgets
       const widthWidget = this.widgets.find(w => w.name === 'mask_width');
@@ -456,17 +458,25 @@ app.registerExtension({
     };
 
     nodeType.prototype.updateRefDataWidget = function () {
+      console.log('[PrepareRefs updateRefDataWidget] Called');
       const w = this.widgets.find(w => w.name === "ref_layer_data");
+      console.log('[PrepareRefs updateRefDataWidget] Widget found:', w);
       if (w) {
-        w.value = this.getRefLayerData();
+        const layerData = this.getRefLayerData();
+        console.log('[PrepareRefs updateRefDataWidget] Layer data from getRefLayerData():', layerData);
+        w.value = layerData;
 
         // Also save to sessionStorage for quick restore on page refresh
         try {
           const sessionKey = `prepare-refs-layers-${this.uuid}`;
+          console.log('[PrepareRefs updateRefDataWidget] Saving to session storage with key:', sessionKey);
           safeSetSessionItem(sessionKey, JSON.stringify(w.value));
+          console.log('[PrepareRefs updateRefDataWidget] Saved to session storage successfully');
         } catch (e) {
           console.warn('[PrepareRefs] Failed to save layers to session:', e);
         }
+      } else {
+        console.warn('[PrepareRefs updateRefDataWidget] Widget not found!');
       }
     };
     
@@ -530,6 +540,45 @@ app.registerExtension({
       } catch (err) {
         console.error('[PrepareRefs] Failed to refresh background:', err);
         this.forceCanvasRefresh();
+      }
+    };
+
+    nodeType.prototype.updateExtraRefsFromConnectedNode = async function () {
+      try {
+        // Safety check: only run if we have the required functions
+        if (typeof findConnectedSourceNode !== 'function' || typeof extractImagesFromSourceNode !== 'function') {
+          console.warn('[PrepareRefs] Graph query functions not available, skipping extra refs update');
+          return;
+        }
+
+        // Fetch images from extra_refs connection (e.g., CreateImageList)
+        // Use lower-level functions since getReferenceImagesFromConnectedNode is hardcoded to 'ref_images'
+        let sourceNodeObj = findConnectedSourceNode(this, 'extra_refs');
+        if (!sourceNodeObj) {
+          sourceNodeObj = findDeepSourceNode(this, 'extra_refs');
+        }
+
+        let extraRefImages = [];
+        if (sourceNodeObj) {
+          extraRefImages = await extractImagesFromSourceNode(sourceNodeObj, true);
+        }
+
+        if (extraRefImages && extraRefImages.length > 0) {
+          console.log(`[PrepareRefs] Found ${extraRefImages.length} extra ref images from connected node`);
+          this.loadedExtraRefImages = extraRefImages;
+
+          // Store in properties for persistence
+          this.properties.extra_ref_count = extraRefImages.length;
+        } else {
+          // No extra refs - this is normal, don't log as error
+          this.loadedExtraRefImages = null;
+          this.properties.extra_ref_count = 0;
+        }
+      } catch (err) {
+        // Silently handle errors - extra refs are optional
+        console.warn('[PrepareRefs] Could not fetch extra refs:', err.message);
+        this.loadedExtraRefImages = null;
+        this.properties.extra_ref_count = 0;
       }
     };
 
@@ -602,6 +651,18 @@ app.registerExtension({
       // Refresh canvas with connected bg_image
       await this.updateReferenceImageFromConnectedNode();
 
+      // Fetch extra refs from connected node (e.g., CreateImageList)
+      // TEMPORARILY DISABLED FOR DEBUGGING
+      /*
+      if (this.updateExtraRefsFromConnectedNode) {
+        try {
+          await this.updateExtraRefsFromConnectedNode();
+        } catch (err) {
+          console.warn('[PrepareRefs] Error in updateExtraRefsFromConnectedNode:', err);
+        }
+      }
+      */
+
       // Restore bg/ref images from execution message
       if (message?.ui?.bg_image_path?.[0]) {
         const path = message.ui.bg_image_path[0];
@@ -623,22 +684,43 @@ app.registerExtension({
     });
 
     chainCallback(nodeType.prototype, 'onConfigure', async function (info) {
+      console.log('[PrepareRefs onConfigure] Starting configuration restore');
+      console.log('[PrepareRefs onConfigure] Current UUID:', this.uuid);
+      console.log('[PrepareRefs onConfigure] Properties UUID:', this.properties?.uuid);
+
+      // CRITICAL: Restore UUID from properties if available
+      // onConfigure runs AFTER onNodeCreated, so we need to update UUID here
+      if (this.properties?.uuid && this.properties.uuid !== this.uuid) {
+        console.log('[PrepareRefs onConfigure] Restoring UUID from properties:', this.properties.uuid);
+        this.uuid = this.properties.uuid;
+      }
+
       // Restore ref layers from widget data
       const refDataWidget = this.widgets?.find(w => w.name === 'ref_layer_data');
+      console.log('[PrepareRefs onConfigure] ref_layer_data widget:', refDataWidget);
+      console.log('[PrepareRefs onConfigure] widget value:', refDataWidget?.value);
+
       if (refDataWidget && Array.isArray(refDataWidget.value) && refDataWidget.value.length > 0) {
+        console.log('[PrepareRefs onConfigure] Restoring from widget data:', refDataWidget.value.length, 'layers');
         this.restoreRefLayers(refDataWidget.value);
       } else {
+        console.log('[PrepareRefs onConfigure] No widget data, trying session storage...');
         // Try to restore from session storage as fallback
         const sessionLayers = safeGetSessionItem(`prepare-refs-layers-${this.uuid}`);
+        console.log('[PrepareRefs onConfigure] Session storage data:', sessionLayers);
         if (sessionLayers) {
           try {
             const layerData = JSON.parse(sessionLayers);
+            console.log('[PrepareRefs onConfigure] Parsed session data:', layerData);
             if (Array.isArray(layerData) && layerData.length > 0) {
+              console.log('[PrepareRefs onConfigure] Restoring from session:', layerData.length, 'layers');
               this.restoreRefLayers(layerData);
             }
           } catch (e) {
             console.warn('[onConfigure] Failed to restore layers from session:', e);
           }
+        } else {
+          console.log('[PrepareRefs onConfigure] No session storage data found');
         }
       }
 
@@ -678,11 +760,19 @@ app.registerExtension({
     const origSerialize = nodeType.prototype.onSerialize;
     nodeType.prototype.onSerialize = function (o) {
       const refWidget = this.widgets?.find(w => w.name === "ref_layer_data");
-      if (refWidget) refWidget.value = this.getRefLayerData();
+      if (refWidget) {
+        const layerData = this.getRefLayerData();
+        console.log('[PrepareRefs onSerialize] Saving layers:', layerData);
+        refWidget.value = layerData;
+      }
 
       o.properties = o.properties || {};
+      o.properties.uuid = this.uuid; // Save UUID for session storage persistence
       if (this.properties.bg_image_path) o.properties.bg_image_path = this.properties.bg_image_path;
       if (this.properties.ref_images_paths) o.properties.ref_images_paths = this.properties.ref_images_paths;
+
+      console.log('[PrepareRefs onSerialize] Serialized widget values:', this.widgets?.map(w => ({name: w.name, value: w.value})));
+      console.log('[PrepareRefs onSerialize] Saved UUID:', this.uuid);
 
       origSerialize?.call(this, o);
     };

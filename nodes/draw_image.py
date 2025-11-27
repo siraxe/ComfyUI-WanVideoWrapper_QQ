@@ -36,6 +36,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 "fallback_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.01}),
                 "overlay_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "add_shadows": ("BOOLEAN", {"default": False}),
+                "mask_fill": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             }
         }
 
@@ -247,7 +248,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
         return padded
 
     def create(self, bg_image, ref_images, coordinates, ref_masks=None, use_box_rotation=True, use_box_scale_size=True,
-               fallback_scale=1.0, overlay_opacity=1.0, frames=0, add_shadows=False):
+               fallback_scale=1.0, overlay_opacity=1.0, frames=0, add_shadows=False, mask_fill=0.0):
         try:
             overlay_opacity = max(0.0, min(1.0, float(overlay_opacity)))
         except (TypeError, ValueError):
@@ -350,7 +351,9 @@ Draws an input image along a coordinate path for each frame, returning the rende
             for frame_idx in range(num_frames):
                 bg_src = bg_pils[min(frame_idx, len(bg_pils) - 1)] if bg_pils else None
                 bg_rgba = bg_src.convert("RGBA") if bg_src else Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 255))
-                mask_base = Image.new("L", (frame_width, frame_height), 0)
+                # Use gray background for mask if mask_fill > 0.0
+                mask_bg_value = int(mask_fill * 255) if mask_fill > 0.0 else 0
+                mask_base = Image.new("L", (frame_width, frame_height), mask_bg_value)
 
                 # Process each layer for this frame (reversed so top layers in list draw on top)
                 for reversed_idx, layer_coords in enumerate(reversed(coords)):
@@ -472,7 +475,9 @@ Draws an input image along a coordinate path for each frame, returning the rende
             for idx, point in enumerate(coords):
                 bg_src = bg_pils[min(idx, len(bg_pils) - 1)] if bg_pils else None
                 bg_rgba = bg_src.convert("RGBA") if bg_src else Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 255))
-                mask_base = Image.new("L", (frame_width, frame_height), 0)
+                # Use gray background for mask if mask_fill > 0.0
+                mask_bg_value = int(mask_fill * 255) if mask_fill > 0.0 else 0
+                mask_base = Image.new("L", (frame_width, frame_height), mask_bg_value)
 
                 # For single layer, use first ref_selection
                 ref_selection = ref_selections[0] if ref_selections else 'no_ref'

@@ -666,10 +666,9 @@ function handleDocumentMouseUp(node, e, onMouseMove, onMouseUp) {
     console.log(`Replaced paths for ${node._lassoActiveLayer.value.name}`);
   }
 
-  // Update the serialized ref layer data widget
-  const refDataWidget = node.widgets?.find(w => w.name === "ref_layer_data");
-  if (refDataWidget) {
-    refDataWidget.value = node.getRefLayerData?.() || [];
+  // Update the serialized ref layer data widget and save to session storage
+  if (node.updateRefDataWidget) {
+    node.updateRefDataWidget();
   }
 
   // Cleanup

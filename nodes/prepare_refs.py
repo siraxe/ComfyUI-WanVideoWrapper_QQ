@@ -531,6 +531,8 @@ class PrepareRefs:
             },
             "optional": {
                 "bg_image": ("IMAGE", {"forceInput": True}),
+                "extra_refs": ("IMAGE", {"forceInput": True}),
+                "extra_masks": ("MASK", {"forceInput": True}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -548,6 +550,7 @@ class PrepareRefs:
     """
 
     def prepare(self, mask_width: int, mask_height: int, bg_image: Optional[torch.Tensor] = None,
+                extra_refs: Optional[torch.Tensor] = None, extra_masks: Optional[torch.Tensor] = None,
                 unique_id: Optional[str] = None, prompt: Optional[Dict] = None):
         """
         Main entry point. High-level orchestration:
@@ -668,6 +671,75 @@ class PrepareRefs:
             ref_images = torch.stack(square_images, dim=0)
             ref_masks = torch.stack(square_masks, dim=0)
             max_dim = FIXED_SQUARE_SIZE  # Update max_dim for subsequent operations
+
+        # Process extra_refs and extra_masks if provided
+        if extra_refs is not None:
+            print(f"[PrepareRefs INFO] Processing extra_refs with shape: {extra_refs.shape}")
+
+            # extra_refs expected shape: [B, H, W, C] where B is the number of extra ref images
+            num_extra_refs = extra_refs.shape[0]
+            extra_square_images = []
+            extra_square_masks = []
+
+            for i in range(num_extra_refs):
+                extra_img = extra_refs[i]  # [H, W, C]
+
+                # Get corresponding mask if extra_masks is provided
+                if extra_masks is not None and i < extra_masks.shape[0]:
+                    # extra_masks shape could be [B, H, W] or [B, H, W, 1]
+                    extra_mask = extra_masks[i]
+                    if extra_mask.ndim == 3 and extra_mask.shape[-1] == 1:
+                        extra_mask = extra_mask.squeeze(-1)  # [H, W]
+                    elif extra_mask.ndim == 2:
+                        pass  # Already [H, W]
+                    else:
+                        print(f"[PrepareRefs WARNING] Unexpected extra_mask shape: {extra_mask.shape}, creating empty mask")
+                        extra_mask = torch.zeros((extra_img.shape[0], extra_img.shape[1]), dtype=torch.float32, device=extra_img.device)
+                else:
+                    # No mask provided, create a full white mask (fully visible)
+                    extra_mask = torch.ones((extra_img.shape[0], extra_img.shape[1]), dtype=torch.float32, device=extra_img.device)
+
+                # Find bounding box for the extra image
+                extra_bbox = find_bounding_box(extra_img, mask_tensor=extra_mask)
+
+                # Scale and center in 768x768 canvas (same as regular refs)
+                sq_img = scale_and_center_in_square(extra_img, extra_bbox, square_size=FIXED_SQUARE_SIZE, has_alpha=export_alpha)
+                extra_square_images.append(sq_img)
+
+                # Scale and center mask in 768x768 canvas
+                min_x, min_y, max_x, max_y = extra_bbox
+                src_w = max_x - min_x + 1
+                src_h = max_y - min_y + 1
+                visible_mask = extra_mask[min_y:max_y + 1, min_x:max_x + 1]
+
+                # Calculate scale factor
+                scale = min(FIXED_SQUARE_SIZE / src_w, FIXED_SQUARE_SIZE / src_h)
+                new_w = int(src_w * scale)
+                new_h = int(src_h * scale)
+
+                # Resize mask
+                mask_chw = visible_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+                resized_mask_chw = F.interpolate(mask_chw, size=(new_h, new_w), mode='bilinear', align_corners=False)
+                resized_mask = resized_mask_chw.squeeze(0).squeeze(0)  # (H, W)
+
+                # Create square mask canvas and center
+                sq_mask = torch.zeros((FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE), dtype=torch.float32, device=extra_mask.device)
+                offset_x = (FIXED_SQUARE_SIZE - new_w) // 2
+                offset_y = (FIXED_SQUARE_SIZE - new_h) // 2
+                sq_mask[offset_y:offset_y + new_h, offset_x:offset_x + new_w] = resized_mask
+
+                extra_square_masks.append(sq_mask)
+
+            # Append extra refs to ref_images and ref_masks
+            if extra_square_images:
+                extra_refs_tensor = torch.stack(extra_square_images, dim=0)
+                extra_masks_tensor = torch.stack(extra_square_masks, dim=0)
+
+                # Concatenate with existing ref_images and ref_masks
+                ref_images = torch.cat([ref_images, extra_refs_tensor], dim=0)
+                ref_masks = torch.cat([ref_masks, extra_masks_tensor], dim=0)
+
+                print(f"[PrepareRefs INFO] Added {num_extra_refs} extra refs. New ref_images shape: {ref_images.shape}")
 
         # Align batch sizes: if base batch size greater than refs, pad refs
         ref_batch_size = ref_images.shape[0]
