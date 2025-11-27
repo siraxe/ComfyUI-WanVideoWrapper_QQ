@@ -2185,9 +2185,12 @@ app.registerExtension({
                       // Calculate absolute bounds of the toggle on the canvas
                       const widgetAbsX = this.pos[0];
                       const widgetAbsY = this.pos[1] + widget.last_y;
-
+                      
+                      // Reduce the width of the hit area to be more precise - use actual toggle width
+                      // The toggle width is approximately height * 0.72 (toggle radius * 2)
+                      const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.72;
                       const toggleAbsXStart = widgetAbsX + drivenToggleBounds[0];
-                      const toggleAbsXEnd = toggleAbsXStart + drivenToggleBounds[1];
+                      const toggleAbsXEnd = toggleAbsXStart + toggleWidth;
                       const toggleAbsYStart = widgetAbsY;
                       const toggleAbsYEnd = widgetAbsY + LiteGraph.NODE_WIDGET_HEIGHT;
 

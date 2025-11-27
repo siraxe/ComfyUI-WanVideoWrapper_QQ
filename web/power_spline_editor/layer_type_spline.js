@@ -177,7 +177,7 @@ export class PowerSplineWidget extends RgthreeBaseWidget {
         // Draw driven toggle
         const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
         // Align driven toggle with the header label by using precise positioning
-        const drivenPosX = rposX - numberWidth / 2 - 15; // Shift driven toggle a bit to the left (by 5 pixels)
+        const drivenPosX = rposX - numberWidth / 2 - 22; // Shift driven toggle further to the left (by 12 pixels)
         this.hitAreas.drivenToggle.bounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height, value: this.value.driven });
         rposX -= numberWidth + 10;
 

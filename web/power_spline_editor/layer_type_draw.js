@@ -189,7 +189,7 @@ export class HandDrawLayerWidget extends RgthreeBaseWidget {
         // Driven toggle (aligned like normal)
         ctx.textAlign = 'left';
         const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-        const drivenPosX = rposX - numberWidth / 2 - 15;
+        const drivenPosX = rposX - numberWidth / 2 - 15; // Shift driven toggle a bit to the left (by 5 pixels)
         this.hitAreas.drivenToggle.bounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height, value: this.value.driven });
         rposX -= numberWidth + 10;
 

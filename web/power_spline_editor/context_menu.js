@@ -831,7 +831,10 @@ export function getSlotInPosition(canvasX, canvasY) {
                         // We need to convert these to canvas coordinates
 
                         const toggleAbsXStart = this.pos[0] + drivenToggleBounds[0];
-                        const toggleAbsXEnd = toggleAbsXStart + drivenToggleBounds[1];
+                        // Reduce the width of the hit area to be more precise - use the actual toggle width
+                        // The toggle width is approximately height * 0.72 (toggle radius * 2)
+                        const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.72;
+                        const toggleAbsXEnd = toggleAbsXStart + toggleWidth;
                         const toggleAbsYStart = widgetTop; // The widget's top is the start Y
                         const toggleAbsYEnd = widgetBottom; // The widget's bottom is the end Y
 

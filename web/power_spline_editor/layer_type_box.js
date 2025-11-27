@@ -221,7 +221,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
 
         ctx.textAlign = 'left';
         const numberWidth = drawNumberWidgetPart.WIDTH_TOTAL;
-        const drivenPosX = rposX - numberWidth / 2 - 15;
+        const drivenPosX = rposX - numberWidth / 2 - 15; // Shift driven toggle a bit to the left (by 5 pixels)
         const drivenBounds = drawTogglePart(ctx, { posX: drivenPosX, posY, height: mainRowHeight, value: this.value.driven });
         this.hitAreas.drivenToggle.bounds = [drivenBounds[0], posY, drivenBounds[1], mainRowHeight];
         rposX -= numberWidth + 10;
