@@ -5,7 +5,7 @@
  * from the frontend without running the full ComfyUI workflow.
  */
 
-import { getReferenceImageFromConnectedNode } from './graph_query.js';
+import { getReferenceImageFromConnectedNode, findConnectedSourceNode, extractImagesFromSourceNode } from './graph_query.js';
 
 /**
  * Trigger PrepareRefs processing in the backend
@@ -46,14 +46,32 @@ export async function triggerPrepareRefsBackend(node) {
         // 2. Get ref_layer_data from node
         const refLayerData = node.getRefLayerData?.() || [];
 
-        if (refLayerData.length === 0) {
-            console.warn('[triggerPrepareRefsBackend] No ref layers with shapes found');
-            return { success: false, error: 'No ref layers with shapes to process' };
-        }
-
         console.log('[triggerPrepareRefsBackend] Found', refLayerData.length, 'layers with shapes');
 
-        // 3. Get dimensions
+        // 3. Check for extra_refs from connected Create Image List node
+        let extraRefsBase64 = [];
+        try {
+            const extraRefsSourceNode = findConnectedSourceNode(node, 'extra_refs');
+            if (extraRefsSourceNode) {
+                console.log('[triggerPrepareRefsBackend] Found extra_refs connection, extracting images...');
+                const extraImages = await extractImagesFromSourceNode(extraRefsSourceNode, false);
+                if (extraImages && extraImages.length > 0) {
+                    extraRefsBase64 = extraImages;
+                    console.log('[triggerPrepareRefsBackend] Extracted', extraRefsBase64.length, 'extra ref images');
+                }
+            }
+        } catch (error) {
+            console.warn('[triggerPrepareRefsBackend] Error extracting extra_refs:', error);
+            // Continue without extra_refs if there's an error
+        }
+
+        // Validate that we have at least one source of refs (lasso layers OR extra_refs)
+        if (refLayerData.length === 0 && extraRefsBase64.length === 0) {
+            console.warn('[triggerPrepareRefsBackend] No ref layers or extra_refs found');
+            return { success: false, error: 'No ref layers or extra_refs to process' };
+        }
+
+        // 4. Get dimensions
         const widthWidget = node.widgets?.find(w => w.name === 'mask_width');
         const heightWidget = node.widgets?.find(w => w.name === 'mask_height');
         const maskWidth = widthWidget?.value || 640;
@@ -61,7 +79,7 @@ export async function triggerPrepareRefsBackend(node) {
 
         console.log('[triggerPrepareRefsBackend] Dimensions:', maskWidth, 'x', maskHeight);
 
-        // 4. Prepare payload
+        // 5. Prepare payload
         const payload = {
             bg_image: bgImageBase64,
             ref_layer_data: refLayerData,
@@ -69,9 +87,14 @@ export async function triggerPrepareRefsBackend(node) {
             mask_height: maskHeight
         };
 
-        console.log('[triggerPrepareRefsBackend] Sending request with', refLayerData.length, 'layers');
+        // Add extra_refs if available
+        if (extraRefsBase64.length > 0) {
+            payload.extra_refs = extraRefsBase64;
+        }
 
-        // 5. Call backend endpoint
+        console.log('[triggerPrepareRefsBackend] Sending request with', refLayerData.length, 'layers and', extraRefsBase64.length, 'extra refs');
+
+        // 6. Call backend endpoint
         const response = await fetch('/wanvideowrapper_qq/trigger_prepare_refs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

@@ -576,8 +576,8 @@ class PrepareRefs:
         raw_ref_data = parse_ref_layer_data_from_prompt(prompt, unique_id)
         valid_ref_layers = filter_layers_with_shapes(raw_ref_data)
 
-        # EARLY GUARD: if no valid layers, warn and return empty outputs (no further processing)
-        if not valid_ref_layers:
+        # EARLY GUARD: if no valid layers AND no extra_refs, warn and return empty outputs (no further processing)
+        if not valid_ref_layers and extra_refs is None:
             # Build empty outputs matching expected shapes
             empty_ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
             empty_ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
@@ -594,10 +594,21 @@ class PrepareRefs:
         # Extract per-layer images and masks (full-size)
         ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, width, height, valid_ref_layers, export_alpha)
 
+        # Define fixed square size for all ref images
+        FIXED_SQUARE_SIZE = 768
+
         # Ensure we always have tensors for downstream logic
+        # If we have no lasso layers but we have extra_refs, create empty (0, ...) tensors to avoid empty ref_1.png
         if ref_images is None or ref_images.shape[0] == 0:
-            ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
-            ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
+            if extra_refs is not None:
+                # Create empty batch (0 images) with 768x768 dimensions to match extra_refs
+                # extra_refs will be processed to 768x768, so ref_images must match for concatenation
+                ref_images = torch.zeros((0, FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE, 4 if export_alpha else 3), dtype=torch.float32)
+                ref_masks = torch.zeros((0, FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE), dtype=torch.float32)
+            else:
+                # No lasso layers and no extra_refs, create a single empty image
+                ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
+                ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
 
         # Optionally save a combined mask preview and create masked BG preview
         if ref_masks is not None and ref_masks.shape[0] > 0 and to_bounding_box:
@@ -621,8 +632,11 @@ class PrepareRefs:
 
         # Determine bounding boxes and optionally crop to square images
         # Always use 768x768 squares and scale each layer to fill as much space as possible
-        FIXED_SQUARE_SIZE = 768
         max_dim = max(width, height)
+
+        # If we have only extra_refs (no lasso layers), max_dim should be 768
+        if ref_images.shape[0] == 0 and extra_refs is not None:
+            max_dim = FIXED_SQUARE_SIZE
 
         if ref_images.shape[0] > 0 and to_bounding_box:
             all_bboxes = []
