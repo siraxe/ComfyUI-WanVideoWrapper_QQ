@@ -18,8 +18,6 @@ import { getReferenceImageFromConnectedNode, findConnectedSourceNode, extractIma
  */
 export async function triggerPrepareRefsBackend(node) {
     try {
-        console.log('[triggerPrepareRefsBackend] Starting backend trigger...');
-
         // 1. Get current bg_image from connected node or canvas
         let bgImageBase64 = null;
 
@@ -35,7 +33,6 @@ export async function triggerPrepareRefsBackend(node) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0);
             bgImageBase64 = canvas.toDataURL('image/png');
-            console.log('[triggerPrepareRefsBackend] Using bg_image from canvas');
         }
 
         if (!bgImageBase64) {
@@ -46,18 +43,14 @@ export async function triggerPrepareRefsBackend(node) {
         // 2. Get ref_layer_data from node
         const refLayerData = node.getRefLayerData?.() || [];
 
-        console.log('[triggerPrepareRefsBackend] Found', refLayerData.length, 'layers with shapes');
-
         // 3. Check for extra_refs from connected Create Image List node
         let extraRefsBase64 = [];
         try {
             const extraRefsSourceNode = findConnectedSourceNode(node, 'extra_refs');
             if (extraRefsSourceNode) {
-                console.log('[triggerPrepareRefsBackend] Found extra_refs connection, extracting images...');
                 const extraImages = await extractImagesFromSourceNode(extraRefsSourceNode, false);
                 if (extraImages && extraImages.length > 0) {
                     extraRefsBase64 = extraImages;
-                    console.log('[triggerPrepareRefsBackend] Extracted', extraRefsBase64.length, 'extra ref images');
                 }
             }
         } catch (error) {
@@ -77,8 +70,6 @@ export async function triggerPrepareRefsBackend(node) {
         const maskWidth = widthWidget?.value || 640;
         const maskHeight = heightWidget?.value || 480;
 
-        console.log('[triggerPrepareRefsBackend] Dimensions:', maskWidth, 'x', maskHeight);
-
         // 5. Prepare payload
         const payload = {
             bg_image: bgImageBase64,
@@ -92,8 +83,6 @@ export async function triggerPrepareRefsBackend(node) {
             payload.extra_refs = extraRefsBase64;
         }
 
-        console.log('[triggerPrepareRefsBackend] Sending request with', refLayerData.length, 'layers and', extraRefsBase64.length, 'extra refs');
-
         // 6. Call backend endpoint
         const response = await fetch('/wanvideowrapper_qq/trigger_prepare_refs', {
             method: 'POST',
@@ -106,9 +95,6 @@ export async function triggerPrepareRefsBackend(node) {
         if (!result.success) {
             throw new Error(result.error || 'Backend processing failed');
         }
-
-        console.log('[triggerPrepareRefsBackend] Success:', result.message);
-        console.log('[triggerPrepareRefsBackend] Generated files:', result.paths);
 
         return result;
 

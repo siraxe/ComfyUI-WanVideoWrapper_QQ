@@ -278,7 +278,6 @@ export class TopRowWidget extends RgthreeBaseWidget {
                     const sourceNodeObj = findConnectedSourceNode(node, 'ref_images');
                     if (sourceNodeObj && sourceNodeObj.node) {
                         if (sourceNodeObj.node.type === 'PrepareRefs') {
-                            console.log('[Refresh] PowerSplineEditor connected to PrepareRefs');
                             isPrepareRefsConnected = true;
                             prepareRefsNode = sourceNodeObj.node;
                         }
@@ -289,16 +288,11 @@ export class TopRowWidget extends RgthreeBaseWidget {
 
                 if (isPrepareRefsConnected && prepareRefsNode) {
                     // Trigger backend PrepareRefs processing
-                    console.log('[Refresh] Triggering backend PrepareRefs processing...');
                     const result = await triggerPrepareRefsBackend(prepareRefsNode);
 
                     if (result.success) {
-                        console.log('[Refresh] Backend processing complete, loading results...');
-
                         // Load the newly generated images from ref folder
                         await this.loadImagesFromRefFolder(node);
-
-                        console.log('[Refresh] Canvas refresh complete');
                     } else {
                         // Silent error handling - log only, no user interruption
                         console.error('[Refresh] Backend processing failed:', result.error);
@@ -495,8 +489,6 @@ export class TopRowWidget extends RgthreeBaseWidget {
                 const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
                 const bg_img = bgImgWidget ? bgImgWidget.value : "None";
                 await node.updateBackgroundImage(bg_img);
-
-                console.log('Successfully loaded bg_image_cl.png from ref folder');
             }
         } catch (e) {
             console.warn('Failed to load bg_image_cl.png from ref folder:', e);
@@ -513,14 +505,12 @@ export class TopRowWidget extends RgthreeBaseWidget {
 
                 if (refImageData) {
                     refImages.push(refImageData);
-                    console.log(`Successfully loaded ref_${i}.png from ref folder`);
                 } else {
                     // Stop trying if we can't load this image
                     break;
                 }
             } catch (e) {
                 // Stop trying if we encounter an error (file doesn't exist)
-                console.log(`No more ref images found after ref_${i - 1}.png`);
                 break;
             }
         }

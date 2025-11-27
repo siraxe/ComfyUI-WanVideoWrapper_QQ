@@ -281,8 +281,6 @@ app.registerExtension({
             element.style.padding = "0";
             element.style.display = "block";
 
-            // Add a debug message when the node is initialized or pasted
-            console.log("PowerSplineEditor node initialized/pasted with data:", this.properties);
             
             // fake image widget to allow copy/paste (set value to null and override draw to prevent "image null" text)
             const fakeimagewidget = this.addWidget("COMBO", "image", null, () => { }, { values: [] });
@@ -487,7 +485,6 @@ app.registerExtension({
                     const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
 
                     if (isConnectedToPrepareRefs) {
-                        console.log('Connected to PrepareRefs, loading bg_image_cl.png from ref folder');
                         try {
                             const timestamp = Date.now();
                             const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
@@ -920,7 +917,6 @@ app.registerExtension({
                     const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
 
                     if (isConnectedToPrepareRefs) {
-                        console.log('Connected to PrepareRefs node, loading bg_image_cl.png from ref folder');
                         try {
                             const timestamp = Date.now();
                             const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
@@ -1244,8 +1240,6 @@ app.registerExtension({
 
             // Add method to handle frames input refresh and box layer keyframe scaling
             this.handleFramesRefresh = function() {
-                console.log('Handling frames refresh...');
-
                 try {
                     // Step 1: Find all box type layers in the layer manager
                     const boxLayers = [];
@@ -1258,38 +1252,26 @@ app.registerExtension({
                     }
 
                     if (boxLayers.length === 0) {
-                        console.log('No box type layers found');
                         return;
                     }
-
-                    console.log(`Found ${boxLayers.length} box layer(s)`);
 
                     // Step 2: Check which box layers have keyframes set
                     const boxLayersWithKeys = boxLayers.filter(layer => {
                         return layer.value.box_keys && Array.isArray(layer.value.box_keys) && layer.value.box_keys.length > 0;
                     });
 
-                    if (boxLayersWithKeys.length === 0) {
-                        console.log('No box layers with keyframes found');
-                    } else {
-                        console.log(`Found ${boxLayersWithKeys.length} box layer(s) with keyframes`);
-                    }
-
                     // Step 3: Determine target frames (must come from frames input/property)
                     const framesInputValue = this.getInputOrProperty('frames');
                     const hasFramesInput = typeof framesInputValue === 'number' && !Number.isNaN(framesInputValue) && framesInputValue > 0;
                     if (!hasFramesInput) {
-                        console.log('No frames input connected or invalid value; aborting frames refresh.');
                         return;
                     }
                     const targetFrames = Math.max(1, Math.round(framesInputValue));
-                    console.log('Frames input value:', targetFrames);
 
                     // Step 4: Get current max frames from timeline (import from canvas_constants.js)
                     // We need to dynamically import or access the constant
                     import('./canvas/canvas_constants.js').then(module => {
                         const currentMaxFrames = (this.editor?._getMaxFrames?.()) || module.BOX_TIMELINE_MAX_POINTS || 50;
-                        console.log(`Current max frames: ${currentMaxFrames}, Target frames: ${targetFrames}`);
 
                         const persistMaxFrames = (frames) => {
                             if (this.editor) {
@@ -1310,15 +1292,12 @@ app.registerExtension({
 
                         // Step 5: Decide scaling behavior based on target vs current max
                         if (targetFrames > currentMaxFrames) {
-                            console.log('Extending timeline to target frames; preserving keyframe positions.');
                             persistMaxFrames(targetFrames);
                         } else {
                             if (lastKeyFrame <= targetFrames) {
-                                console.log('Last keyframe within target; shrinking timeline without scaling.');
                                 persistMaxFrames(targetFrames);
                             } else {
                                 const scaleRatio = targetFrames / currentMaxFrames;
-                                console.log(`Last keyframe exceeds target; scaling keyframes with ratio ${scaleRatio}.`);
                                 if (boxLayersWithKeys.length > 0) {
                                     for (const layer of boxLayersWithKeys) {
                                         const originalKeys = layer.value.box_keys;
@@ -1333,8 +1312,6 @@ app.registerExtension({
                                             keysByFrame.set(key.frame, key);
                                         }
                                         layer.value.box_keys = Array.from(keysByFrame.values()).sort((a, b) => a.frame - b.frame);
-
-                                        console.log(`Scaled ${originalKeys.length} keys for layer "${layer.value.name}"`);
                                     }
                                 }
                                 persistMaxFrames(targetFrames);
@@ -1347,8 +1324,6 @@ app.registerExtension({
                         }
 
                         this.setDirtyCanvas(true, true);
-
-                        console.log('Frames refresh completed successfully');
                     }).catch(err => {
                         console.error('Error importing canvas_constants:', err);
                     });
@@ -2117,9 +2092,8 @@ app.registerExtension({
                         const size = JSON.stringify(this.imgData).length;
                         if (size < 640 * 480) { // 1MB limit
                             safeSetSessionItem(`spline-editor-img-${this.uuid}`, JSON.stringify(this.imgData));
-                        } else {
-                            console.warn("Spline Editor: Image not saved to session storage because it is too large.", size);
                         }
+                        // Silently skip saving large images to session storage
                     } catch (e) {
                         console.error("Spline Editor: Could not save image to session storage", e);
                     }

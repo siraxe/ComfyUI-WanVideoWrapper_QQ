@@ -38,14 +38,6 @@ export default class RefCanvas {
       const newHeight = this.originalImageHeight * this.scale;
       this.offsetX = (this.width - newWidth) / 2;
       this.offsetY = (this.height - newHeight) / 2;
-
-      console.log('[RefCanvas] Recenter:', {
-        canvasSize: `${this.width}×${this.height}`,
-        imageSize: `${this.originalImageWidth}×${this.originalImageHeight}`,
-        scale: this.scale.toFixed(3),
-        offset: `${this.offsetX.toFixed(1)}, ${this.offsetY.toFixed(1)}`,
-        displaySize: `${newWidth.toFixed(1)}×${newHeight.toFixed(1)}`
-      });
     }
   }
 
@@ -109,7 +101,6 @@ export default class RefCanvas {
     // Check if points are already in canvas coords (not normalized)
     const isNormalized = points.every(p => Math.abs(p.x) < 10 && Math.abs(p.y) < 10);
     if (!isNormalized) {
-      console.log('[RefCanvas] Denormalize: points already in canvas coords');
       return points;
     }
 
@@ -125,24 +116,11 @@ export default class RefCanvas {
         y = (origY * this.scale) + this.offsetY;
       } else {
         // Fallback: denormalize to canvas dimensions
-        console.warn('[RefCanvas] Using fallback denormalize!', {
-          hasOriginalWidth: !!this.originalImageWidth,
-          hasOriginalHeight: !!this.originalImageHeight,
-          scale: this.scale
-        });
         x = nx * this.width;
         y = ny * this.height;
       }
       return { ...p, x, y };
     });
-
-    if (points.length > 0) {
-      console.log('[RefCanvas] Denormalize sample:', {
-        normalized: `(${points[0].x.toFixed(3)}, ${points[0].y.toFixed(3)})`,
-        canvas: `(${result[0].x.toFixed(1)}, ${result[0].y.toFixed(1)})`,
-        transform: { scale: this.scale.toFixed(3), offset: `${this.offsetX.toFixed(1)}, ${this.offsetY.toFixed(1)}` }
-      });
-    }
 
     return result;
   }

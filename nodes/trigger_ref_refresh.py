@@ -157,14 +157,9 @@ async def trigger_prepare_refs(request):
                 extra_refs_tensor = torch.stack(extra_ref_tensors, dim=0)
                 print(f"[trigger_prepare_refs] Stacked {len(extra_ref_tensors)} extra_refs into tensor: {extra_refs_tensor.shape}")
 
-        # Construct prompt structure (PrepareRefs expects this format)
-        prompt = {
-            "unique_id": {
-                "inputs": {
-                    "ref_layer_data": ref_layer_data
-                }
-            }
-        }
+        # Serialize ref_layer_data to JSON string (PrepareRefs expects STRING parameter)
+        import json
+        ref_layer_data_json = json.dumps(ref_layer_data) if ref_layer_data else "[]"
 
         # Create PrepareRefs instance and execute
         print(f"[trigger_prepare_refs] Calling PrepareRefs.prepare()...")
@@ -172,10 +167,13 @@ async def trigger_prepare_refs(request):
         result = prep_refs.prepare(
             mask_width=mask_width,
             mask_height=mask_height,
+            internal_state="{}",
+            export_filename="",
+            ref_layer_data=ref_layer_data_json,
             bg_image=bg_tensor,
             extra_refs=extra_refs_tensor,
-            unique_id="unique_id",  # Key used in prompt dict
-            prompt=prompt
+            unique_id="unique_id",
+            prompt=None
         )
 
         # Extract paths from result

@@ -376,12 +376,6 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
 function renderLayerLassoShapes(ctx, shape, w, h, isActive = true, refCanvasEditor = null) {
   if (!shape || !shape.additivePaths?.length) return;
 
-  console.log('[renderLayerLassoShapes] Rendering:', {
-    pathCount: shape.additivePaths.length,
-    hasRefCanvas: !!refCanvasEditor,
-    canvasSize: `${w}×${h}`
-  });
-
   // Choose colors based on active state
   const fillColor = isActive ? 'rgba(0, 255, 0, 0.3)' : 'rgba(128, 128, 128, 0.3)';
   const strokeColor = isActive ? 'rgba(0, 255, 0, 0.8)' : 'rgba(128, 128, 128, 0.8)';
@@ -397,7 +391,6 @@ function renderLayerLassoShapes(ctx, shape, w, h, isActive = true, refCanvasEdit
   offCtx.fillStyle = fillColor;
   if (shape.additivePaths && shape.additivePaths.length > 0) {
     shape.additivePaths.forEach((path, idx) => {
-      console.log(`[renderLayerLassoShapes] Path ${idx}: ${path.length} points, using ${refCanvasEditor ? 'RefCanvas' : 'fallback'}`);
       // Use RefCanvas's denormalize method (handles coordinate transform automatically)
       const canvasCoords = refCanvasEditor ? refCanvasEditor.denormalizePoints(path) : denormalizePoints(path, w, h);
       if (canvasCoords.length < 3) return;
@@ -496,8 +489,6 @@ function enterLassoMode(node, refLayer) {
 
   // Update button states to show green pen for active layer
   node.updateLayerButtonStates?.();
-
-  console.log(`Lasso mode activated for ${refLayer.value.name}`);
 }
 
 /**
@@ -523,8 +514,6 @@ function exitLassoMode(node) {
 
   // Update button states to reset pen colors
   node.updateLayerButtonStates?.();
-
-  console.log('Lasso mode deactivated');
 }
 
 /**
@@ -653,17 +642,12 @@ function handleDocumentMouseUp(node, e, onMouseMove, onMouseUp) {
       additivePaths: mergedContours,
       subtractivePaths: []
     };
-
-    const mode = node._lassoIsCtrlHeld ? 'Subtractive' : 'Additive';
-    console.log(`${mode} merge for ${node._lassoActiveLayer.value.name}:`,
-      `${mergedContours.length} region(s), unaffected paths preserved`);
   } else {
     // No modifier - replace all paths with new one
     node._lassoActiveLayer.value.lassoShape = {
       additivePaths: [normalizedPath],
       subtractivePaths: []
     };
-    console.log(`Replaced paths for ${node._lassoActiveLayer.value.name}`);
   }
 
   // Update the serialized ref layer data widget and save to session storage
@@ -718,6 +702,4 @@ export function attachLassoHelpers(node) {
       canvas.removeEventListener('mousedown', onMouseDown);
     };
   }
-
-  console.log('Lasso helpers attached to PrepareRefs node');
 }

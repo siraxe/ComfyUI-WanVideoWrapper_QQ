@@ -168,14 +168,6 @@ function findConnectedSourceNode(currentNode, inputName) {
             return null;
         }
 
-        console.log(`Found connected source node:`, {
-            sourceNodeId: sourceNode.id,
-            sourceNodeType: sourceNode.type,
-            sourceNodeWidgetValues: sourceNode.widgets ? sourceNode.widgets.map(w => ({name: w.name, type: w.type, value: w.value})) : [],
-            origin_slot: link.origin_slot,
-            target_slot: link.target_slot
-        });
-
         return {
             node: sourceNode,
             origin_slot: link.origin_slot,
@@ -337,7 +329,6 @@ async function extractImagesFromSourceNode(sourceNodeObj, includeDomFallback = f
                     const imgElements = nodeElement.querySelectorAll('img');
                     for (const img of imgElements) {
                         if (img.src && (img.src.startsWith('data:') || img.src.startsWith('http'))) {
-                            console.log('Found image in node DOM element:', img.src);
                             collected.push(img.src);
                             break;
                         }
@@ -379,7 +370,11 @@ async function loadImageAsBase64(imageUrl) {
 
         const response = await fetch(urlToUse);
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            // Suppress 404 errors as they're expected when checking for ref images
+            if (response.status !== 404) {
+                console.error(`Error loading image (${response.status}):`, urlToUse);
+            }
+            return null;
         }
 
         const blob = await response.blob();
@@ -390,7 +385,10 @@ async function loadImageAsBase64(imageUrl) {
             reader.readAsDataURL(blob);
         });
     } catch (error) {
-        console.error('Error loading image as base64:', error);
+        // Only log unexpected errors (not 404s)
+        if (!error.message?.includes('404')) {
+            console.error('Error loading image as base64:', error);
+        }
         return null;
     }
 }
@@ -517,24 +515,14 @@ function findResizeNodeInChain(startNode, inputName) {
  * @returns {Promise<string|null>} Promise that resolves to base64 image data or null
  */
 async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_image') {
-    console.log('Starting reference image query for node:', currentNode);
-
     // Step 1: Find the connected source node for ref_image input
     let sourceNodeObj = findConnectedSourceNode(currentNode, inputName);
     if (!sourceNodeObj) {
-        console.log(`No source node found for ${inputName} input, trying deep search...`);
         // Try deep search as fallback
         sourceNodeObj = findDeepSourceNode(currentNode, inputName);
-        if (sourceNodeObj) {
-            console.log('Deep search found a potential image source node:', {
-                sourceNodeId: sourceNodeObj.node.id,
-                sourceNodeType: sourceNodeObj.node.type
-            });
-        }
     }
 
     if (!sourceNodeObj) {
-        console.log(`No source node found for ${inputName} input after deep search`);
         return null;
     }
 
@@ -544,14 +532,9 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
     // Step 2: Extract image data from the source node
     let imageDataUrl = await extractImageFromSourceNode(sourceNodeObj);
     if (!imageDataUrl) {
-        console.log('No image data found in source node, trying deep search for original image source...');
         // If we couldn't extract image from the found source node, try to find the original image source via deep search
         const deepSourceNodeObj = findDeepSourceNode(currentNode, inputName);
         if (deepSourceNodeObj && deepSourceNodeObj.node.id !== sourceNodeObj.node.id) {
-            console.log('Deep search found alternative source node:', {
-                sourceNodeId: deepSourceNodeObj.node.id,
-                sourceNodeType: deepSourceNodeObj.node.type
-            });
             imageDataUrl = await extractImageFromSourceNode(deepSourceNodeObj);
             if (imageDataUrl) {
                 sourceNodeObj = deepSourceNodeObj; // Update the source node for potential logging
@@ -560,7 +543,6 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
     }
 
     if (!imageDataUrl) {
-        console.log('No image data found in source node after trying alternatives');
         return null;
     }
 
@@ -593,7 +575,6 @@ async function getReferenceImageFromConnectedNode(currentNode, inputName = 'ref_
         }
     }
 
-    console.log('Successfully retrieved reference image from connected node');
     return base64Image;
 }
 
