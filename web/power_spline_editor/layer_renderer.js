@@ -1,4 +1,4 @@
-import { BOX_BASE_RADIUS, POINT_BASE_RADIUS } from './spline_utils.js';
+import { BOX_BASE_RADIUS, POINT_BASE_RADIUS, transformVideoToCanvasSpace } from './spline_utils.js';
 import { BOX_TIMELINE_MAX_POINTS } from './canvas/canvas_constants.js';
 
 /**
@@ -143,10 +143,11 @@ export class LayerRenderer {
             children.forEach((element, idx) => {
                 if (idx >= validPoints.length) return;
                 const point = validPoints[idx];
+                const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
 
                 if (element.tagName === 'circle') {
-                    element.setAttribute('cx', point.x);
-                    element.setAttribute('cy', point.y);
+                    element.setAttribute('cx', transformedPoint.x);
+                    element.setAttribute('cy', transformedPoint.y);
                 } else if (element.tagName === 'path') {
                     // For paths (triangles), recalculate rotation for first point
                     let rotationDeg = 0;
@@ -156,7 +157,7 @@ export class LayerRenderer {
                         const rotationRad = (dx !== 0 || dy !== 0) ? (Math.atan2(dy, dx) - Math.PI / 2 + Math.PI + 2 * Math.PI) % (2 * Math.PI) : 0;
                         rotationDeg = rotationRad * (180 / Math.PI);
                     }
-                    element.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+                    element.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
                 }
             });
         }
@@ -172,7 +173,9 @@ export class LayerRenderer {
                     const point = validPoints[idx];
                     const rotationRad = this._getBoxRotationValue(point);
                     const rotationDeg = rotationRad * (180 / Math.PI);
-                    element.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+                    const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+                    
+                    element.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
                 } else if (element.tagName === 'g' && element.hasAttribute('data-rotation-text') && validPoints.length > 0) {
                     // Update rotation text group
                     const point = validPoints[0];
@@ -180,7 +183,8 @@ export class LayerRenderer {
                     const rotationDeg = rotationRad * (180 / Math.PI);
 
                     // Update group position
-                    element.setAttribute('transform', `translate(${point.x},${point.y})`);
+                    const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+                    element.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y})`);
 
                     // Update text content
                     const textElement = element.querySelector('text');
@@ -202,7 +206,8 @@ export class LayerRenderer {
                 const point = validPoints[0];
                 const rotationDeg = this._getBoxRotationValue(point) * (180 / Math.PI);
                 images.forEach((imgEl) => {
-                    imgEl.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+                    const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+                    imgEl.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
                 });
             }
         }
@@ -374,7 +379,9 @@ export class LayerRenderer {
         path.setAttribute('d', d);
         // Convert rotation from radians to degrees for SVG
         const rotationDeg = rotation * (180 / Math.PI);
-        path.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+        const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+        
+        path.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
         path.setAttribute('stroke', styles.stroke || 'rgb(31,119,180)');
         path.setAttribute('stroke-width', styles.strokeWidth || 3);
         path.setAttribute('fill', styles.fill || 'none');
@@ -390,8 +397,11 @@ export class LayerRenderer {
 
     _createSVGCircle(point, styles) {
         const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.setAttribute('cx', point.x);
-        circle.setAttribute('cy', point.y);
+        
+        const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+        
+        circle.setAttribute('cx', transformedPoint.x);
+        circle.setAttribute('cy', transformedPoint.y);
         circle.setAttribute('r', styles.radius || 6);
         circle.setAttribute('stroke', styles.stroke || 'rgb(31,119,180)');
         circle.setAttribute('stroke-width', styles.strokeWidth || 3);
@@ -537,6 +547,19 @@ export class LayerRenderer {
             return `data:${attachment.type || 'image/png'};base64,${attachment.base64}`;
         }
 
+        // First check sessionStorage for the data
+        if (attachment.sessionKey) {
+            try {
+                const dataUrl = sessionStorage.getItem(attachment.sessionKey);
+                if (dataUrl) {
+                    console.log(`[_getRefImageUrl] Loaded ${attachment.name} from sessionStorage`);
+                    return dataUrl;
+                }
+            } catch (e) {
+                console.warn(`[_getRefImageUrl] Failed to load from sessionStorage:`, e);
+            }
+        }
+
         // For path-based images, use cache to prevent blinking during timeline scrub
         if (attachment.path) {
             const widgetName = widget?.value?.name || widget?.name || 'unknown';
@@ -547,10 +570,27 @@ export class LayerRenderer {
 
             // Check if we have a cached URL for this widget+selection+attachment
             if (!this._refImageCache.has(cacheKey)) {
-                // Create new URL with cache bust counter to force browser refresh when cache is cleared
-                // Using cacheBustCounter ensures all URLs get new timestamps when clearRefImageCache() is called
-                const url = new URL(`${attachment.path}?v=${this._cacheBustCounter}`, import.meta.url).href;
+                let url;
+                if (attachment.path.startsWith('ref/')) {
+                    // This is an output file from PrepareRefs, use /view endpoint
+                    const pathParts = attachment.path.split('/');
+                    const filename = pathParts.pop();
+                    const subfolder = pathParts.join('/');
+
+                    const urlObj = new URL('/view', window.location.origin);
+                    urlObj.searchParams.set('filename', filename);
+                    if (subfolder) {
+                        urlObj.searchParams.set('subfolder', subfolder);
+                    }
+                    urlObj.searchParams.set('type', 'output');
+                    urlObj.searchParams.set('t', this._cacheBustCounter); // Use cacheBustCounter for cache busting
+                    url = urlObj.href;
+                } else {
+                    // This is a file inside the extension's web folder (e.g., bg/....)
+                    url = new URL(`/extensions/ComfyUI-WanVideoWrapper_QQ/${attachment.path}?v=${this._cacheBustCounter}`, window.location.origin).href;
+                }
                 this._refImageCache.set(cacheKey, url);
+                console.log(`[DEBUG] Image URL for ${attachment.path}: ${url}`);
             }
 
             return this._refImageCache.get(cacheKey);
@@ -581,8 +621,14 @@ export class LayerRenderer {
     }
 
     getCanvasScale() {
-        // Returns the canvas scaling factor used for background image
+        // Returns the canvas scaling factor used for background image or video
         const editor = this.splineEditor;
+
+        if (editor.videoMetadata && editor.videoScale !== undefined && editor.videoScale !== null) {
+            return editor.videoScale;
+        }
+        
+        // Fallback to image scaling
         return (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0)
             ? editor.scale
             : 1;
@@ -606,10 +652,15 @@ export class LayerRenderer {
         if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
 
         const rotation = this._getBoxRotationValue(point);
-        const radius = this.getScaledBoxRadius(point);
+        let radius = this.getScaledBoxRadius(point);
         if (!Number.isFinite(radius)) return null;
+
+        const canvasScale = this.getCanvasScale();
+        if (canvasScale > 0) {
+            radius /= canvasScale;
+        }
         
-        const extra = Math.max(18, radius * 0.5);
+        const extra = Math.max(18 / (canvasScale || 1), radius * 0.5);
         const rotatePoint = (px, py) => ({
             x: point.x + px * Math.cos(rotation) - py * Math.sin(rotation),
             y: point.y + px * Math.sin(rotation) + py * Math.cos(rotation),
@@ -834,6 +885,28 @@ export class LayerRenderer {
     // === MAIN RENDER ===
 
     render() {
+        const editor = this.splineEditor;
+        const points = editor.points || [];
+
+        if (points.length > 0) {
+            const firstPoint = points[0];
+            const transformedFirstPoint = transformVideoToCanvasSpace(editor, firstPoint.x, firstPoint.y);
+            
+            let bgTopLeft = { x: 'N/A', y: 'N/A' };
+            let bgScale = 'N/A';
+            let bgType = 'None';
+            
+            if (editor.videoMetadata) {
+                bgType = 'Video';
+                bgTopLeft = { x: editor.videoOffsetX, y: editor.videoOffsetY };
+                bgScale = editor.videoScale;
+            } else if (editor.originalImageWidth) {
+                bgType = 'Image';
+                bgTopLeft = { x: editor.offsetX, y: editor.offsetY };
+                bgScale = editor.scale;
+            }
+        }
+
         const forceRebuild = !!this.splineEditor._forceRebuildNextRender;
         if (forceRebuild) this.splineEditor._forceRebuildNextRender = false;
 
@@ -1036,7 +1109,7 @@ export class LayerRenderer {
             this._drawBoxKeyPath(this.activeLayerPanel, widget, true);
             
             // Third: Get the actual keyframe points from box_keys for rotation handles and green center dots
-            const sortedKeys = this._sanitizeBoxKeys(widget);
+            const sortedKeys = this.splineEditor._ensureBoxLayerData(widget);
             if (sortedKeys.length > 0) {
                 const keyframeNormPoints = sortedKeys.map(k => ({ x: k.x, y: k.y }));
                 const keyframeDenormPoints = this._safeDenormalizePoints(keyframeNormPoints);
@@ -1134,10 +1207,13 @@ export class LayerRenderer {
                     text.setAttribute('font-weight', 'bold');
                     text.setAttribute('text-anchor', 'start');
                     text.setAttribute('pointer-events', 'none');
+                    text.style.userSelect = 'none';
                     text.textContent = `${rotationDeg.toFixed(1)}°`;
 
                     textGroup.appendChild(text);
-                    textGroup.setAttribute('transform', `translate(${dot.x},${dot.y})`);
+                    const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, dot.x, dot.y);
+                    
+                    textGroup.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y})`);
                     textGroup.style.pointerEvents = 'none';
 
                     this._pendingShapes.activeBoxDots.push(textGroup);
@@ -1183,7 +1259,9 @@ export class LayerRenderer {
             image.setAttribute('x', -renderW / 2);
             image.setAttribute('y', -renderH / 2);
             image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-            image.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+            const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+            
+            image.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
             image.style.pointerEvents = 'none';
             image.style.opacity = '0.6';
             // Store cache bust version to track if image needs updating
@@ -1205,10 +1283,8 @@ export class LayerRenderer {
                 const geom = this._computeBoxHandleGeometry(point);
                 return geom ? [geom.base, geom.tip] : [];
             })
-            .left(d => d.x)
-            .top(d => d.y)
-            .strokeStyle(styles.pointStroke || '#2df26d')
-            .lineWidth(styles.lineWidth || 2);
+            .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
 
         // 2. Draw handle tip (Circle)
         this.activeLayerPanel.add(pv.Dot)
@@ -1221,8 +1297,8 @@ export class LayerRenderer {
                 const geom = this._computeBoxHandleGeometry(point);
                 return geom ? [{ point, tip: geom.tip }] : [];
             })
-            .left(d => d.tip.x)
-            .top(d => d.tip.y)
+            .left(d => transformVideoToCanvasSpace(this.splineEditor, d.tip.x, d.tip.y).x)
+            .top(d => transformVideoToCanvasSpace(this.splineEditor, d.tip.x, d.tip.y).y)
             .shape('circle')
             .radius(5)
             .fillStyle(styles.pointFill || 'rgba(45, 242, 109, 0.9)')
@@ -1247,9 +1323,8 @@ export class LayerRenderer {
                 const point = pointGetter(); // <--- Dynamic lookup
                 return point ? [point] : [];
             })
-            .left(d => d.x)
-            .top(d => d.y)
-            .shape('circle')
+            .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
             .radius(3)
             .fillStyle(styles.pointFill || '#2df26d')
             .strokeStyle(styles.pointStroke || '#064f1c')
@@ -1312,10 +1387,13 @@ export class LayerRenderer {
             text.setAttribute('font-weight', 'bold');
             text.setAttribute('text-anchor', 'start');
             text.setAttribute('pointer-events', 'none');
+            text.style.userSelect = 'none';
             text.textContent = `${rotationDeg.toFixed(1)}°`;
 
             textGroup.appendChild(text);
-            textGroup.setAttribute('transform', `translate(${point.x},${point.y})`);
+            const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+            
+            textGroup.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y})`);
             textGroup.style.pointerEvents = 'none';
 
             this._pendingShapes.activeBoxDots.push(textGroup);
@@ -1346,7 +1424,9 @@ export class LayerRenderer {
             image.setAttribute('x', -renderW / 2);
             image.setAttribute('y', -renderH / 2);
             image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-            image.setAttribute('transform', `translate(${point.x},${point.y}) rotate(${rotationDeg})`);
+            const transformedPoint = transformVideoToCanvasSpace(this.splineEditor, point.x, point.y);
+            
+            image.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
             image.style.pointerEvents = 'none';
             image.style.opacity = '0.6';
             // Store cache bust version to track if image needs updating
@@ -1372,8 +1452,8 @@ export class LayerRenderer {
 
                 return this._prepareLineData(validPoints, interpolation, isPointMode);
             })
-            .left(d => d.x)
-            .top(d => d.y)
+            .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
             .interpolate(() => isPointMode ? 'linear' : interpolation)
             .strokeStyle(() => styles.lineStroke)
             .lineWidth(() => styles.lineWidth);
@@ -1634,8 +1714,8 @@ export class LayerRenderer {
 
         layerPanel.add(pv.Line).events("none")
             .data(renderPoints)
-            .left(d => d.x)
-            .top(d => d.y)
+            .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
             .interpolate(isPointMode ? 'linear' : interpolation)
             .strokeStyle(styles.lineStroke)
             .lineWidth(lineWidth);
@@ -1709,7 +1789,7 @@ export class LayerRenderer {
         if (!points || !points.length) return;
 
         // Only use the main keyframe points for the inactive circles
-        const sanitizedKeys = this._sanitizeBoxKeys(widget);
+        const sanitizedKeys = this.splineEditor._ensureBoxLayerData(widget);
         const keyframeNormPoints = sanitizedKeys.map(k => ({ x: k.x, y: k.y }));
         const keyframeDenormPoints = this._safeDenormalizePoints(keyframeNormPoints) || [];
         const orderedDots = [...keyframeDenormPoints].map(p => ({ ...p })).sort((a, b) =>
@@ -1718,29 +1798,13 @@ export class LayerRenderer {
 
         this._drawInactiveLine(layerPanel, points, 'linear', true, styles);
 
-        // Draw small red circles for inactive box layers instead of squares
-        orderedDots.forEach((dot) => {
-            const svgStyles = {
-                radius: 4, // Small radius for inactive box points
-                stroke: '#f04d3a', // Red to indicate inactive state
-                strokeWidth: 2,
-                fill: 'rgba(240, 77, 58, 0.25)', // Light red fill
-                cursor: 'default'
-            };
-
-            const element = this._createSVGCircle(dot, svgStyles);
-            if (element) {
-                element.style.pointerEvents = 'none';
-                // Queue for rendering after vis.render()
-                this._pendingShapes.inactiveBoxDots.push(element);
-            }
-        });
-
-        // Keyframe markers (uses Protovis)
+        // Keyframe markers (uses Protovis) - relying solely on this for keyframe circles
         this._drawBoxKeyPath(layerPanel, widget, false);
     }
 
     // === BOX LAYER HELPERS ===
+
+
 
     _sanitizeBoxKeys(widget) {
         if (!widget?.value) return [];
@@ -1786,7 +1850,7 @@ export class LayerRenderer {
     }
 
     _drawBoxKeyPath(panel, widget, isActive) {
-        const sortedKeys = this._sanitizeBoxKeys(widget);
+        const sortedKeys = this.splineEditor._ensureBoxLayerData(widget);
         if (!sortedKeys.length) return;
 
         // Check if we're currently manipulating box keyframes
@@ -1865,8 +1929,8 @@ export class LayerRenderer {
 
                     return pathDenormPoints;
                 })
-                .left(d => d.x)
-                .top(d => d.y)
+                .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+                .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
                 .interpolate('linear')
                 .strokeStyle(color)
                 .lineWidth(isActive ? 2 : 1.5);
@@ -1904,8 +1968,8 @@ export class LayerRenderer {
                         // Use original position
                         return [keyframeData];
                     })
-                    .left(d => d.x)
-                    .top(d => d.y)
+                    .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+                    .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
                 .shape('circle')
                 .radius(4)
                 .strokeStyle(color)
@@ -1930,8 +1994,8 @@ export class LayerRenderer {
                 // Inactive layer: non-interactive
                 panel.add(pv.Dot).events("none")
                     .data([keyframeData])
-                    .left(d => d.x)
-                    .top(d => d.y)
+                    .left(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).x)
+                    .top(d => transformVideoToCanvasSpace(this.splineEditor, d.x, d.y).y)
                     .shape('circle')
                     .radius(3)
                     .strokeStyle(color)

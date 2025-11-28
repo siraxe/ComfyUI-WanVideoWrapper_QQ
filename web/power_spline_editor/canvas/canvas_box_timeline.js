@@ -1,4 +1,6 @@
 import { BOX_TIMELINE_MAX_POINTS } from './canvas_constants.js';
+import { syncVideoToFrame, hasBackgroundVideo } from './canvas_video_background.js';
+import { transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js'; // Added transformVideoToCanvasSpace
 
 export function attachBoxTimelineHelpers(editor) {
   // Helper to get max frames dynamically (can be overridden by editor._maxFrames)
@@ -259,17 +261,38 @@ export function attachBoxTimelineHelpers(editor) {
   editor._handleBoxCanvasShortcut = (widget, coords) => {
     if (!editor._isBoxLayerWidget(widget)) return false;
     try { editor.node.layerManager?.setActiveWidget(widget); } catch {}
+
+    let mediaCoords = null; // Declare mediaCoords here
     if (coords) {
-      const targetedFrame = editor._pickBoxKeyAtPosition(widget, coords, 14);
+      // Convert coords (canvas space) to video space for comparison with media space points
+      mediaCoords = transformMouseToVideoSpace(editor, coords.x, coords.y);
+      const targetedFrame = editor._pickBoxKeyAtPosition(widget, mediaCoords, 14);
       if (targetedFrame) {
         editor.deleteBoxLayerKey(widget, targetedFrame);
         return true;
       }
     }
+    // Use original canvas coords for pickBoxPointFromCoords since it expects canvas space coordinates
     const insideBox = coords ? editor.pickBoxPointFromCoords(coords) : null;
-    if (!insideBox) return false;
+    if (!insideBox) return false; // This path means we clicked inside an existing box.
     const frame = widget.value.box_timeline_point || 1;
-    editor.addBoxLayerKey(widget, frame);
+    editor.addBoxLayerKey(widget, frame); // Do NOT pass mediaCoords, new key will be at box's current location
+
+    // Debug print
+    if (mediaCoords) {
+      const clickCanvasCoords = transformVideoToCanvasSpace(editor, mediaCoords.x, mediaCoords.y);
+      // We need the box center *after* it's been updated.
+      // Use _computeBoxLayerPosition to get the current box's active position.
+      const activeWidget = editor.getActiveWidget();
+      const currentBoxPositionNormalized = editor._computeBoxLayerPosition(activeWidget, frame); // This is the 0-1 normalized position
+      const currentBoxPositionDenorm = editor.denormalizePoints([{ x: currentBoxPositionNormalized.x, y: currentBoxPositionNormalized.y }])[0];
+      const currentBoxPositionCanvas = transformVideoToCanvasSpace(editor, currentBoxPositionDenorm.x, currentBoxPositionDenorm.y);
+
+      console.log(`[DEBUG] New Key Point Creation (S+Click):`);
+      console.log(`  Clicked Canvas Location: x=${clickCanvasCoords.x.toFixed(2)}, y=${clickCanvasCoords.y.toFixed(2)}`);
+      console.log(`  Created Box Center (Canvas): x=${currentBoxPositionCanvas.x.toFixed(2)}, y=${currentBoxPositionCanvas.y.toFixed(2)}`);
+    }
+
     return true;
   };
 
@@ -282,22 +305,25 @@ export function attachBoxTimelineHelpers(editor) {
     }
     const targetPoint = editor._computeBoxLayerPosition(widget, clampedFrame);
     editor._applyBoxLayerPoint(widget, targetPoint);
+
+    // Sync video to frame
+    if (hasBackgroundVideo(editor)) {
+      syncVideoToFrame(editor, clampedFrame);
+    }
   };
 
-  editor.addBoxLayerKey = (widget, frame) => {
+  editor.addBoxLayerKey = (widget, frame) => { // Removed newPointMediaCoords parameter
     if (!editor._isBoxLayerWidget(widget)) return false;
     const keys = editor._ensureBoxLayerData(widget) || [];
     const stored = editor._getBoxLayerStoredPoint(widget);
     const normalized = (() => {
-      const width = Math.max(1, Number(editor.width) || 1);
-      const height = Math.max(1, Number(editor.height) || 1);
+      // Stored point (from _getBoxLayerStoredPoint) is already normalized (0-1 range).
+      // Always use this. No re-normalization needed here.
       const rawX = (typeof stored?.x === 'number' && !Number.isNaN(stored.x)) ? stored.x : 0.5;
       const rawY = (typeof stored?.y === 'number' && !Number.isNaN(stored.y)) ? stored.y : 0.5;
-      const normX = Math.abs(rawX) >= 10 ? rawX / width : rawX;
-      const normY = Math.abs(rawY) >= 10 ? rawY / height : rawY;
       return {
-        x: normX,
-        y: normY,
+        x: rawX, // Use rawX directly, as it's already normalized
+        y: rawY, // Use rawY directly, as it's already normalized
         scale: editor.clampScaleValue(stored?.scale ?? 1),
         rotation: (typeof stored?.rotation === 'number' && !Number.isNaN(stored.rotation)) ? stored.rotation : 0,
       };
@@ -322,6 +348,7 @@ export function attachBoxTimelineHelpers(editor) {
     editor._forceRebuildNextRender = true;
     try { editor.layerRenderer?.render(); } catch {}
     try { editor.node?.setDirtyCanvas?.(true, true); } catch {}
+
     return true;
   };
 
@@ -358,6 +385,12 @@ export function attachBoxTimelineHelpers(editor) {
       y: actualPoint.y,
       rotation: (typeof normalizedPoint.rotation === 'number' && !Number.isNaN(normalizedPoint.rotation)) ? normalizedPoint.rotation : 0,
     };
+
+    // Sync video to preview frame
+    if (hasBackgroundVideo(editor)) {
+      syncVideoToFrame(editor, clampedFrame);
+    }
+
     try { editor.layerRenderer?.render(); } catch {}
   };
 

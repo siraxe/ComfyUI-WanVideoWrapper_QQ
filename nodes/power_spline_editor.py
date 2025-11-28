@@ -3,9 +3,11 @@ import json
 import torch
 import math
 
+from pathlib import Path
 from torchvision import transforms
 from ..utility.driver_utils import apply_driver_offset
 from ..config.constants import BOX_BASE_RADIUS, BOX_TIMELINE_MAX_POINTS
+from .video_background_handler import save_frames_as_video, should_create_video
 
 class PowerSplineEditor:
     @classmethod
@@ -964,35 +966,67 @@ class PowerSplineEditor:
             if ref_paths:
                 ui_out["ref_images_paths"] = ref_paths
 
+        # Handle background image/video
+        video_metadata = None
+
         if bg_image is not None:
-            # Ensure bg_image is on CPU before converting
+            # Ensure bg_image is on CPU
             if bg_image.device != torch.device('cpu'):
                 bg_image = bg_image.cpu()
 
-            transform = transforms.ToPILImage()
-            # Use the first image in the batch for the preview
-            # Ensure tensor is in CHW format (channels, height, width)
-            img_tensor = bg_image[0]
-            if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
-                 img_tensor = img_tensor.permute(2, 0, 1) # HWC to CHW if needed
-            elif img_tensor.dim() == 2: # Grayscale HW -> 1HW -> CHW (repeat channel)
-                 img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
+            # Check if we have multiple frames (video)
+            if should_create_video(bg_image):
+                # Multiple frames - create video
+                bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
+                bg_folder.mkdir(parents=True, exist_ok=True)
+                video_path = bg_folder / "bg_video.mp4"
 
-            # Clamp tensor values to [0, 1] if they are floats
-            if torch.is_floating_point(img_tensor):
-                img_tensor = torch.clamp(img_tensor, 0, 1)
+                # Calculate appropriate FPS based on frames input
+                # Use frames parameter if available, default to 24 fps
+                video_fps = 24.0
+                if frames is not None and frames > 1:
+                    # Map timeline frames to video fps
+                    video_fps = min(30.0, max(12.0, float(frames) / 2.0))  # Clamp to reasonable range
 
-            try:
-                image = transform(img_tensor)
-                
-                # Save the image directly to the bg folder as bg_image.png
-                self._save_bg_image_to_bg_folder(image)
-                
-                # Send file path instead of base64 to avoid bloating workflow
-                # The UI can load the image from the saved path
-                ui_out["bg_image_path"] = ["bg/bg_image.png"]
-            except Exception as e:
-                print(f"Error processing background image for UI preview: {e}")
+                try:
+                    video_metadata = save_frames_as_video(
+                        images=bg_image,
+                        output_path=str(video_path),
+                        fps=video_fps,
+                        codec="libx264",
+                        quality=23
+                    )
+                    print(f"Background video saved: {video_metadata}")
+                except Exception as e:
+                    print(f"Error creating background video: {e}")
+                    video_metadata = None
+
+            else:
+                # Single frame - save as image (existing logic)
+                transform = transforms.ToPILImage()
+                # Use the first image in the batch for the preview
+                # Ensure tensor is in CHW format (channels, height, width)
+                img_tensor = bg_image[0]
+                if img_tensor.dim() == 3 and img_tensor.shape[0] != 3 and img_tensor.shape[2] == 3:
+                     img_tensor = img_tensor.permute(2, 0, 1) # HWC to CHW if needed
+                elif img_tensor.dim() == 2: # Grayscale HW -> 1HW -> CHW (repeat channel)
+                     img_tensor = img_tensor.unsqueeze(0).repeat(3, 1, 1)
+
+                # Clamp tensor values to [0, 1] if they are floats
+                if torch.is_floating_point(img_tensor):
+                    img_tensor = torch.clamp(img_tensor, 0, 1)
+
+                try:
+                    image = transform(img_tensor)
+
+                    # Save the image directly to the bg folder as bg_image.png
+                    self._save_bg_image_to_bg_folder(image)
+
+                    # Send file path instead of base64 to avoid bloating workflow
+                    # The UI can load the image from the saved path
+                    ui_out["bg_image_path"] = ["bg/bg_image.png"]
+                except Exception as e:
+                    print(f"Error processing background image for UI preview: {e}")
 
         # Return results
         # Create proper blank tensor if no bg_image provided (ComfyUI expects BHWC format)
@@ -1006,9 +1040,20 @@ class PowerSplineEditor:
 
         result = (result_image, coord_out, frames)
 
+        # Add video metadata to ui_out if video was created
+        if video_metadata:
+            ui_out["bg_video"] = [{
+                "path": "bg/bg_video.mp4",
+                "num_frames": video_metadata["num_frames"],
+                "fps": video_metadata["fps"],
+                "width": video_metadata["width"],
+                "height": video_metadata["height"],
+                "duration": video_metadata["duration"]
+            }]
+
         # Include bg_img selection in UI output so frontend can use it
         ui_out["bg_img"] = [bg_img]
-        
+
         # Always return UI data with at least dimensions for proper canvas initialization
         return {"ui": ui_out, "result": result}
 
@@ -1018,7 +1063,7 @@ class PowerSplineEditor:
         from pathlib import Path
 
         # Get the bg folder path (relative to this file)
-        bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
+        bg_folder = Path(__file__).parent.parent / "web" / "bg"
         bg_folder.mkdir(parents=True, exist_ok=True)
         bg_image_path = bg_folder / "bg_image.png"
 
@@ -1037,7 +1082,7 @@ class PowerSplineEditor:
         from pathlib import Path
 
         # Get the bg folder path (relative to this file)
-        bg_folder = Path(__file__).parent.parent / "web" / "power_spline_editor" / "bg"
+        bg_folder = Path(__file__).parent.parent / "web" / "bg"
         bg_folder.mkdir(parents=True, exist_ok=True)
 
         # Create unique filename for each ref image

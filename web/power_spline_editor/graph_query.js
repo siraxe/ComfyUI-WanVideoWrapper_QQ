@@ -3,7 +3,7 @@
  * Allows querying node connections and extracting image data from connected nodes
  */
 
-import { app } from '../../../scripts/app.js';
+import { app } from '../../../../scripts/app.js';
 import { applyResizeParams } from './image_resize.js';
 
 /**
@@ -279,6 +279,21 @@ async function extractImagesFromSourceNode(sourceNodeObj, includeDomFallback = f
                         if (data) collected.push(data);
                     }
                 }
+                break;
+            }
+
+            case 'LoadVideo': {
+                console.log('[graph_query DEBUG] Processing LoadVideo node');
+                console.log('[graph_query DEBUG] LoadVideo widgets:', sourceNode.widgets?.map(w => ({ name: w.name, value: w.value, type: w.type })));
+                
+                // LoadVideo nodes store frames in widgets
+                await collectFromWidgets(sourceNode.widgets, 'input');
+                console.log('[graph_query DEBUG] Collected images from widgets:', collected.length);
+                if (collected.length) break;
+                // Also try upstream connections
+                console.log('[graph_query DEBUG] Trying upstream connections');
+                await collectFromUpstream(sourceNode);
+                console.log('[graph_query DEBUG] Total collected after upstream:', collected.length);
                 break;
             }
 

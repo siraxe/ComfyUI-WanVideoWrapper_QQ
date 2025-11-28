@@ -1,2204 +1,1010 @@
+/**
+ * PowerSplineEditor Main Extension
+ * Integrates all modular managers for spline editing functionality
+ */
+
 import { app } from '../../../scripts/app.js';
-import { makeUUID, loadScript, create_documentation_stylesheet, RgthreeBaseWidget, DimensionsWidget, TopRowWidget, PowerSplineWidget, PowerSplineHeaderWidget, NodeSizeManager, drawWidgetButton } from './spline_utils.js';
-import { HandDrawLayerWidget, commitHanddrawPath } from './layer_type_draw.js';
+import {
+  makeUUID,
+  loadScript,
+  create_documentation_stylesheet,
+  RgthreeBaseWidget,
+  DimensionsWidget,
+  PowerSplineWidget,
+  PowerSplineHeaderWidget,
+  NodeSizeManager,
+  drawWidgetButton,
+  transformMouseToVideoSpace,
+  transformVideoToCanvasSpace
+} from './spline_utils.js';
+import { TopRowWidget, handleCanvasRefresh, handleFramesRefresh } from './canvas_top_row.js';
+import {
+  HandDrawLayerWidget,
+  commitHanddrawPath
+} from './layer_type_draw.js';
 import { BoxLayerWidget } from './layer_type_box.js';
 import { chainCallback, hideWidgetForGood } from './general_utils.js';
 import { initializeLayerUI, SplineLayerManager } from './layer_ui_main_widget.js';
 import SplineEditor2 from './canvas/canvas_main.js';
-import { getSlotInPosition, getSlotMenuOptions, showCustomDrivenToggleMenu } from './context_menu.js';
+import {
+  getSlotInPosition,
+  getSlotMenuOptions,
+  showCustomDrivenToggleMenu
+} from './context_menu.js';
 import { drawDriverLines } from './driver_line_renderer.js';
-import { darkenImage, scaleImageToRefDimensions, processBgImage, createImageOverlayForConfigure } from './image_overlay.js';
-import { getReferenceImageFromConnectedNode, getReferenceImagesFromConnectedNode } from './graph_query.js';
+import { processBgImage } from './image_overlay.js';
 
-loadScript('/kjweb_async/svg-path-properties.min.js').catch((e) => {
-    console.log(e)
-})
-loadScript('/kjweb_async/protovis.min.js').catch((e) => {
+import { createBackgroundImageManager } from './modules/background-image-manager.js';
+import { createRefImageManager } from './modules/ref-image-manager.js';
+import { createVideoBackgroundManager } from './modules/video-background-manager.js';
+import { createDimensionManager } from './modules/dimension-manager.js';
+import { saveRefImageToCache, safeSetSessionItem } from './modules/image-cache.js';
+
+// Load external scripts
+loadScript('/kjweb_async/svg-path-properties.min.js').catch(e =>
   console.log(e)
-})
-create_documentation_stylesheet()
-
-async function loadImageAsBase64(url) {
-    try {
-        // Check if it's a data URL (starts with 'data:')
-        if (url.startsWith('data:')) {
-            // For data URLs, no cache-busting is needed, just process directly
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            // Ensure initial overlay selection is applied on page load (handles None/A/B/C)
-            try {
-                const initBgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
-                const initBg = initBgWidget ? initBgWidget.value : "None";
-                // Defer slightly to allow editor and size to settle
-                setTimeout(() => this.updateBackgroundImage(initBg), 50);
-            } catch {}
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        } else {
-            // For regular URLs, add cache-busting parameter
-            const urlObj = new URL(url, window.location.href);
-            urlObj.searchParams.set('t', Date.now());
-            const cacheBustedUrl = urlObj.toString();
-            
-            const response = await fetch(cacheBustedUrl);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-    } catch (e) {
-        console.error(`Failed to load image from ${url}:`, e);
-        return null;
-    }
-}
-
-// Function to save ref_image to cache; default name is ref_image.png (background saves pass an explicit name)
-// options.skipSessionCache avoids writing to the shared session key used for bg overlays
-async function saveRefImageToCache(base64Data, name = 'ref_image.png', options = {}) {
-    try {
-        // Create a cache key to track the current ref_image
-        const currentHash = await simpleHash(base64Data);
-        if (!options.skipSessionCache) {
-            safeSetSessionItem('spline-editor-ref-image-hash', currentHash);
-        }
-        
-        // Try to save the file to the bg folder via the backend API
-        try {
-            const formData = new FormData();
-            formData.append('image', `data:image/png;base64,${base64Data}`);
-            formData.append('name', name);
-            
-            const response = await fetch('/wanvideowrapper_qq/save_ref_image', {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                if (result.success) {
-                 
-                    // Save to sessionStorage as backup (unless skipped)
-                    if (!options.skipSessionCache) {
-                        safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                            base64: base64Data,
-                            type: 'image/png',
-                            name,
-                            hash: currentHash,
-                            timestamp: Date.now()
-                        }));
-                    }
-                    
-                    return true;
-                } else {
-                    console.error('Backend error saving ref image:', result.error);
-                    // Fallback to sessionStorage only
-                    if (!options.skipSessionCache) {
-                        safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                            base64: base64Data,
-                            type: 'image/png',
-                            name,
-                            hash: currentHash,
-                            timestamp: Date.now()
-                        }));
-                    }
-                    return false;
-                }
-            } else {
-                console.error('Failed to save ref image via API:', response.status);
-                // Fallback to sessionStorage only
-                if (!options.skipSessionCache) {
-                    safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                        base64: base64Data,
-                        type: 'image/png',
-                        name,
-                        hash: currentHash,
-                        timestamp: Date.now()
-                    }));
-                }
-                return false;
-            }
-        } catch (error) {
-            console.warn('API save failed, using sessionStorage fallback:', error);
-            
-            // Fallback to sessionStorage if API fails
-            if (!options.skipSessionCache) {
-                safeSetSessionItem('spline-editor-cached-ref-image', JSON.stringify({
-                    base64: base64Data,
-                    type: 'image/png',
-                    name,
-                    hash: currentHash,
-                    timestamp: Date.now()
-                }));
-            }
-            
-            return true;
-        }
-    } catch (e) {
-        console.error('Failed to cache ref image:', e);
-        return false;
-    }
-}
-
-// Simple hash function to compare images
-async function simpleHash(str) {
-    // Convert input to string if it's not already
-    if (typeof str !== 'string') {
-        str = String(str);
-    }
-    
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32bit integer
-    }
-    return hash.toString();
-}
-
-// Function to check if cached ref_image exists and is different from current
-async function getCachedRefImage(currentBase64 = null) {
-    try {
-        const cachedData = sessionStorage.getItem('spline-editor-cached-ref-image');
-        if (!cachedData) {
-            return null;
-        }
-        
-        const parsed = JSON.parse(cachedData);
-        // Guard: only honor caches explicitly saved for bg image overlays
-        if (parsed?.name && parsed.name !== 'bg_image.png') {
-            return null;
-        }
-        
-        // If current base64 is provided, check if it's different from cached
-        if (currentBase64) {
-            const currentHash = await simpleHash(currentBase64);
-            if (currentHash === parsed.hash) {
-                // Same image, no need to update
-                return parsed;
-            } else {
-                // Different image, update cache
-                await saveRefImageToCache(currentBase64, 'bg_image.png');
-                return JSON.parse(sessionStorage.getItem('spline-editor-cached-ref-image'));
-            }
-        }
-        
-        return parsed;
-    } catch (e) {
-        console.error('Failed to get cached ref image:', e);
-        return null;
-    }
-}
-
-// Function to load cached ref_image as base64
-async function loadCachedRefImageAsBase64() {
-    try {
-        // First try to load from actual file in bg folder
-        const timestamp = Date.now();
-        const refImageUrl = new URL(`bg/bg_image.png?t=${timestamp}`, import.meta.url).href;
-        const response = await fetch(refImageUrl);
-        if (response.ok) {
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-        
-        // If file doesn't exist, try to load from sessionStorage cache
-        const cachedData = await getCachedRefImage();
-        if (cachedData) {
-            return `data:${cachedData.type};base64,${cachedData.base64}`;
-        }
-        
-        return null;
-    } catch (e) {
-        console.error('Failed to load cached ref image as base64:', e);
-        // Fallback to sessionStorage cache
-        try {
-            const cachedData = await getCachedRefImage();
-            if (cachedData) {
-                return `data:${cachedData.type};base64,${cachedData.base64}`;
-            }
-        } catch (fallbackError) {
-            console.error('Fallback cache also failed:', fallbackError);
-        }
-        return null;
-    }
-}
-
-
-
-// == SPLINE LAYER MANAGER
-
-// Safe sessionStorage setter to avoid quota errors
-function safeSetSessionItem(key, value) {
-    try { sessionStorage.setItem(key, value); } catch (e) { /* ignore quota/unsupported */ }
-}
+);
+loadScript('/kjweb_async/protovis.min.js').catch(e => console.log(e));
+create_documentation_stylesheet();
 
 app.registerExtension({
-    name: 'WanVideoWrapper_QQ.PowerSplineEditor',
-
-    async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData?.name === 'PowerSplineEditor') {
-          chainCallback(nodeType.prototype, "onNodeCreated", function () {
-            this.serialize_widgets = true; // Enable widget serialization for persistence
-            this.resizable = false;
-
-            this.sizeManager = new NodeSizeManager(this);
-            this.layerManager = new SplineLayerManager(this);
-
-            // Set up onResize to use size manager
-            this.onResize = function(size) {
-              const constrainedSize = this.sizeManager.onNodeResized(size);
-              size[0] = constrainedSize[0];
-              size[1] = constrainedSize[1];
-            };
-
-            const coordinatesWidget = this.widgets.find(w => w.name === "coordinates");
-            hideWidgetForGood(this, coordinatesWidget); // Hide first
-            coordinatesWidget.value = "[]"; // Set default value *after* finding it
-
-            var element = document.createElement("div");
-            this.uuid = makeUUID()
-            element.id = `spline-editor-${this.uuid}`
-            element.style.margin = "0";
-            element.style.padding = "0";
-            element.style.display = "block";
-
-            
-            // fake image widget to allow copy/paste (set value to null and override draw to prevent "image null" text)
-            const fakeimagewidget = this.addWidget("COMBO", "image", null, () => { }, { values: [] });
-            hideWidgetForGood(this, fakeimagewidget)
-            fakeimagewidget.draw = () => {}
-
-            // Hide internal widgets that don't need visual display
-            const pointsStoreWidget = this.widgets.find(w => w.name === "points_store");
-
-            if (pointsStoreWidget) {
-              hideWidgetForGood(this, pointsStoreWidget);
-            }
-
-            // Hide original width/height widgets and add custom dimensions widget BEFORE the canvas
-            const widthWidget = this.widgets.find(w => w.name === "mask_width");
-            const heightWidget = this.widgets.find(w => w.name === "mask_height");
-
-            if (widthWidget) {
-              // Add callback to track user adjustments
-              const originalWidthCallback = widthWidget.callback;
-              widthWidget.callback = (value) => {
-                if (originalWidthCallback) originalWidthCallback.call(widthWidget, value);
-                // Mark as user-adjusted and store dimensions
-                this.properties = this.properties || {};
-                this.properties.userAdjustedDims = true;
-                this.properties.bgImageDims = this.properties.bgImageDims || {};
-                this.properties.bgImageDims.width = value;
-                try {
-                  const hWidget = this.widgets.find(w => w.name === "mask_height");
-                  const userDims = { width: Number(value), height: Number(hWidget ? hWidget.value : this.properties.bgImageDims.height || 0) };
-                  if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(userDims));
-                } catch {}
-              };
-              hideWidgetForGood(this, widthWidget);
-            }
-            if (heightWidget) {
-              // Add callback to track user adjustments
-              const originalHeightCallback = heightWidget.callback;
-              heightWidget.callback = (value) => {
-                if (originalHeightCallback) originalHeightCallback.call(heightWidget, value);
-                // Mark as user-adjusted and store dimensions
-                this.properties = this.properties || {};
-                this.properties.userAdjustedDims = true;
-                this.properties.bgImageDims = this.properties.bgImageDims || {};
-                this.properties.bgImageDims.height = value;
-                try {
-                  const wWidget = this.widgets.find(w => w.name === "mask_width");
-                  const userDims = { width: Number(wWidget ? wWidget.value : this.properties.bgImageDims.width || 0), height: Number(value) };
-                  if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(userDims));
-                } catch {}
-              };
-              hideWidgetForGood(this, heightWidget);
-            }
-
-            // Hide bg_img widget but add callback to update background image immediately
-            const bgImgWidget = this.widgets.find(w => w.name === "bg_img");
-            if (bgImgWidget) {
-              hideWidgetForGood(this, bgImgWidget);
-              
-              // Add callback to update background image immediately when bg_img value changes
-              const originalCallback = bgImgWidget.callback;
-              bgImgWidget.callback = (value) => {
-                if (originalCallback) {
-                  originalCallback(value);
-                }
-                
-                // Update background image based on the new selection
-                this.updateBackgroundImage(value);
-                
-                return value;
-              };
-            }
-
-            // Hide start_pause, end_pause widgets
-            const startPauseWidget = this.widgets.find(w => w.name === "start_pause");
-            if (startPauseWidget) {
-              hideWidgetForGood(this, startPauseWidget);
-              startPauseWidget.draw = () => {};
-            }
-            const endPauseWidget = this.widgets.find(w => w.name === "end_pause");
-            if (endPauseWidget) {
-              hideWidgetForGood(this, endPauseWidget);
-              endPauseWidget.draw = () => {};
-            }
-
-            // Hide interpolation, offset, repeat, driver_rotation, and driver_d_scale widgets
-            const interpolationWidget = this.widgets.find(w => w.name === "interpolation");
-            if (interpolationWidget) {
-              hideWidgetForGood(this, interpolationWidget);
-              interpolationWidget.draw = () => {};
-            }
-            const offsetWidget = this.widgets.find(w => w.name === "offset");
-            if (offsetWidget) {
-              hideWidgetForGood(this, offsetWidget);
-              offsetWidget.draw = () => {};
-            }
-            const repeatWidget = this.widgets.find(w => w.name === "repeat");
-            if (repeatWidget) {
-              hideWidgetForGood(this, repeatWidget);
-              repeatWidget.draw = () => {};
-            }
-            const driverRotationWidget = this.widgets.find(w => w.name === "driver_rotation");
-            if (driverRotationWidget) {
-              hideWidgetForGood(this, driverRotationWidget);
-              driverRotationWidget.draw = () => {};
-            }
-            const driverDScaleWidget = this.widgets.find(w => w.name === "driver_d_scale");
-            if (driverDScaleWidget) {
-              hideWidgetForGood(this, driverDScaleWidget);
-              driverDScaleWidget.draw = () => {};
-            }
-
-            // Add custom widget method if it doesn't exist
-            if (!this.addCustomWidget) {
-              this.addCustomWidget = function(widget) {
-                widget.parent = this;
-                this.widgets = this.widgets || [];
-                this.widgets.push(widget);
-
-                // Ensure proper ComfyUI integration
-                const originalMouse = widget.mouse;
-                widget.mouse = function(event, pos, node) {
-                  // Convert global pos to local widget pos
-                  const localPos = [pos[0], pos[1] - (widget.last_y || 0)];
-                  return originalMouse?.call(this, event, localPos, node);
-                };
-
-                return widget;
-              };
-            }
-
-            // Add the new combined TopRowWidget that contains refresh button, bg_img dropdown, and width/height controls
-            this.addCustomWidget(new TopRowWidget("top_row_display"));
-
-            this.splineEditor2 = this.addDOMWidget(nodeData.name, "SplineEditor2Widget", element, {
-            serialize: false,
-            hideOnZoom: false,
-            });
-
-            // CRITICAL: DOM widget must report its height to LiteGraph's widget layout system
-            // This ensures the canvas takes up the correct vertical space and other widgets appear below it
-            this.splineEditor2.computeSize = function(width) {
-                // Get current canvas height from widget (or use default)
-                const heightWidget = this.node?.widgets?.find(w => w.name === "mask_height");
-                const canvasHeight = heightWidget ? heightWidget.value : 480;
-                // Include spacingAfterCanvas to ensure proper positioning of subsequent widgets
-                const spacingAfterCanvas = this.node?.sizeManager?.config?.spacingAfterCanvas || 60;
-                // Return canvas height + spacing so LiteGraph positions subsequent widgets correctly
-                return [width, canvasHeight + spacingAfterCanvas];
-            }.bind(this.splineEditor2);
-
-            this.generateUniqueName = function(baseName, existingNames) {
-              if (!existingNames.includes(baseName)) return baseName;
-              const regex = /_(\d+)$/;
-              let nameToCheck = baseName;
-              let counter = 1;
-              const match = baseName.match(regex);
-              if (match) {
-                nameToCheck = baseName.substring(0, match.index);
-                counter = parseInt(match[1], 10) + 1;
-              }
-              let newName = `${nameToCheck}_${counter}`;
-              while (existingNames.includes(newName)) {
-                counter++;
-                newName = `${nameToCheck}_${counter}`;
-              }
-              return newName;
-            }
-
-            this.hasSplineWidgets = function() {
-              return this.widgets && this.widgets.some(w =>
-                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
-            };
-
-            this.allSplinesState = function() {
-              const layerWidgets = this.widgets.filter(w =>
-                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
-              if (!layerWidgets.length) return false;
-              return layerWidgets.every(w => w.value.on);
-            };
-
-            this.toggleAllSplines = function() {
-              const layerWidgets = this.widgets.filter(w =>
-                (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
-              const newState = !this.allSplinesState();
-              layerWidgets.forEach(w => w.value.on = newState);
-              this.setDirtyCanvas(true, true);
-            };
-
-            this.updateNodeHeight = function() {
-              // Size manager now handles all spacing internally - no need to add extra padding
-              this.sizeManager.updateSize(true);
-            };
-
-            // Silent auto-refresh overlay on init (mimics ? Refresh without alerts)
-            this.initOverlayRefresh = async function() {
-                try {
-                    const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
-                    const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-
-                    // Check if connected to PrepareRefs - if so, load bg_image_cl.png from ref folder instead
-                    const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
-
-                    if (isConnectedToPrepareRefs) {
-                        try {
-                            const timestamp = Date.now();
-                            const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
-                            const response = await fetch(refImageUrl);
-                            if (response.ok) {
-                                const blob = await response.blob();
-                                const base64Data = await new Promise((resolve, reject) => {
-                                    const reader = new FileReader();
-                                    reader.onload = () => resolve(reader.result.split(',')[1]);
-                                    reader.onerror = reject;
-                                    reader.readAsDataURL(blob);
-                                });
-
-                                this.originalRefImageData = {
-                                    name: 'bg_image_cl.png',
-                                    base64: base64Data,
-                                    type: 'image/png'
-                                };
-
-                                // Process the image immediately based on bg_img selection
-                                if (bg_img === "None") {
-                                    // Apply darkening for "None" selection
-                                    const img = new Image();
-                                    img.onload = () => {
-                                        const canvas = document.createElement('canvas');
-                                        canvas.width = img.width;
-                                        canvas.height = img.height;
-                                        const ctx = canvas.getContext('2d');
-                                        ctx.drawImage(img, 0, 0);
-                                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-                                        const darkenedDataUrl = canvas.toDataURL('image/png');
-                                        this.imgData = {
-                                            name: 'bg_image_cl.png',
-                                            base64: darkenedDataUrl.split(',')[1],
-                                            type: 'image/png'
-                                        };
-                                        if (this.editor) {
-                                            this.editor.refreshBackgroundImage();
-                                        }
-                                    };
-                                    img.src = `data:image/png;base64,${base64Data}`;
-                                } else {
-                                    // For A/B/C selections, set imgData directly for now
-                                    this.imgData = {
-                                        name: 'bg_image_cl.png',
-                                        base64: base64Data,
-                                        type: 'image/png'
-                                    };
-                                    if (this.editor) {
-                                        this.editor.refreshBackgroundImage();
-                                    }
-                                    // Also trigger updateBackgroundImage for proper overlay handling
-                                    this.updateBackgroundImage(bg_img);
-                                }
-
-                                if (this.uuid) {
-                                    sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
-                                }
-                                return;
-                            }
-                        } catch (e) {
-                            console.error('Failed to load bg_image_cl.png from ref folder:', e);
-                        }
-                    } else {
-                        // Try to pull a fresh ref image from connected node silently
-                        const base64Image = await getReferenceImageFromConnectedNode(this);
-                        if (base64Image) {
-                            this.originalRefImageData = {
-                                name: 'ref_image_from_connection.jpg',
-                                base64: base64Image.split(',')[1],
-                                type: 'image/jpeg'
-                            };
-                            try { await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png'); } catch {}
-                            if (this.uuid) {
-                                sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
-                            }
-                            this.updateBackgroundImage(bg_img);
-                            this.editor?.refreshBackgroundImage?.();
-                            return;
-                        }
-                    }
-                } catch {}
-                // Fallback: just apply current selection to force overlay/cached handling
-                try {
-                    const bgImgWidget = this.widgets && this.widgets.find(w => w.name === "bg_img");
-                    const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-                    this.updateBackgroundImage(bg_img);
-                    this.editor?.refreshBackgroundImage?.();
-                } catch {}
-            }.bind(this);
-
-            // Trigger the auto-refresh a couple of times during init to catch late readiness
-            setTimeout(() => { this.initOverlayRefresh(); }, 150);
-            setTimeout(() => { this.initOverlayRefresh(); }, 700);
-
-            // Helper method to load background image from URL with optional scaling
-            this.loadBackgroundImageFromUrl = function(imageUrl, imageName, targetWidth, targetHeight) {
-                loadImageAsBase64(imageUrl).then(dataUrl => {
-                    if (dataUrl) {
-                        // If we have target dimensions, load and scale the image
-                        if (targetWidth && targetHeight) {
-                            // First, create an image to get the original dimensions
-                            const img = new Image();
-                            img.onload = () => {
-                                // Scale the image to match the target dimensions
-                                const canvas = document.createElement('canvas');
-                                canvas.width = targetWidth;
-                                canvas.height = targetHeight;
-                                const ctx = canvas.getContext('2d');
-                                
-                                // Draw the original image scaled to the target dimensions
-                                ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-                                
-                                // Convert back to base64
-                                const scaledDataUrl = canvas.toDataURL('image/jpeg');
-                                this.imgData = {
-                                    name: imageName,
-                                    base64: scaledDataUrl.split(',')[1],
-                                    type: 'image/jpeg'
-                                };
-                                this.editor.refreshBackgroundImage();
-                                
-                                // Update the widget values to match the new dimensions unless user has their own dims
-                                const widthWidget = this.widgets.find(w => w.name === "mask_width");
-                                const heightWidget = this.widgets.find(w => w.name === "mask_height");
-                                const userDimsJson = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
-                                const hasUserDims = this.properties.userAdjustedDims || !!userDimsJson;
-                                if (!hasUserDims) {
-                                    if (widthWidget) widthWidget.value = targetWidth;
-                                    if (heightWidget) heightWidget.value = targetHeight;
-                                }
-
-                                // Update editor dimensions (respect user dims if set)
-                                if (this.editor) {
-                                    const newW = hasUserDims && widthWidget ? Number(widthWidget.value) : targetWidth;
-                                    const newH = hasUserDims && heightWidget ? Number(heightWidget.value) : targetHeight;
-                                    this.editor.width = newW;
-                                    this.editor.height = newH;
-                                    if (this.editor.vis) {
-                                        this.editor.vis.width(newW);
-                                        this.editor.vis.height(newH);
-                                        this.editor.vis.render();
-                                    }
-                                    
-                                    // Normalize the spline points to the new dimensions if there are any splines
-                                    const splineWidgets = this.widgets.filter(w =>
-                                        (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
-                                    splineWidgets.forEach(widget => {
-                                        if (widget.value.points_store) {
-                                            try {
-                                                let points = JSON.parse(widget.value.points_store);
-                                                // If points are in normalized coordinates (0-1 range), they don't need re-normalization
-                                                // But if the canvas size changed significantly, we may need to update the editor's internal state
-                                                this.editor.width = targetWidth;
-                                                this.editor.height = targetHeight;
-                                                
-                                                // Refresh the active layer to ensure it uses the new dimensions
-                                                if (this.layerManager && this.layerManager.activeWidget) {
-                                                    // Update the editor's points with the new canvas dimensions
-                                                    this.editor.onActiveLayerChanged();
-                                                }
-                                            } catch (e) {
-                                                console.error("Error updating spline points for new dimensions:", e);
-                                            }
-                                        }
-                                    });
-                                    
-                                    // Trigger a full refresh of the editor to apply the new dimensions properly
-                                    if (this.editor.layerRenderer) {
-                                        this.editor.layerRenderer.render();
-                                    }
-                                }
-                            };
-                            img.onerror = () => {
-                                // If scaling fails, just use the original image
-                                this.imgData = {
-                                    name: imageName,
-                                    base64: dataUrl.split(',')[1],
-                                    type: 'image/jpeg'
-                                };
-                                this.editor.refreshBackgroundImage();
-                            };
-                            img.src = dataUrl;
-                        } else {
-                            // No target dimensions, just use the original image
-                            this.imgData = {
-                                name: imageName,
-                                base64: dataUrl.split(',')[1],
-                                type: 'image/jpeg'
-                            };
-                            this.editor.refreshBackgroundImage();
-                        }
-                    }
-                });
-            }.bind(this);
-
-            // Set initial node size
-            this.updateNodeHeight();
-
-            // Helper method to load the correct cached ref image based on PrepareRefs connection
-            this.loadCorrectCachedRefImage = async function() {
-                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
-
-                if (isConnectedToPrepareRefs) {
-                    // Load bg_image_cl.png from ref folder
-                    try {
-                        const timestamp = Date.now();
-                        const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
-                        const response = await fetch(refImageUrl);
-                        if (response.ok) {
-                            const blob = await response.blob();
-                            return new Promise((resolve, reject) => {
-                                const reader = new FileReader();
-                                reader.onloadend = () => resolve(reader.result);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-                        }
-                    } catch (e) {
-                        console.error('Failed to load bg_image_cl.png from ref folder:', e);
-                    }
-                    return null;
-                } else {
-                    // Load bg_image.png from bg folder (standard behavior)
-                    return await loadCachedRefImageAsBase64();
-                }
-            }.bind(this);
-
-            // Add method to update background image immediately based on bg_img selection
-            this.updateBackgroundImage = async function(bg_img) {
-                // First check if we have saved dimensions to maintain proportions
-                let targetWidth, targetHeight;
-                const savedDims = sessionStorage.getItem(`spline-editor-dims-${this.uuid}`);
-                if (savedDims) {
-                    const dims = JSON.parse(savedDims);
-                    targetWidth = dims.width;
-                    targetHeight = dims.height;
-                } else if (this.properties.bgImageDims) {
-                    // Fallback to dimensions stored in properties
-                    targetWidth = this.properties.bgImageDims.width;
-                    targetHeight = this.properties.bgImageDims.height;
-                }
-
-                // Determine which image to load based on the bg_img selection
-                if (bg_img === "None") {
-                    // For "None" selection, we want to use the original reference image 
-                    // instead of any previously processed image, so that updates from the refresh button take effect
-                    // and to prevent stacking of darkening effects
-                    if (this.originalRefImageData && this.originalRefImageData.base64) {
-                        // We have original ref image data from the refresh button, apply darkening effect directly
-                        const img = new Image();
-                        img.onload = () => {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = img.width;
-                            canvas.height = img.height;
-                            const ctx = canvas.getContext('2d');
-
-                            ctx.drawImage(img, 0, 0);
-                            ctx.fillStyle = `rgba(0, 0, 0, 0.6)`; // Same opacity as in onExecuted
-                            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                            // Convert the darkened image to data URL
-                            const darkenedDataUrl = canvas.toDataURL('image/jpeg');
-                            this.imgData = {
-                                name: 'bg_image.png',
-                                base64: darkenedDataUrl.split(',')[1],
-                                type: 'image/jpeg'
-                            };
-                            this.editor.refreshBackgroundImage();
-                        };
-                        img.onerror = () => {
-                            // Fallback: try to load cached bg_image first, then default A.jpg
-                            this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                                if (cachedImageUrl) {
-                                    const fallbackImg = new Image();
-                                    fallbackImg.onload = () => {
-                                        const canvas = document.createElement('canvas');
-                                        canvas.width = fallbackImg.width;
-                                        canvas.height = fallbackImg.height;
-                                        const ctx = canvas.getContext('2d');
-
-                                        ctx.drawImage(fallbackImg, 0, 0);
-                                        ctx.fillStyle = `rgba(0, 0, 0, 0.6)`;
-                                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                                        const darkenedDataUrl = canvas.toDataURL('image/jpeg');
-                                        this.imgData = {
-                                            name: 'bg_image.png',
-                                            base64: darkenedDataUrl.split(',')[1],
-                                            type: 'image/jpeg'
-                                        };
-                                        this.editor.refreshBackgroundImage();
-                                    };
-                                    fallbackImg.onerror = () => {
-                                        // Final fallback to A.jpg
-                                        const timestamp = Date.now();
-                                        const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                        this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                                    };
-                                    fallbackImg.src = cachedImageUrl;
-                                } else {
-                                    // Final fallback to A.jpg with dark overlay
-                                    const timestamp = Date.now();
-                                    const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                    const img2 = new Image();
-                                    img2.onload = () => {
-                                        const canvas2 = document.createElement('canvas');
-                                        canvas2.width = img2.width;
-                                        canvas2.height = img2.height;
-                                        const ctx2 = canvas2.getContext('2d');
-                                        ctx2.drawImage(img2, 0, 0);
-                                        ctx2.fillStyle = 'rgba(0,0,0,0.6)';
-                                        ctx2.fillRect(0, 0, canvas2.width, canvas2.height);
-                                        const darkUrl = canvas2.toDataURL('image/jpeg');
-                                        this.imgData = { name: 'A.jpg', base64: darkUrl.split(',')[1], type: 'image/jpeg' };
-                                        this.editor.refreshBackgroundImage();
-                                    };
-                                    img2.onerror = () => {
-                                        this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                                    };
-                                    img2.src = defaultImageUrl;
-                                }
-                            });
-                        };
-                        // Use the original ref image data to create a data URL
-                        img.src = `data:image/jpeg;base64,${this.originalRefImageData.base64}`;
-                    } else {
-                        // If no original ref image data, try to load cached bg_image first, then fallback to default
-                        this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                            if (cachedImageUrl) {
-                                const img = new Image();
-                                img.onload = () => {
-                                    const canvas = document.createElement('canvas');
-                                    canvas.width = img.width;
-                                    canvas.height = img.height;
-                                    const ctx = canvas.getContext('2d');
-
-                                    ctx.drawImage(img, 0, 0);
-                                    ctx.fillStyle = `rgba(0, 0, 0, 0.6)`; // Same opacity as in onExecuted
-                                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                                    // Convert the darkened image to data URL
-                                    const darkenedDataUrl = canvas.toDataURL('image/jpeg');
-                                    this.imgData = {
-                                        name: 'bg_image.png',
-                                        base64: darkenedDataUrl.split(',')[1],
-                                        type: 'image/jpeg'
-                                    };
-                                    this.editor.refreshBackgroundImage();
-                                };
-                                img.onerror = () => {
-                                    // Fallback to loading default A.jpg if ref_image doesn't exist
-                                    const timestamp = Date.now();
-                                    const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                    this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                                };
-                                img.src = cachedImageUrl;
-                            } else {
-                                // Fallback to default A.jpg with dark overlay
-                                const timestamp = Date.now();
-                                const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                const img2 = new Image();
-                                img2.onload = () => {
-                                    const canvas2 = document.createElement('canvas');
-                                    canvas2.width = img2.width;
-                                    canvas2.height = img2.height;
-                                    const ctx2 = canvas2.getContext('2d');
-                                    ctx2.drawImage(img2, 0, 0);
-                                    ctx2.fillStyle = 'rgba(0,0,0,0.6)';
-                                    ctx2.fillRect(0, 0, canvas2.width, canvas2.height);
-                                    const darkUrl = canvas2.toDataURL('image/jpeg');
-                                    this.imgData = { name: 'A.jpg', base64: darkUrl.split(',')[1], type: 'image/jpeg' };
-                                    this.editor.refreshBackgroundImage();
-                                };
-                                img2.onerror = () => {
-                                    this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                                };
-                                img2.src = defaultImageUrl;
-                            }
-                        });
-                    }
-                } else {
-                    // Load the selected background image (A, B, or C) from the bg folder
-                    const timestamp = Date.now();
-                    const imageUrl = new URL(`bg/${bg_img}.jpg?t=${timestamp}`, import.meta.url).href;
-                    
-                    // Use the overlay function from image_overlay.js with proper scaling
-                    // Prioritize original reference image (from refresh) over cached, to prevent stacking
-                    let refImageForOverlay = null;
-                    
-                    if (this.originalRefImageData && this.originalRefImageData.base64) {
-                        // Use original ref image if available (from refresh button)
-                        const imgType = this.originalRefImageData.type || 'image/jpeg';
-                        refImageForOverlay = `data:${imgType};base64,${this.originalRefImageData.base64}`;
-                    } else {
-                        // Otherwise, load from cached
-                        this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                            if (cachedImageUrl) {
-                                // Create a properly scaled overlay using the original cached ref image
-                                this.createScaledImageOverlay(cachedImageUrl, bg_img, imageUrl);
-                            } else {
-                                // Fallback to loading the background image directly if no ref image
-                                this.loadBackgroundImageFromUrl(imageUrl, `${bg_img}.jpg`, targetWidth, targetHeight);
-                            }
-                        }).catch(error => {
-                            console.error(`Error loading ref image for immediate overlay with ${bg_img}.jpg:`, error);
-                            // Fallback to loading the background image directly
-                            this.loadBackgroundImageFromUrl(imageUrl, `${bg_img}.jpg`, targetWidth, targetHeight);
-                        });
-                        return; // Return early to avoid duplicate processing
-                    }
-                    
-                    if (refImageForOverlay) {
-                        // Create a properly scaled overlay with the original ref image
-                        this.createScaledImageOverlay(refImageForOverlay, bg_img, imageUrl);
-                    } else {
-                        // Fallback to loading the background image directly if no ref image
-                        this.loadBackgroundImageFromUrl(imageUrl, `${bg_img}.jpg`, targetWidth, targetHeight);
-                    }
-                }
-            }.bind(this);
-
-            // Add method to update reference image from connected node
-            this.updateReferenceImageFromConnectedNode = async function() {
-                console.log('Attempting to update reference image from connected node...');
-
-                try {
-                    // Check if we're connected to PrepareRefs node
-                    const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
-
-                    if (isConnectedToPrepareRefs) {
-                        try {
-                            const timestamp = Date.now();
-                            const refImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
-                            const response = await fetch(refImageUrl);
-                            if (!response.ok) {
-                                console.error('Failed to load bg_image_cl.png from ref folder');
-                                alert('Could not load bg_image_cl.png from ref folder. Make sure the file exists.');
-                                return;
-                            }
-
-                            const blob = await response.blob();
-                            const base64Data = await new Promise((resolve, reject) => {
-                                const reader = new FileReader();
-                                reader.onload = () => resolve(reader.result.split(',')[1]);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-
-                            this.originalRefImageData = {
-                                name: 'bg_image_cl.png',
-                                base64: base64Data,
-                                type: 'image/png'
-                            };
-
-                            // Clear session storage cache for this node's image to force refresh
-                            if (this.uuid) {
-                                sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
-                            }
-
-                            // Get current bg_img selection to update background accordingly
-                            const bgImgWidget = this.widgets.find(w => w.name === "bg_img");
-                            const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-
-                            // Update background based on current bg_img selection
-                            this.updateBackgroundImage(bg_img);
-
-                            // Wait for the image processing to complete
-                            await new Promise(resolve => setTimeout(resolve, 200));
-
-                            console.log('Successfully loaded bg_image_cl.png from ref folder');
-                        } catch (error) {
-                            console.error('Error loading bg_image_cl.png:', error);
-                            alert('Error loading bg_image_cl.png: ' + error.message);
-                        }
-                        return;
-                    }
-
-                    // Get reference image from connected bg_image input
-                    const base64Image = await getReferenceImageFromConnectedNode(this, 'bg_image');
-                    if (!base64Image) {
-                        console.warn('Could not retrieve reference image from connected node');
-                        // Optionally show a message to the user
-                        alert('Could not retrieve reference image from connected node. Make sure an image node is connected to the bg_image input.');
-                        return;
-                    }
-
-                    // Store the fetched image as-is without resizing
-                    // The canvas system will handle aspect ratio preservation via recenterBackgroundImage()
-                    this.originalRefImageData = {
-                        name: 'ref_image_from_connection.jpg',
-                        base64: base64Image.split(',')[1],
-                        type: 'image/jpeg'
-                    };
-
-                    // Cache the ref image for future use
-                    await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png');
-
-                    // Clear session storage cache for this node's image to force refresh
-                    if (this.uuid) {
-                        sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
-                    }
-
-                    // Get current bg_img selection to update background accordingly
-                    const bgImgWidget = this.widgets.find(w => w.name === "bg_img");
-                    const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-
-                    // Update background based on current bg_img selection
-                    this.updateBackgroundImage(bg_img);
-
-                    // Wait for the image processing to complete
-                    await new Promise(resolve => setTimeout(resolve, 200));
-
-                } catch (error) {
-                    console.error('Error updating reference image from connected node:', error);
-                    alert('Error updating reference image: ' + error.message);
-                }
-            }.bind(this);
-
-            // Attach ref_images input to the active box layer (Ref selection)
-            this.attachRefImageToActiveBoxLayer = async function(desiredSelection = 'ref_1') {
-                const activeWidget = this.layerManager?.getActiveWidget?.();
-                if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
-                    alert('Activate a box layer first to attach a ref image.');
-                    return;
-                }
-
-                // Check if we're connected to PrepareRefs node
-                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
-                
-                if (isConnectedToPrepareRefs) {
-                    // When connected to PrepareRefs, load ref images from ref folder instead
-                    await this.loadRefImagesFromRefFolder(activeWidget, desiredSelection);
-                    return;
-                }
-
-                // Fetch images from ref_images input (first frame used)
-                const images = await getReferenceImagesFromConnectedNode(this);
-                if (!images || images.length === 0) {
-                    alert('No ref_images input found. Connect an IMAGE or IMAGE batch to ref_images.');
-                    return;
-                }
-
-                const attachments = [];
-                const maxRefs = 5;
-                for (let i = 0; i < Math.min(images.length, maxRefs); i++) {
-                    const imgData = images[i];
-                    const base64Data = imgData.startsWith('data:')
-                        ? imgData.split(',')[1]
-                        : imgData;
-                    const dataUrl = imgData.startsWith('data:')
-                        ? imgData
-                        : `data:image/png;base64,${base64Data}`;
-
-                    // Load dimensions to fit the box without stretching
-                    // eslint-disable-next-line no-await-in-loop
-                    const dims = await new Promise((resolve) => {
-                        const img = new Image();
-                        img.onload = () => resolve({ width: img.width, height: img.height });
-                        img.onerror = () => resolve({ width: 1, height: 1 });
-                        img.src = dataUrl;
-                    });
-
-                    // Save image to disk and store path instead of base64
-                    const filename = `ref_image_${i}.png`;
-                    // eslint-disable-next-line no-await-in-loop
-                    await saveRefImageToCache(base64Data, filename);
-
-                    attachments.push({
-                        path: `bg/${filename}`,  // Store file path instead of base64
-                        type: 'image/png',
-                        width: dims.width,
-                        height: dims.height,
-                        name: filename
-                    });
-                }
-
-                activeWidget.value.ref_attachment = { entries: attachments };
-
-                // Clear ref image cache when new attachments are loaded to prevent stale images
-                if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
-                    this.layerRenderer.clearRefImageCache();
-                    // Force render to update displayed reference image with new timestamp
-                    this.layerRenderer.render();
-                }
-
-                const availableOptions = activeWidget._getRefOptions ? activeWidget._getRefOptions() : ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
-                const desiredIdx = desiredSelection && availableOptions.includes(desiredSelection)
-                    ? Math.max(0, (parseInt(desiredSelection.split('_')[1], 10) || 1) - 1)
-                    : 0;
-                if (attachments.length === 0 || desiredIdx >= attachments.length) {
-                    activeWidget.value.ref_selection = 'no_ref';
-                } else {
-                    const clampedIndex = Math.min(attachments.length - 1, desiredIdx);
-                    activeWidget.value.ref_selection = `ref_${clampedIndex + 1}`;
-                }
-
-                // Persist per-layer in sessionStorage for reloads (store attachment + selection)
-                try {
-                    const keyId = this.id ?? this.uuid;
-                    const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
-                    if (key) {
-                        sessionStorage.setItem(key, JSON.stringify({
-                            attachment: activeWidget.value.ref_attachment,
-                            selection: activeWidget.value.ref_selection,
-                        }));
-                    }
-                } catch (e) {
-                    console.warn('Failed to persist box ref attachment to session:', e);
-                }
-
-                // Clear global ref cache so background overlay does not use ref_images batch
-                try { sessionStorage.removeItem('spline-editor-cached-ref-image'); } catch {}
-
-                // Save all frames (first + any extras) to disk as numbered PNGs
-                for (let i = 0; i < images.length; i++) {
-                    const imgData = images[i];
-                    const b64 = imgData.startsWith('data:') ? imgData.split(',')[1] : imgData;
-                    await saveRefImageToCache(b64, `ref_image_${i}.png`, { skipSessionCache: true });
-                }
-
-                // Refresh canvas
-                this.setDirtyCanvas(true, true);
-                this.editor?.refreshBackgroundImage?.();
-            }.bind(this);
-
-            // Clear ref attachment from active box layer
-            this.clearRefImageFromActiveBoxLayer = function() {
-                const activeWidget = this.layerManager?.getActiveWidget?.();
-                if (activeWidget && activeWidget.value?.type === 'box_layer') {
-                    activeWidget.value.ref_attachment = null;
-                    activeWidget.value.ref_selection = 'no_ref';
-                    try {
-                        const keyId = this.id ?? this.uuid;
-                        const key = keyId ? `spline-editor-boxref-${keyId}-${activeWidget.value.name || activeWidget.name || 'box'}` : null;
-                        if (key) sessionStorage.removeItem(key);
-                    } catch {}
-                    this.setDirtyCanvas(true, true);
-                }
-            }.bind(this);
-
-            // Update ref attachments for all box layers from connected ref_images
-            this.updateAllBoxLayerRefs = async function() {
-                const widgets = this.layerManager?.getSplineWidgets?.() || [];
-                const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
-                if (!boxWidgets.length) return;
-
-                // Clear ref image cache to force reload of all images
-                if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
-                    this.layerRenderer.clearRefImageCache();
-                }
-
-                // Check if we're connected to PrepareRefs node
-                const isConnectedToPrepareRefs = this.checkIfConnectedToPrepareRefs();
-                
-                if (isConnectedToPrepareRefs) {
-                    // When connected to PrepareRefs, load ref images from ref folder for all box layers
-                    for (const boxWidget of boxWidgets) {
-                        await this.loadRefImagesFromRefFolder(boxWidget, boxWidget.value.ref_selection || 'ref_1');
-                    }
-                    return;
-                }
-
-                // Fetch images from ref_images input (first frame used)
-                const images = await getReferenceImagesFromConnectedNode(this);
-                if (!images || images.length === 0) {
-                    console.warn('No ref_images input found for updating box layer refs.');
-                    return;
-                }
-
-                const attachments = [];
-                const maxRefs = 5;
-                for (let i = 0; i < Math.min(images.length, maxRefs); i++) {
-                    const imgData = images[i];
-                    const base64Data = imgData.startsWith('data:')
-                        ? imgData.split(',')[1]
-                        : imgData;
-                    const dataUrl = imgData.startsWith('data:')
-                        ? imgData
-                        : `data:image/png;base64,${base64Data}`;
-
-                    // Load dimensions to fit the box without stretching
-                    // eslint-disable-next-line no-await-in-loop
-                    const dims = await new Promise((resolve) => {
-                        const img = new Image();
-                        img.onload = () => resolve({ width: img.width, height: img.height });
-                        img.onerror = () => resolve({ width: 1, height: 1 });
-                        img.src = dataUrl;
-                    });
-
-                    // Save image to disk and store path instead of base64
-                    const filename = `ref_image_${i}.png`;
-                    // eslint-disable-next-line no-await-in-loop
-                    await saveRefImageToCache(base64Data, filename);
-
-                    attachments.push({
-                        path: `bg/${filename}`,
-                        type: 'image/png',
-                        width: dims.width,
-                        height: dims.height,
-                        name: filename
-                    });
-                }
-
-                // Update all box layers with the new attachments
-                boxWidgets.forEach(boxWidget => {
-                    const currentSelection = boxWidget.value.ref_selection || 'no_ref';
-                    boxWidget.value.ref_attachment = { entries: attachments };
-
-                    // Keep current selection if it's still valid, otherwise set to no_ref
-                    if (currentSelection !== 'no_ref') {
-                        const parts = currentSelection.split('_');
-                        const idx = parts.length > 1 ? parseInt(parts[1], 10) : 1;
-                        const arrayIndex = Number.isFinite(idx) ? Math.max(0, idx - 1) : 0;
-                        if (arrayIndex >= attachments.length) {
-                            boxWidget.value.ref_selection = 'no_ref';
-                        }
-                        // Otherwise keep the existing selection
-                    }
-
-                    // Persist to sessionStorage
-                    try {
-                        const keyId = this.id ?? this.uuid;
-                        const key = keyId ? `spline-editor-boxref-${keyId}-${boxWidget.value.name || boxWidget.name || 'box'}` : null;
-                        if (key) {
-                            sessionStorage.setItem(key, JSON.stringify({
-                                attachment: boxWidget.value.ref_attachment,
-                                selection: boxWidget.value.ref_selection,
-                            }));
-                        }
-                    } catch (e) {
-                        console.warn('Failed to persist box ref attachment to session:', e);
-                    }
-                });
-
-                // Clear global ref cache
-                try { sessionStorage.removeItem('spline-editor-cached-ref-image'); } catch {}
-
-                // Save all frames to disk
-                for (let i = 0; i < images.length; i++) {
-                    const imgData = images[i];
-                    const b64 = imgData.startsWith('data:') ? imgData.split(',')[1] : imgData;
-                    await saveRefImageToCache(b64, `ref_image_${i}.png`, { skipSessionCache: true });
-                }
-
-                // Clear ref image cache again after all images saved to force reload with new images
-                this.editor?.layerRenderer?.clearRefImageCache?.();
-
-                // Refresh canvas
-                this.setDirtyCanvas(true, true);
-            }.bind(this);
-
-            // Add method to handle frames input refresh and box layer keyframe scaling
-            this.handleFramesRefresh = function() {
-                try {
-                    // Step 1: Find all box type layers in the layer manager
-                    const boxLayers = [];
-                    if (this.widgets) {
-                        for (const widget of this.widgets) {
-                            if (widget.value && widget.value.type === 'box_layer') {
-                                boxLayers.push(widget);
-                            }
-                        }
-                    }
-
-                    if (boxLayers.length === 0) {
-                        return;
-                    }
-
-                    // Step 2: Check which box layers have keyframes set
-                    const boxLayersWithKeys = boxLayers.filter(layer => {
-                        return layer.value.box_keys && Array.isArray(layer.value.box_keys) && layer.value.box_keys.length > 0;
-                    });
-
-                    // Step 3: Determine target frames (must come from frames input/property)
-                    const framesInputValue = this.getInputOrProperty('frames');
-                    const hasFramesInput = typeof framesInputValue === 'number' && !Number.isNaN(framesInputValue) && framesInputValue > 0;
-                    if (!hasFramesInput) {
-                        return;
-                    }
-                    const targetFrames = Math.max(1, Math.round(framesInputValue));
-
-                    // Step 4: Get current max frames from timeline (import from canvas_constants.js)
-                    // We need to dynamically import or access the constant
-                    import('./canvas/canvas_constants.js').then(module => {
-                        const currentMaxFrames = (this.editor?._getMaxFrames?.()) || module.BOX_TIMELINE_MAX_POINTS || 50;
-
-                        const persistMaxFrames = (frames) => {
-                            if (this.editor) {
-                                this.editor._maxFrames = frames;
-                            }
-                            // Persist in both properties (serialized) and session (fast reload)
-                            this.properties = this.properties || {};
-                            this.properties.box_max_frames = frames;
-                            if (this.uuid) {
-                                safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(frames));
-                            }
-                        };
-
-                        // Determine last keyframe across box layers (if any)
-                        const lastKeyFrame = boxLayersWithKeys.length > 0
-                            ? Math.max(...boxLayersWithKeys.map(layer => Math.max(...layer.value.box_keys.map(k => Math.max(1, Number(k.frame) || 1)))))
-                            : 0;
-
-                        // Step 5: Decide scaling behavior based on target vs current max
-                        if (targetFrames > currentMaxFrames) {
-                            persistMaxFrames(targetFrames);
-                        } else {
-                            if (lastKeyFrame <= targetFrames) {
-                                persistMaxFrames(targetFrames);
-                            } else {
-                                const scaleRatio = targetFrames / currentMaxFrames;
-                                if (boxLayersWithKeys.length > 0) {
-                                    for (const layer of boxLayersWithKeys) {
-                                        const originalKeys = layer.value.box_keys;
-                                        const scaledKeys = originalKeys.map(key => {
-                                            const newFrame = Math.max(1, Math.min(targetFrames, Math.round(key.frame * scaleRatio)));
-                                            return { ...key, frame: newFrame };
-                                        });
-
-                                        // Remove duplicate frames (keep last one for each frame)
-                                        const keysByFrame = new Map();
-                                        for (const key of scaledKeys) {
-                                            keysByFrame.set(key.frame, key);
-                                        }
-                                        layer.value.box_keys = Array.from(keysByFrame.values()).sort((a, b) => a.frame - b.frame);
-                                    }
-                                }
-                                persistMaxFrames(targetFrames);
-                            }
-                        }
-
-                        // Step 8: Force refresh the editor to show the changes
-                        if (this.editor && this.editor.redraw) {
-                            this.editor.redraw();
-                        }
-
-                        this.setDirtyCanvas(true, true);
-                    }).catch(err => {
-                        console.error('Error importing canvas_constants:', err);
-                    });
-
-                } catch (error) {
-                    console.error('Error handling frames refresh:', error);
-                }
-            }.bind(this);
-
-            // Helper method to get input value or property
-            this.getInputOrProperty = function(name) {
-                const coerceNumber = (val) => {
-                    if (val === null || val === undefined) return val;
-                    const num = Number(val);
-                    return Number.isNaN(num) ? val : num;
-                };
-
-                // First try to get from connected input
-                if (this.inputs) {
-                    const inputIndex = this.inputs.findIndex(i => i.name === name);
-                    if (inputIndex >= 0 && this.inputs[inputIndex].link != null) {
-                        // Get the link
-                        const link = app.graph.links.get(this.inputs[inputIndex].link);
-                        // Prefer explicit link data if available
-                        if (link && link.data !== undefined) {
-                            return coerceNumber(link.data);
-                        }
-                        if (link) {
-                            // Get the source node
-                            const sourceNode = app.graph._nodes.find(n => n.id === link.origin_id);
-                            if (sourceNode && sourceNode.outputs && sourceNode.outputs[link.origin_slot]) {
-                                // Try to get the value from the source node's widget
-                                const outputName = sourceNode.outputs[link.origin_slot].name;
-                                const widget = sourceNode.widgets?.find(w => w.name === outputName || w.name === name);
-                                if (widget) {
-                                    return coerceNumber(widget.value);
-                                }
-                                // Fallback to output value on the source node
-                                const outputVal = sourceNode.outputs[link.origin_slot].value;
-                                if (outputVal !== undefined) {
-                                    return coerceNumber(outputVal);
-                                }
-                                // Fallback: first numeric widget on source node
-                                const firstNumericWidget = sourceNode.widgets?.find(w => {
-                                    const num = coerceNumber(w.value);
-                                    return typeof num === 'number' && !Number.isNaN(num);
-                                });
-                                if (firstNumericWidget) {
-                                    return coerceNumber(firstNumericWidget.value);
-                                }
-                                // Fallback: first numeric property on source node
-                                const firstNumericProp = (() => {
-                                    if (!sourceNode.properties) return null;
-                                    for (const val of Object.values(sourceNode.properties)) {
-                                        const num = coerceNumber(val);
-                                        if (typeof num === 'number' && !Number.isNaN(num)) return num;
-                                    }
-                                    return null;
-                                })();
-                                if (firstNumericProp !== null) {
-                                    return firstNumericProp;
-                                }
-                            }
-                        }
-                        // Fallback to direct input value if present
-                        const directInputVal = this.inputs[inputIndex].value;
-                        if (directInputVal !== undefined) {
-                            return coerceNumber(directInputVal);
-                        }
-                    }
-                }
-
-                // Fallback to property
-                if (this.properties && this.properties[name] !== undefined) {
-                    return coerceNumber(this.properties[name]);
-                }
-
-                // Fallback to widget
-                const widget = this.widgets?.find(w => w.name === name);
-                if (widget) {
-                    return coerceNumber(widget.value);
-                }
-
-                return null;
-            }.bind(this);
-
-            // Add method to create scaled overlay for immediate background updates
-            this.createScaledImageOverlay = async function(refImageUrl, bg_img, bgImageUrl) {
-                try {
-                    // Load both images
-                    const [refResponse, bgResponse] = await Promise.all([
-                        fetch(refImageUrl),
-                        fetch(bgImageUrl)
-                    ]);
-                    
-                    if (!refResponse.ok || !bgResponse.ok) {
-                        throw new Error(`Failed to load images: ref=${refResponse.status}, bg=${bgResponse.status}`);
-                    }
-                    
-                    const [refBlob, bgBlob] = await Promise.all([
-                        refResponse.blob(),
-                        bgResponse.blob()
-                    ]);
-                    
-                    // Convert to base64
-                    const [refBase64, bgBase64] = await Promise.all([
-                        new Promise(resolve => {
-                            const reader = new FileReader();
-                            reader.onload = () => resolve(reader.result.split(',')[1]);
-                            reader.readAsDataURL(refBlob);
-                        }),
-                        new Promise(resolve => {
-                            const reader = new FileReader();
-                            reader.onload = () => resolve(reader.result.split(',')[1]);
-                            reader.readAsDataURL(bgBlob);
-                        })
-                    ]);
-
-                    // Scale the bg image to match the ref image dimensions
-                    const scaledBgImageData = await scaleImageToRefDimensions(
-                        bgBase64,
-                        'image/jpeg', // Assuming JPEG for background images
-                        refBase64
-                    );
-                    
-                    // Create the overlay with the scaled image
-                    const refImg = new Image();
-                    const scaledBgImg = new Image();
-                    
-                    let refImageLoaded = false;
-                    let scaledBgImageLoaded = false;
-                    
-                    // Function to create overlay when both images are loaded
-                    const createOverlayWhenBothLoaded = () => {
-                        if (refImageLoaded && scaledBgImageLoaded) {
-                            const canvas = document.createElement('canvas');
-                            canvas.width = refImg.width;
-                            canvas.height = refImg.height;
-                            const ctx = canvas.getContext('2d');
-                            
-                            // Draw the original ref_image first
-                            ctx.drawImage(refImg, 0, 0);
-                            
-                            // Then draw the scaled background image as an overlay with 40% opacity
-                            ctx.globalAlpha = 0.4;
-                            ctx.drawImage(scaledBgImg, 0, 0);
-                            ctx.globalAlpha = 1.0; // Reset to default
-                            
-                            // Convert the combined image to data URL
-                            const combinedDataUrl = canvas.toDataURL('image/jpeg');
-                            
-                            const overlayImgData = {
-                                name: `${bg_img}.jpg`,
-                                base64: combinedDataUrl.split(',')[1],
-                                type: 'image/jpeg'
-                            };
-                            
-                            // Update the imgData property with the overlay data
-                            this.imgData = overlayImgData;
-                            
-                            // Refresh the background image
-                            this.editor.refreshBackgroundImage();
-                        }
-                    };
-                    
-                    refImg.onload = () => {
-                        refImageLoaded = true;
-                        createOverlayWhenBothLoaded();
-                    };
-                    scaledBgImg.onload = () => {
-                        scaledBgImageLoaded = true;
-                        createOverlayWhenBothLoaded();
-                    };
-                    
-                    refImg.onerror = () => {
-                        console.error(`Failed to load ref_image for scaled overlay with ${bg_img}.jpg`);
-                        // Fallback: load the background image directly without overlay
-                        this.loadBackgroundImageFromUrl(bgImageUrl, `${bg_img}.jpg`, null, null);
-                    };
-                    scaledBgImg.onerror = () => {
-                        console.error(`Failed to load scaled background image for overlay with ${bg_img}.jpg`);
-                        // Fallback: load the background image directly without overlay
-                        this.loadBackgroundImageFromUrl(bgImageUrl, `${bg_img}.jpg`, null, null);
-                    };
-                    
-                    // Load images
-                    refImg.src = refImageUrl;
-                    scaledBgImg.src = `data:image/jpeg;base64,${scaledBgImageData.base64}`;
-                    
-                } catch (error) {
-                    console.error(`Error creating scaled image overlay for ${bg_img}.jpg:`, error);
-                    // Fallback to loading the background image directly
-                    this.loadBackgroundImageFromUrl(bgImageUrl, `${bg_img}.jpg`, null, null);
-                }
-            }.bind(this);
-
-            // Helper method to check if connected to PrepareRefs node
-            this.checkIfConnectedToPrepareRefs = function() {
-                // Check if any of our inputs is connected to a PrepareRefs node
-                const graph = app.graph;
-                if (!graph || !graph.links || !this.inputs) {
-                    return false;
-                }
-                
-                for (let i = 0; i < this.inputs.length; i++) {
-                    const input = this.inputs[i];
-                    if (!input || !input.name) continue;
-                    
-                    // Look for connections to this input
-                    let link = null;
-                    if (graph.links instanceof Map) {
-                        for (const [linkId, linkObj] of graph.links) {
-                            if (linkObj && linkObj.target_id === this.id && linkObj.target_slot === i) {
-                                link = linkObj;
-                                break;
-                            }
-                        }
-                    } else if (Array.isArray(graph.links)) {
-                        link = graph.links.find(linkObj =>
-                            linkObj && linkObj.target_id === this.id && linkObj.target_slot === i
-                        );
-                    }
-                    
-                    if (link) {
-                        const sourceNode = graph._nodes?.find(n => n.id === link.origin_id);
-                        if (sourceNode && sourceNode.type === 'PrepareRefs') {
-                            return true;
-                        }
-                    }
-                }
-                return false;
-            }.bind(this);
-
-            // Helper method to load ref images from ref folder
-            this.loadRefImagesFromRefFolder = async function(boxWidget, desiredSelection = 'ref_1') {
-                try {
-                    // Load ALL available ref images (ref_1.png through ref_5.png) from ref folder
-                    const attachments = [];
-                    const maxRefs = 5;
-                    const timestamp = Date.now();
-
-                    for (let i = 1; i <= maxRefs; i++) {
-                        try {
-                            const refImageUrl = new URL(`ref/ref_${i}.png?t=${timestamp}`, import.meta.url).href;
-                            const response = await fetch(refImageUrl);
-
-                            if (!response.ok) {
-                                console.log(`ref_${i}.png not found in ref folder, skipping`);
-                                continue;
-                            }
-
-                            const blob = await response.blob();
-                            const base64Data = await new Promise((resolve, reject) => {
-                                const reader = new FileReader();
-                                reader.onload = () => resolve(reader.result.split(',')[1]);
-                                reader.onerror = reject;
-                                reader.readAsDataURL(blob);
-                            });
-
-                            // Load dimensions to fit box without stretching
-                            const dims = await new Promise((resolve) => {
-                                const img = new Image();
-                                img.onload = () => resolve({ width: img.width, height: img.height });
-                                img.onerror = () => resolve({ width: 1, height: 1 });
-                                img.src = `data:image/png;base64,${base64Data}`;
-                            });
-
-                            // Save image to disk and store path
-                            const filename = `ref_${i}.png`;
-                            await saveRefImageToCache(base64Data, filename);
-
-                            // Create attachment
-                            attachments.push({
-                                path: `ref/${filename}`,
-                                type: 'image/png',
-                                width: dims.width,
-                                height: dims.height,
-                                name: filename
-                            });
-
-                            console.log(`Successfully loaded ref_${i}.png from ref folder`);
-                        } catch (error) {
-                            console.error(`Error loading ref_${i}.png:`, error);
-                        }
-                    }
-
-                    if (attachments.length === 0) {
-                        console.error('No ref images found in ref folder');
-                        return;
-                    }
-
-                    // Set all attachments on the box widget
-                    boxWidget.value.ref_attachment = { entries: attachments };
-
-                    // Set the desired selection if valid, otherwise set to first available
-                    const availableOptions = boxWidget._getRefOptions ? boxWidget._getRefOptions() : ['no_ref', 'ref_1', 'ref_2', 'ref_3', 'ref_4', 'ref_5'];
-                    const desiredIdx = desiredSelection && availableOptions.includes(desiredSelection)
-                        ? Math.max(0, (parseInt(desiredSelection.split('_')[1], 10) || 1) - 1)
-                        : 0;
-
-                    if (desiredIdx >= attachments.length) {
-                        boxWidget.value.ref_selection = 'no_ref';
-                    } else {
-                        const clampedIndex = Math.min(attachments.length - 1, desiredIdx);
-                        boxWidget.value.ref_selection = `ref_${clampedIndex + 1}`;
-                    }
-
-                    // Persist to sessionStorage
-                    try {
-                        const keyId = this.id ?? this.uuid;
-                        const key = keyId ? `spline-editor-boxref-${keyId}-${boxWidget.value.name || boxWidget.name || 'box'}` : null;
-                        if (key) {
-                            sessionStorage.setItem(key, JSON.stringify({
-                                attachment: boxWidget.value.ref_attachment,
-                                selection: boxWidget.value.ref_selection,
-                            }));
-                        }
-                    } catch (e) {
-                        console.warn('Failed to persist box ref attachment to session:', e);
-                    }
-
-                    // Clear ref image cache to force reload
-                    if (this.layerRenderer && this.layerRenderer.clearRefImageCache) {
-                        this.layerRenderer.clearRefImageCache();
-                    }
-
-                    console.log(`Successfully loaded ${attachments.length} ref images from ref folder for box layer`);
-                } catch (error) {
-                    console.error('Error loading ref images from ref folder:', error);
-                }
-            }.bind(this);
-
-            // context menu
-            this.contextMenu = document.createElement("div");
-            this.contextMenu.className = 'spline-editor-context-menu';
-            this.contextMenu.id = "context-menu";
-            this.contextMenu.style.display = "none";
-            this.contextMenu.style.position = "absolute";
-            this.contextMenu.style.backgroundColor = "#202020";
-            this.contextMenu.style.minWidth = "100px";
-            this.contextMenu.style.boxShadow = "0px 8px 16px 0px rgba(0,0,0,0.2)";
-            this.contextMenu.style.zIndex = "100";
-            this.contextMenu.style.padding = "5px";
-
-            function styleMenuItem(menuItem) {
-              menuItem.style.display = "block";
-              menuItem.style.padding = "5px";
-              menuItem.style.color = "#FFF";
-              menuItem.style.fontFamily = "Arial, sans-serif";
-              menuItem.style.fontSize = "16px";
-              menuItem.style.textDecoration = "none";
-              menuItem.style.marginBottom = "5px";
-            }
-            function createMenuItem(id, textContent) {
-              let menuItem = document.createElement("a");
-              menuItem.href = "#";
-              menuItem.id = `menu-item-${id}`;
-              menuItem.textContent = textContent;
-              styleMenuItem(menuItem);
-              return menuItem;
-            }
-            
-            // Create an array of menu items using the createMenuItem function
-            this.menuItems = [
-              createMenuItem(0, "Invert point order"),
-              createMenuItem(1, "Smooth"),
-              createMenuItem(2, "Delete spline"),
-              createMenuItem(3, "Background image"),
-              createMenuItem(4, "Clear Image"),
-              createMenuItem(5, "Delete all splines"),
-            ];
-            
-            // Add mouseover and mouseout event listeners to each menu item for styling
-            this.menuItems.forEach(menuItem => {
-              menuItem.addEventListener('mouseover', function() {
-                this.style.backgroundColor = "gray";
-              });
-            
-              menuItem.addEventListener('mouseout', function() {
-                this.style.backgroundColor = "#202020";
-              });
-            });
-            
-            // Append each menu item to the context menu
-            this.menuItems.forEach(menuItem => {
-              this.contextMenu.appendChild(menuItem);
-            });
-
-            document.body.appendChild(this.contextMenu);
-
-            this.splineEditor2.parentEl = document.createElement("div");
-            this.splineEditor2.parentEl.className = "spline-editor";
-            this.splineEditor2.parentEl.id = `spline-editor-${this.uuid}`;
-            this.splineEditor2.parentEl.style.display = "block";
-            this.splineEditor2.parentEl.style.margin = "0";
-            this.splineEditor2.parentEl.style.padding = "0";
-            element.appendChild(this.splineEditor2.parentEl);
-
-            this.editor = new SplineEditor2(this);
-            // Restore persisted max frames for box timelines if available
-            const propMaxFrames = Number(this.properties?.box_max_frames);
-            if (!Number.isNaN(propMaxFrames) && propMaxFrames > 0) {
-                this.editor._maxFrames = propMaxFrames;
-                if (this.uuid) {
-                    safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(propMaxFrames));
-                }
-            } else if (this.uuid) {
-                const savedMaxFrames = Number(sessionStorage.getItem(`spline-editor-maxframes-${this.uuid}`));
-                if (!Number.isNaN(savedMaxFrames) && savedMaxFrames > 0) {
-                    this.editor._maxFrames = savedMaxFrames;
-                }
-            }
-            // Expose commit handler for handdraw to the editor/node
-            this.commitHanddraw = (points) => {
-                try { commitHanddrawPath(this, points); } catch (e) { console.error('commitHanddraw failed', e); }
-            };
-
-            // Try to load image from session storage for persistence across reloads
-            if (this.uuid) {
-              const sessionImgData = sessionStorage.getItem(`spline-editor-img-${this.uuid}`);
-              if (sessionImgData) {
-                this.imgData = JSON.parse(sessionImgData);
-              } else if (this.properties.imgData) {
-                // Migrate from old property if it exists
-                this.imgData = this.properties.imgData;
-                delete this.properties.imgData;
-              }
-            }
-
-            // Ensure the background image is refreshed after editor creation
-            if (this.editor && this.imgData) {
-                 this.editor.refreshBackgroundImage();
-            } else if (this.editor) {
-                // If no image is loaded from session, first try to load cached bg_image, then fallback to A.jpg
-                // First check if we have saved dimensions to maintain proportions
-                let targetWidth, targetHeight;
-                const savedDims = sessionStorage.getItem(`spline-editor-dims-${this.uuid}`);
-                if (savedDims) {
-                    const dims = JSON.parse(savedDims);
-                    targetWidth = dims.width;
-                    targetHeight = dims.height;
-                } else if (this.properties.bgImageDims) {
-                    // Fallback to dimensions stored in properties
-                    targetWidth = this.properties.bgImageDims.width;
-                    targetHeight = this.properties.bgImageDims.height;
-                }
-
-                // Try to load cached bg_image first
-                this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                    if (cachedImageUrl) {
-                        const filename = this.checkIfConnectedToPrepareRefs() ? 'bg_image_cl.png' : 'bg_image.png';
-                        this.loadBackgroundImageFromUrl(cachedImageUrl, filename, targetWidth, targetHeight);
-                    } else {
-                        // Fallback to default A.jpg
-                        const timestamp = Date.now();
-                        const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                        this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                    }
-                });
-            }
-
-            // Initialize layer UI (button bar + header) - positioned between canvas and layers
-            initializeLayerUI(this);
-
-            // Removed double-click rename behavior (no longer used)
-
-          // Override onNodeContextMenu to handle driven toggle right-click
-          const originalOnNodeContextMenu = nodeType.prototype.onNodeContextMenu;
-          nodeType.prototype.onNodeContextMenu = function (x, y, node) {
-              // Iterate through spline widgets to find if the click was on a driven toggle
-              for (const widget of this.layerManager.getSplineWidgets()) {
-                  if (widget.hitAreas && widget.hitAreas.drivenToggle) {
-                      const toggleBounds = widget.hitAreas.drivenToggle.bounds;
-
-                      // Calculate absolute bounds of the toggle on the canvas
-                      const widgetAbsX = node.pos[0];
-                      const widgetAbsY = node.pos[1] + widget.last_y;
-
-                      const toggleAbsXStart = widgetAbsX + toggleBounds[0];
-                      const toggleAbsXEnd = toggleAbsXStart + toggleBounds[1];
-                      const toggleAbsYStart = widgetAbsY;
-                      const toggleAbsYEnd = widgetAbsY + LiteGraph.NODE_WIDGET_HEIGHT;
-
-                      if (x >= toggleAbsXStart && x <= toggleAbsXEnd &&
-                          y >= toggleAbsYStart && y <= toggleAbsYEnd) {
-
-                          // Use the custom grid-based menu instead of LiteGraph's default menu
-                          showCustomDrivenToggleMenu(null, widget, { x: x, y: y });
-                          return false; // Prevent default context menu
-                      }
-                  }
-              }
-
-              // If no driven toggle was hit, call the original context menu handler
-              return originalOnNodeContextMenu?.apply(this, arguments);
-          };
-
-          // Removed onMouseDown override for double-click rename
-
-          chainCallback(this, "onDrawForeground", function(ctx) {
-            if (!this.flags.collapsed) {
-                drawDriverLines(ctx, this);
-            }
-          });
-
-          chainCallback(this, "onConfigure", function (info) {
-            if (!this.widgets || !this.updateNodeHeight) {
-              return;
-            }
-
-            // Restore persisted max frames for box timelines from properties
-            if (this.editor && this.properties?.box_max_frames) {
-              const propMaxFrames = Number(this.properties.box_max_frames);
-              if (!Number.isNaN(propMaxFrames) && propMaxFrames > 0) {
-                this.editor._maxFrames = propMaxFrames;
-                if (this.uuid) {
-                  safeSetSessionItem(`spline-editor-maxframes-${this.uuid}`, String(propMaxFrames));
-                }
-              }
-            }
-
-            const savedSize = [this.size[0], this.size[1]];
-            this.layerManager.recreateSplinesFromData(info.widgets_values);
-
-            // Ensure coordWidget has a default value
-            const coordWidget = this.widgets.find(w => w.name === "coordinates");
-            if (coordWidget && !coordWidget.value) {
-              coordWidget.value = "[]";
-            }
-
+  name: 'WanVideoWrapper_QQ.PowerSplineEditor',
+
+  async beforeRegisterNodeDef(nodeType, nodeData) {
+    if (nodeData?.name === 'PowerSplineEditor') {
+      // Initialize modules
+      // await initializeModules();
+
+      // ============================================================== 
+      // == NODE CREATED - Setup and initialization
+      // ============================================================
+      chainCallback(nodeType.prototype, 'onNodeCreated', async function () {
+        this.serialize_widgets = true;
+        this.resizable = false;
+
+        // Initialize core managers
+        this.sizeManager = new NodeSizeManager(this);
+        this.layerManager = new SplineLayerManager(this);
+
+        // Initialize modular managers
+        this.bgImageManager = createBackgroundImageManager(this);
+        this.refImageManager = createRefImageManager(this);
+        this.videoManager = createVideoBackgroundManager(this);
+        this.dimensionManager = createDimensionManager(this);
+
+        // Set up onResize
+        this.onResize = function (size) {
+          const constrainedSize = this.sizeManager.onNodeResized(size);
+          size[0] = constrainedSize[0];
+          size[1] = constrainedSize[1];
+        };
+
+        // Hide and setup coordinates widget
+        const coordinatesWidget = this.widgets.find(w => w.name === 'coordinates');
+        hideWidgetForGood(this, coordinatesWidget);
+        coordinatesWidget.value = '[]';
+
+        // Create DOM element for editor
+        var element = document.createElement('div');
+        this.uuid = makeUUID();
+        element.id = `spline-editor-${this.uuid}`;
+        element.style.margin = '0';
+        element.style.padding = '0';
+        element.style.display = 'block';
+
+        // Add fake image widget for copy/paste
+        const fakeimagewidget = this.addWidget('COMBO', 'image', null, () => {}, {
+          values: []
+        });
+        hideWidgetForGood(this, fakeimagewidget);
+        fakeimagewidget.draw = () => {};
+
+        // Hide internal widgets
+        const pointsStoreWidget = this.widgets.find(
+          w => w.name === 'points_store'
+        );
+        if (pointsStoreWidget) {
+          hideWidgetForGood(this, pointsStoreWidget);
+        }
+
+        // ============================================================== 
+        // == SETUP WIDTH/HEIGHT WIDGETS WITH CALLBACKS
+        // ============================================================
+        const widthWidget = this.widgets.find(w => w.name === 'mask_width');
+        if (widthWidget) {
+          const originalWidthCallback = widthWidget.callback;
+          widthWidget.callback = (value) => {
+            if (originalWidthCallback) originalWidthCallback.call(widthWidget, value);
+            this.properties = this.properties || {};
+            this.properties.userAdjustedDims = true;
+            this.properties.bgImageDims = this.properties.bgImageDims || {};
+            this.properties.bgImageDims.width = value;
             try {
-              // Restore background image dimensions from properties if available
-              // BUT only if user hasn't manually adjusted dimensions
-              // Check sessionStorage first for more recent dimensions from the last session
-              let dims = null;
-              const sessionDims = sessionStorage.getItem(`spline-editor-dims-${this.uuid}`);
-              if (sessionDims) {
-                  dims = JSON.parse(sessionDims);
-              } else if (this.properties && this.properties.bgImageDims && !this.properties.userAdjustedDims) {
-                  dims = this.properties.bgImageDims;
-              }
-
-              // Apply dimensions if we found them and user hasn't manually adjusted
-              if (dims && !this.properties.userAdjustedDims) {
-                const widthWidget = this.widgets.find(w => w.name === "mask_width");
-                const heightWidget = this.widgets.find(w => w.name === "mask_height");
-
-                const userDimsJson = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
-                const hasUserDims = this.properties.userAdjustedDims || !!userDimsJson;
-                if (!hasUserDims) {
-                  const widgetDiffers = (
-                    (widthWidget && dims && typeof widthWidget.value === 'number' && widthWidget.value !== dims.width) ||
-                    (heightWidget && dims && typeof heightWidget.value === 'number' && heightWidget.value !== dims.height)
-                  );
-                  if (widgetDiffers) {
-                    // Treat saved widget values as user preference; persist flag for this session
-                    this.properties.userAdjustedDims = true;
-                    try {
-                      const stored = { width: Number(widthWidget ? widthWidget.value : dims.width), height: Number(heightWidget ? heightWidget.value : dims.height) };
-                      if (this.uuid) sessionStorage.setItem(`spline-editor-user-dims-${this.uuid}`, JSON.stringify(stored));
-                    } catch {}
-                  } else {
-                    if (widthWidget && widthWidget.value !== dims.width) {
-                      widthWidget.value = dims.width;
-                    }
-                    if (heightWidget && heightWidget.value !== dims.height) {
-                      heightWidget.value = dims.height;
-                    }
-                  }
-                }
-                else if (userDimsJson) {
-                  try {
-                    const userDims = JSON.parse(userDimsJson);
-                    if (widthWidget && typeof userDims.width === 'number') widthWidget.value = userDims.width;
-                    if (heightWidget && typeof userDims.height === 'number') heightWidget.value = userDims.height;
-                  } catch {}
-                }
-                
-                // Store the dimensions back to properties to ensure consistency
-                if (!this.properties.userAdjustedDims) {
-                    this.properties.bgImageDims = dims;
-                }
-              }
-
-              // Now restore node size using size manager (with correct widget values)
-              this.sizeManager.onConfigure(savedSize);
-
-              // Update canvas dimensions if editor exists
-              if (this.editor && this.editor.vis) {
-                const userDimsJson2 = this.uuid ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`) : null;
-                const hasUserDims2 = this.properties.userAdjustedDims || !!userDimsJson2;
-                const canvasWidth = (dims && !hasUserDims2) ? dims.width : (this.properties.bgImageDims?.width || this.editor.widthWidget.value);
-                const canvasHeight = (dims && !hasUserDims2) ? dims.height : (this.properties.bgImageDims?.height || this.editor.heightWidget.value);
-                
-                this.editor.width = canvasWidth;
-                this.editor.height = canvasHeight;
-                this.editor.vis.width(canvasWidth);
-                this.editor.vis.height(canvasHeight);
-                this.editor.vis.render();
-                // Render all spline layers after canvas resize
-                if (this.editor.layerRenderer) {
-                  this.editor.layerRenderer.render();
-                }
-              }
-
-              // Try to load image from session storage for persistence across reloads
+              const hWidget = this.widgets.find(w => w.name === 'mask_height');
+              const userDims = {
+                width: Number(value),
+                height: Number(hWidget?.value ?? this.properties.bgImageDims.height ?? 0)
+              };
               if (this.uuid) {
-                const sessionImgData = sessionStorage.getItem(`spline-editor-img-${this.uuid}`);
-                if (sessionImgData) {
-                  this.imgData = JSON.parse(sessionImgData);
-                } else if (this.properties.imgData) {
-                  // Migrate from old property if it exists
-                  this.imgData = this.properties.imgData;
-                  delete this.properties.imgData;
-                }
+                safeSetSessionItem(
+                  `spline-editor-user-dims-${this.uuid}`,
+                  JSON.stringify(userDims)
+                );
               }
+            } catch {}
+          };
+          hideWidgetForGood(this, widthWidget);
+        }
 
-              // Create the editor instance if it doesn't exist yet
-              if (!this.editor) {
-                 this.editor = new SplineEditor2(this);
+        const heightWidget = this.widgets.find(w => w.name === 'mask_height');
+        if (heightWidget) {
+          const originalHeightCallback = heightWidget.callback;
+          heightWidget.callback = (value) => {
+            if (originalHeightCallback)
+              originalHeightCallback.call(heightWidget, value);
+            this.properties = this.properties || {};
+            this.properties.userAdjustedDims = true;
+            this.properties.bgImageDims = this.properties.bgImageDims || {};
+            this.properties.bgImageDims.height = value;
+            try {
+              const wWidget = this.widgets.find(w => w.name === 'mask_width');
+              const userDims = {
+                width: Number(wWidget?.value ?? this.properties.bgImageDims.width ?? 0),
+                height: Number(value)
+              };
+              if (this.uuid) {
+                safeSetSessionItem(
+                  `spline-editor-user-dims-${this.uuid}`,
+                  JSON.stringify(userDims)
+                );
               }
-              // Ensure the background image is refreshed after configuration/editor creation
-              if (this.editor && this.imgData) {
-                   this.editor.refreshBackgroundImage();
-              } else if (this.editor) {
-                  // Get the bg_img value from the widget to determine which image to load
-                  const bgImgWidget = this.widgets.find(w => w.name === "bg_img");
-                  const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-                  
-                  // If no image is loaded from session, load the appropriate background based on bg_img selection
-                  // First check if we have saved dimensions to maintain proportions
-                  let targetWidth, targetHeight;
-                  const savedDims = sessionStorage.getItem(`spline-editor-dims-${this.uuid}`);
-                  if (savedDims) {
-                      const dims = JSON.parse(savedDims);
-                      targetWidth = dims.width;
-                      targetHeight = dims.height;
-                  } else if (this.properties.bgImageDims) {
-                      // Fallback to dimensions stored in properties
-                      targetWidth = this.properties.bgImageDims.width;
-                      targetHeight = this.properties.bgImageDims.height;
-                  }
-                  
-                  // Determine which image to load based on the bg_img selection
-                  if (bg_img === "None") {
-                      // Try to load cached bg_image first, then fallback to default
-                      this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                          if (cachedImageUrl) {
-                              // Apply darkening effect to match onExecuted behavior
-                              const img = new Image();
-                              img.onload = () => {
-                                const canvas = document.createElement('canvas');
-                                canvas.width = img.width;
-                                canvas.height = img.height;
-                                const ctx = canvas.getContext('2d');
+            } catch {}
+          };
+          hideWidgetForGood(this, heightWidget);
+        }
 
-                                ctx.drawImage(img, 0, 0);
-                                ctx.fillStyle = `rgba(0, 0, 0, 0.6)`; // Same opacity as in onExecuted
-                                ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                                // Convert the darkened image to data URL
-                                const darkenedDataUrl = canvas.toDataURL('image/jpeg');
-                                this.imgData = {
-                                    name: 'bg_image.png',
-                                    base64: darkenedDataUrl.split(',')[1],
-                                    type: 'image/jpeg'
-                                };
-                                this.editor.refreshBackgroundImage();
-                              };
-                              img.onerror = () => {
-                                // Fallback to loading default A.jpg if ref_image doesn't exist
-                                const timestamp = Date.now();
-                                const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                                this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                              };
-                              img.src = cachedImageUrl;
-                          } else {
-                              // Fallback to default A.jpg
-                              const timestamp = Date.now();
-                              const defaultImageUrl = new URL(`bg/A.jpg?t=${timestamp}`, import.meta.url).href;
-                              this.loadBackgroundImageFromUrl(defaultImageUrl, 'A.jpg', targetWidth, targetHeight);
-                          }
-                      });
-                  } else {
-                      // Load the selected background image (A, B, or C) from the bg folder
-                      const timestamp = Date.now();
-                      const imageUrl = new URL(`bg/${bg_img}.jpg?t=${timestamp}`, import.meta.url).href;
-
-                      // Use the overlay function from image_overlay.js
-                      this.loadCorrectCachedRefImage().then(cachedImageUrl => {
-                          if (cachedImageUrl) {
-                              createImageOverlayForConfigure(
-                                  cachedImageUrl,
-                                  bg_img,
-                                  imageUrl,
-                                  this.loadBackgroundImageFromUrl.bind(this),
-                                  () => {
-                                      // After creating overlay, refresh the background image
-                                      if (this.editor) {
-                                          this.editor.refreshBackgroundImage();
-                                      }
-                                  },
-                                  this.imgData
-                              );
-                          } else {
-                              // If no cached ref image, fallback to loading the background image directly
-                              this.loadBackgroundImageFromUrl(imageUrl, `${bg_img}.jpg`, targetWidth, targetHeight);
-                          }
-                      }).catch(error => {
-                          console.error(`Error loading ref image for overlay with ${bg_img}.jpg:`, error);
-                          // Fallback to loading the background image directly
-                          this.loadBackgroundImageFromUrl(imageUrl, `${bg_img}.jpg`, targetWidth, targetHeight);
-                      });
-                  }
-              }
-
-              // After recreating splines, the first layer might not render correctly on refresh.
-              // Force an update of the active layer to ensure it's drawn properly.
-              if (this.editor) {
-                const activeWidget = this.layerManager.getActiveWidget(); // Ensure active widget is set
-                if (activeWidget) {
-                    // Clear the active widget reference before setting it to avoid potential issues
-                    this.layerManager.activeWidget = null; // Force a reset to trigger the update
-                    this.layerManager.setActiveWidget(activeWidget); // Notify canvas to redraw the active layer
-                }
-              }
-            } catch (error) {
-              console.error("An error occurred while configuring the editor:", error);
+        // ============================================================
+        // == SETUP BG_IMG WIDGET WITH CALLBACK
+        // ============================================================
+        const bgImgWidget = this.widgets.find(w => w.name === 'bg_img');
+        if (bgImgWidget) {
+          hideWidgetForGood(this, bgImgWidget);
+          const originalCallback = bgImgWidget.callback;
+          bgImgWidget.callback = (value) => {
+            if (originalCallback) {
+              originalCallback(value);
             }
-          });
-          chainCallback(this, "onExecuted", function (message) {
-            let ref_image = message["ref_image"];
-            let coord_in = message["coord_in"];
-            let ref_image_dims = message["ref_image_dims"];
-            let bg_img = message["bg_img"] ? message["bg_img"][0] : "None"; // Get the bg_img value from the message
+            this.bgImageManager.updateBackgroundImage(value);
+            return value;
+          };
+        }
 
-            // Store background image dimensions for reference (don't modify UI widget values)
-            // BUT only if user hasn't manually adjusted dimensions
-            if (ref_image_dims && Array.isArray(ref_image_dims) && ref_image_dims.length > 0) {
-              const dims = ref_image_dims[0];
-              if (dims.width && dims.height) {
-                this.properties = this.properties || {};
-                // Only update bgImageDims if user hasn't manually adjusted dimensions
-                if (!this.properties.userAdjustedDims) {
-                  this.properties.bgImageDims = { width: dims.width, height: dims.height };
-                  
-                  // Also save dimensions to sessionStorage for persistence across page refreshes
-                  try {
-                      safeSetSessionItem(`spline-editor-dims-${this.uuid}`, JSON.stringify({
-                          width: dims.width,
-                          height: dims.height
-                      }));
-                  } catch (e) {
-                      console.error("Spline Editor: Could not save dimensions to session storage", e);
-                  }
-                } else {
-                  console.log(`Skipped storing ref_image dimensions (user has manually adjusted dimensions)`);
-                }
-              }
-            }
+        // Hide pause widgets
+        const startPauseWidget = this.widgets.find(
+          w => w.name === 'start_pause'
+        );
+        if (startPauseWidget) {
+          hideWidgetForGood(this, startPauseWidget);
+          startPauseWidget.draw = () => {};
+        }
 
-            const finishExecution = (imgData) => {
-                if (imgData) {
-                    this.imgData = imgData;
-                    try {
-                        const size = JSON.stringify(this.imgData).length;
-                        if (size < 640 * 480) { // 1MB limit
-                            safeSetSessionItem(`spline-editor-img-${this.uuid}`, JSON.stringify(this.imgData));
-                        }
-                        // Silently skip saving large images to session storage
-                    } catch (e) {
-                        console.error("Spline Editor: Could not save image to session storage", e);
-                    }
-                    // Clear old property if it exists to migrate old workflows
-                    if (this.properties.imgData) {
-                        delete this.properties.imgData;
-                    }
-                } else {
-                }
+        const endPauseWidget = this.widgets.find(w => w.name === 'end_pause');
+        if (endPauseWidget) {
+          hideWidgetForGood(this, endPauseWidget);
+          endPauseWidget.draw = () => {};
+        }
 
-                // Initialize editor if it doesn't exist yet
-                if (!this.editor) {
-                    this.editor = new SplineEditor2(this, false);
-                }
+        // Hide interpolation, offset, repeat, driver widgets
+        const interpolationWidget = this.widgets.find(
+          w => w.name === 'interpolation'
+        );
+        if (interpolationWidget) {
+          hideWidgetForGood(this, interpolationWidget);
+          interpolationWidget.draw = () => {};
+        }
 
-                if (coord_in) {
-                    const coord_in_str = Array.isArray(coord_in) ? coord_in.join('') : coord_in;
-                    this.editor.drawPreviousSpline(coord_in_str);
-                }
+        const offsetWidget = this.widgets.find(w => w.name === 'offset');
+        if (offsetWidget) {
+          hideWidgetForGood(this, offsetWidget);
+          offsetWidget.draw = () => {};
+        }
 
-                if (this.editor && this.imgData) {
-                    this.editor.refreshBackgroundImage();
-                } else if (this.editor) {
-                    this.editor.vis.render();
-                }
+        const repeatWidget = this.widgets.find(w => w.name === 'repeat');
+        if (repeatWidget) {
+          hideWidgetForGood(this, repeatWidget);
+          repeatWidget.draw = () => {};
+        }
+
+        const driverRotationWidget = this.widgets.find(
+          w => w.name === 'driver_rotation'
+        );
+        if (driverRotationWidget) {
+          hideWidgetForGood(this, driverRotationWidget);
+          driverRotationWidget.draw = () => {};
+        }
+
+        const driverDScaleWidget = this.widgets.find(
+          w => w.name === 'driver_d_scale'
+        );
+        if (driverDScaleWidget) {
+          hideWidgetForGood(this, driverDScaleWidget);
+          driverDScaleWidget.draw = () => {};
+        }
+
+        // ============================================================
+        // == CUSTOM WIDGET METHODS
+        // ============================================================
+        if (!this.addCustomWidget) {
+          this.addCustomWidget = function (widget) {
+            widget.parent = this;
+            this.widgets = this.widgets || [];
+            this.widgets.push(widget);
+
+            const originalMouse = widget.mouse;
+            widget.mouse = function (event, pos, node) {
+              const localPos = [pos[0], pos[1] - (widget.last_y || 0)];
+              return originalMouse?.call(this, event, localPos, node);
             };
 
+            return widget;
+          };
+        }
 
+        // Add top row widget
+        this.addCustomWidget(new TopRowWidget('top_row_display', {}, {
+          onRefreshCanvas: handleCanvasRefresh,
+          onRefreshFrames: handleFramesRefresh
+        }));
 
+        // Add SplineEditor2 DOM widget
+        this.splineEditor2 = this.addDOMWidget(nodeData.name, 'SplineEditor2Widget', element, {
+          serialize: false,
+          hideOnZoom: false
+        });
 
+        // Set computeSize for proper layout
+        this.splineEditor2.computeSize = function (width) {
+          const heightWidget = this.node?.widgets?.find(w => w.name === 'mask_height');
+          const canvasHeight = heightWidget?.value ?? 480;
+          const spacingAfterCanvas =
+            this.node?.sizeManager?.config?.spacingAfterCanvas ?? 60;
+          return [width, canvasHeight + spacingAfterCanvas];
+        }.bind(this.splineEditor2);
 
-            // If a new background image is provided, cache it and then finish execution.
-            if (ref_image) {
-              // Cache the ref_image for future use
-            saveRefImageToCache(ref_image, 'bg_image.png').then(success => {
-                if (success) {
-                  console.log('Ref image cached successfully for future use');
-                } else {
-                  console.warn('Failed to cache ref image');
+        // ============================================================
+        // == HELPER METHODS
+        // ============================================================
+        this.generateUniqueName = function (baseName, existingNames) {
+          if (!existingNames.includes(baseName)) return baseName;
+          const regex = /_(\d+)$/;
+          let nameToCheck = baseName;
+          let counter = 1;
+          const match = baseName.match(regex);
+          if (match) {
+            nameToCheck = baseName.substring(0, match.index);
+            counter = parseInt(match[1], 10) + 1;
+          }
+          let newName = `${nameToCheck}_${counter}`;
+          while (existingNames.includes(newName)) {
+            counter++;
+            newName = `${nameToCheck}_${counter}`;
+          }
+          return newName;
+        };
+
+        this.hasSplineWidgets = function () {
+          return (
+            this.widgets &&
+            this.widgets.some(
+              w =>
+                w instanceof PowerSplineWidget ||
+                w instanceof HandDrawLayerWidget ||
+                w instanceof BoxLayerWidget
+            )
+          );
+        };
+
+        this.allSplinesState = function () {
+          const layerWidgets = this.widgets.filter(
+            w =>
+              w instanceof PowerSplineWidget ||
+              w instanceof HandDrawLayerWidget ||
+              w instanceof BoxLayerWidget
+          );
+          if (!layerWidgets.length) return false;
+          return layerWidgets.every(w => w.value.on);
+        };
+
+        this.toggleAllSplines = function () {
+          const layerWidgets = this.widgets.filter(
+            w =>
+              w instanceof PowerSplineWidget ||
+              w instanceof HandDrawLayerWidget ||
+              w instanceof BoxLayerWidget
+          );
+          const newState = !this.allSplinesState();
+          layerWidgets.forEach(w => (w.value.on = newState));
+          this.setDirtyCanvas(true, true);
+        };
+
+        this.updateNodeHeight = function () {
+          this.sizeManager.updateSize(true);
+        };
+
+        this.handleFramesRefresh = async function () {
+          console.log("[PowerSplineEditor] handleFramesRefresh called");
+          if (this.dimensionManager) {
+            await this.dimensionManager.handleFramesRefresh();
+          }
+        };
+
+        // ============================================================
+        // == INITIALIZATION OVERLAY REFRESH
+        // ============================================================
+        this.initOverlayRefresh = async function () {
+          try {
+            const bg_img =
+              (this.widgets && this.widgets.find(w => w.name === 'bg_img'))
+                ?.value || 'None';
+
+            const isConnectedToPrepareRefs =
+              this.refImageManager.checkIfConnectedToPrepareRefs();
+
+            if (isConnectedToPrepareRefs) {
+              try {
+                const timestamp = Date.now();
+                const refImageUrl = new URL(
+                  `ref/bg_image_cl.png?t=${timestamp}`,
+                  import.meta.url
+                ).href;
+                const response = await fetch(refImageUrl);
+                if (response.ok) {
+                  const blob = await response.blob();
+                  const base64Data = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                  });
+
+                  this.originalRefImageData = {
+                    name: 'bg_image_cl.png',
+                    base64: base64Data,
+                    type: 'image/png'
+                  };
+
+                  await this.bgImageManager.updateBackgroundImage(bg_img);
+                  this.editor?.refreshBackgroundImage?.();
+                  return;
                 }
-              });
-
-              const timestamp = Date.now();
-              const bgImageUrl = new URL(`bg/${bg_img}.jpg?t=${timestamp}`, import.meta.url).href;
-              processBgImage(ref_image, bg_img, bgImageUrl, finishExecution);
-            } else {
-              // Otherwise, just run the rest of the logic with existing image data (if any).
-              finishExecution(this.imgData);
-            }
-          }); // End onExecuted callback
-
-          }); // End onNodeCreated callback
-
-          // Override onContextMenu to handle driven toggle right-click
-          const originalOnContextMenu = nodeType.prototype.onContextMenu;
-          nodeType.prototype.onContextMenu = function (x, y, menu, node) {
-
-              // Iterate through spline widgets to find if the click was on a driven toggle
-              for (const widget of this.layerManager.getSplineWidgets()) {
-                  if (widget.hitAreas && widget.hitAreas.drivenToggle) {
-                      const drivenToggleBounds = widget.hitAreas.drivenToggle.bounds;
-
-                      // Calculate absolute bounds of the toggle on the canvas
-                      const widgetAbsX = this.pos[0];
-                      const widgetAbsY = this.pos[1] + widget.last_y;
-                      
-                      // Reduce the width of the hit area to be more precise - use actual toggle width
-                      // The toggle width is approximately height * 0.72 (toggle radius * 2)
-                      const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.72;
-                      const toggleAbsXStart = widgetAbsX + drivenToggleBounds[0];
-                      const toggleAbsXEnd = toggleAbsXStart + toggleWidth;
-                      const toggleAbsYStart = widgetAbsY;
-                      const toggleAbsYEnd = widgetAbsY + LiteGraph.NODE_WIDGET_HEIGHT;
-
-                      if (x >= toggleAbsXStart && x <= toggleAbsXEnd &&
-                          y >= toggleAbsYStart && y <= toggleAbsYEnd) {
-
-                          // Use the custom menu display function
-                          showCustomDrivenToggleMenu(null, widget, { x: x, y: y });
-                          return false; // Prevent default LiteGraph context menu
-                      }
-                  }
+              } catch (e) {
+                console.error('Failed to load bg_image_cl.png:', e);
               }
-
-              // If no driven toggle was hit, call the original context menu handler
-              return originalOnContextMenu?.apply(this, arguments);
-          };
-
-          // Serialize all the spline widget values into the hidden 'coordinates' widget for the backend.
-          const onSerialize = nodeType.prototype.onSerialize;
-          nodeType.prototype.onSerialize = function(o) {
-            const coordinatesWidget = this.widgets.find(w => w.name === "coordinates");
-            if (coordinatesWidget) {
-                const splineWidgets = this.widgets.filter(w =>
-                    (w instanceof PowerSplineWidget) || (w instanceof HandDrawLayerWidget) || (w instanceof BoxLayerWidget));
-                const values = splineWidgets.map(w => w.value);
-                coordinatesWidget.value = JSON.stringify(values);
+            } else {
+              // Try to pull fresh ref image from connected node
+              const { getReferenceImageFromConnectedNode } = await import(
+                './graph_query.js'
+              );
+              const base64Image = await getReferenceImageFromConnectedNode(this);
+              if (base64Image) {
+                this.originalRefImageData = {
+                  name: 'ref_image_from_connection.jpg',
+                  base64: base64Image.split(',')[1],
+                  type: 'image/jpeg'
+                };
+                try {
+                  await saveRefImageToCache(this.originalRefImageData.base64, 'bg_image.png');
+                } catch {}
+                if (this.uuid) {
+                  sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
+                }
+                await this.bgImageManager.updateBackgroundImage(bg_img);
+                this.editor?.refreshBackgroundImage?.();
+                return;
+              }
             }
-            onSerialize?.apply(this, arguments);
+          } catch {}
+
+          // Fallback: just apply current selection
+          try {
+            const bgImgWidget = this.widgets?.find(w => w.name === 'bg_img');
+            const bg_img = bgImgWidget?.value || 'None';
+            await this.bgImageManager.updateBackgroundImage(bg_img);
+            this.editor?.refreshBackgroundImage?.();
+          } catch {}
+        }.bind(this);
+
+        // Trigger auto-refresh during init
+        setTimeout(() => {
+          this.initOverlayRefresh();
+        }, 150);
+        setTimeout(() => {
+          this.initOverlayRefresh();
+        }, 700);
+
+        // Set initial node size
+        this.updateNodeHeight();
+
+        // Initialize layer UI
+        initializeLayerUI(this);
+
+        // ============================================================
+        // == UI EVENT HANDLERS
+        // ============================================================
+
+        // Override onNodeContextMenu
+        const originalOnNodeContextMenu = nodeType.prototype.onNodeContextMenu;
+        nodeType.prototype.onNodeContextMenu = function (x, y, node) {
+          for (const widget of this.layerManager.getSplineWidgets()) {
+            if (widget.hitAreas?.drivenToggle) {
+              const toggleBounds = widget.hitAreas.drivenToggle.bounds;
+              const widgetAbsX = node.pos[0];
+              const widgetAbsY = node.pos[1] + widget.last_y;
+
+              const toggleAbsXStart = widgetAbsX + toggleBounds[0];
+              const toggleAbsXEnd = toggleAbsXStart + toggleBounds[1];
+              const toggleAbsYStart = widgetAbsY;
+              const toggleAbsYEnd = widgetAbsY + LiteGraph.NODE_WIDGET_HEIGHT;
+
+              if (
+                x >= toggleAbsXStart &&
+                x <= toggleAbsXEnd &&
+                y >= toggleAbsYStart &&
+                y <= toggleAbsYEnd
+              ) {
+                showCustomDrivenToggleMenu(null, widget, { x, y });
+                return false;
+              }
+            }
+          }
+
+          return originalOnNodeContextMenu?.apply(this, arguments);
+        };
+
+        // Draw foreground
+        chainCallback(this, 'onDrawForeground', function (ctx) {
+          if (!this.flags.collapsed) {
+            drawDriverLines(ctx, this);
+          }
+        });
+      });
+
+      // ============================================================
+      // == NODE CONFIGURATION
+      // ============================================================
+      chainCallback(nodeType.prototype, 'onConfigure', async function (info) {
+        if (!this.widgets || !this.updateNodeHeight) {
+          return;
+        }
+
+        // Restore persisted max frames
+        if (this.editor && this.properties?.box_max_frames) {
+          const propMaxFrames = Number(this.properties.box_max_frames);
+          if (!Number.isNaN(propMaxFrames) && propMaxFrames > 0) {
+            this.editor._maxFrames = propMaxFrames;
+            if (this.uuid) {
+              safeSetSessionItem(
+                `spline-editor-maxframes-${this.uuid}`,
+                String(propMaxFrames)
+              );
+            }
+          }
+        }
+
+        const savedSize = [this.size[0], this.size[1]];
+        this.layerManager.recreateSplinesFromData(info.widgets_values);
+
+        // Ensure coordWidget has default value
+        const coordWidget = this.widgets.find(w => w.name === 'coordinates');
+        if (coordWidget && !coordWidget.value) {
+          coordWidget.value = '[]';
+        }
+
+        try {
+          // Restore background image dimensions
+          let dims = null;
+          const sessionDims = sessionStorage.getItem(
+            `spline-editor-dims-${this.uuid}`
+          );
+          if (sessionDims) {
+            dims = JSON.parse(sessionDims);
+          } else if (
+            this.properties?.bgImageDims &&
+            !this.properties.userAdjustedDims
+          ) {
+            dims = this.properties.bgImageDims;
+          }
+
+          // Apply dimensions
+          if (dims && !this.properties.userAdjustedDims) {
+            const widthWidget = this.widgets.find(w => w.name === 'mask_width');
+            const heightWidget = this.widgets.find(
+              w => w.name === 'mask_height'
+            );
+
+            const userDimsJson = this.uuid
+              ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`)
+              : null;
+            const hasUserDims =
+              this.properties.userAdjustedDims || !!userDimsJson;
+
+            if (!hasUserDims) {
+              const widgetDiffers =
+                (widthWidget &&
+                  dims &&
+                  typeof widthWidget.value === 'number' &&
+                  widthWidget.value !== dims.width) ||
+                (heightWidget &&
+                  dims &&
+                  typeof heightWidget.value === 'number' &&
+                  heightWidget.value !== dims.height);
+
+              if (widgetDiffers) {
+                this.properties.userAdjustedDims = true;
+                try {
+                  const stored = {
+                    width: Number(widthWidget?.value ?? dims.width),
+                    height: Number(heightWidget?.value ?? dims.height)
+                  };
+                  if (this.uuid) {
+                    safeSetSessionItem(
+                      `spline-editor-user-dims-${this.uuid}`,
+                      JSON.stringify(stored)
+                    );
+                  }
+                } catch {}
+              } else {
+                if (widthWidget && widthWidget.value !== dims.width) {
+                  widthWidget.value = dims.width;
+                }
+                if (heightWidget && heightWidget.value !== dims.height) {
+                  heightWidget.value = dims.height;
+                }
+              }
+            } else if (userDimsJson) {
+              try {
+                const userDims = JSON.parse(userDimsJson);
+                if (widthWidget && typeof userDims.width === 'number') {
+                  widthWidget.value = userDims.width;
+                }
+                if (heightWidget && typeof userDims.height === 'number') {
+                  heightWidget.value = userDims.height;
+                }
+              } catch {}
+            }
+
+            if (!this.properties.userAdjustedDims) {
+              this.properties.bgImageDims = dims;
+            }
+          }
+
+          // Restore node size
+          this.sizeManager.onConfigure(savedSize);
+
+          // Update canvas dimensions
+          if (this.editor && this.editor.vis) {
+            const userDimsJson2 = this.uuid
+              ? sessionStorage.getItem(`spline-editor-user-dims-${this.uuid}`)
+              : null;
+            const hasUserDims2 =
+              this.properties.userAdjustedDims || !!userDimsJson2;
+            const canvasWidth =
+              dims && !hasUserDims2
+                ? dims.width
+                : this.properties.bgImageDims?.width ??
+                  this.editor.widthWidget.value;
+            const canvasHeight =
+              dims && !hasUserDims2
+                ? dims.height
+                : this.properties.bgImageDims?.height ??
+                  this.editor.heightWidget.value;
+
+            this.editor.width = canvasWidth;
+            this.editor.height = canvasHeight;
+            this.editor.vis.width(canvasWidth);
+            this.editor.vis.height(canvasHeight);
+            this.editor.vis.render();
+
+            // Update video position
+            if (this.editor.videoElement && this.editor.videoMetadata) {
+              const { recenterBackgroundVideo } = await import(
+                './canvas/canvas_video_background.js'
+              );
+              recenterBackgroundVideo(this.editor);
+            }
+
+            // Scale spline points
+            const oldWidth = this.editor.width || canvasWidth;
+            const oldHeight = this.editor.height || canvasHeight;
+            const scaleX = canvasWidth / oldWidth;
+            const scaleY = canvasHeight / oldHeight;
+
+            const splineWidgets = this.widgets?.filter(
+              w =>
+                w instanceof PowerSplineWidget ||
+                w instanceof HandDrawLayerWidget ||
+                w instanceof BoxLayerWidget
+            );
+
+            splineWidgets?.forEach(widget => {
+              if (widget.value.points_store) {
+                try {
+                  let points = JSON.parse(widget.value.points_store);
+                  const transformedPoints = points.map(point => ({
+                    ...point,
+                    x: point.x * scaleX,
+                    y: point.y * scaleY
+                  }));
+                  widget.value.points_store = JSON.stringify(
+                    transformedPoints
+                  );
+                } catch (e) {
+                  console.error(
+                    'Error updating spline points for new dimensions:',
+                    e
+                  );
+                }
+              }
+            });
+
+            if (this.editor.layerRenderer) {
+              this.editor.layerRenderer.render();
+            }
+          }
+
+          // Restore image from session
+          if (this.uuid) {
+            const sessionImgData = sessionStorage.getItem(
+              `spline-editor-img-${this.uuid}`
+            );
+            if (sessionImgData) {
+              this.imgData = JSON.parse(sessionImgData);
+            } else if (this.properties.imgData) {
+              this.imgData = this.properties.imgData;
+              delete this.properties.imgData;
+            }
+
+            // Restore video from session
+            const sessionVideoData = sessionStorage.getItem(
+              `spline-editor-video-${this.uuid}`
+            );
+            if (sessionVideoData) {
+              this.videoData = JSON.parse(sessionVideoData);
+              console.log(
+                '[PowerSplineEditor onConfigure] Restored video data from session:',
+                this.videoData
+              );
+            }
+          }
+
+          // Create editor if needed
+          if (!this.editor) {
+            this.editor = new SplineEditor2(this);
+          }
+
+          // Restore video background
+          if (this.videoData && !this.imgData && this.editor) {
+            console.log('[PowerSplineEditor onConfigure] Restoring video background');
+            const { loadBackgroundVideo } = await import(
+              './canvas/canvas_video_background.js'
+            );
+            if (loadBackgroundVideo) {
+              loadBackgroundVideo(this.editor, this.videoData);
+            }
+          }
+
+          // Refresh background image
+          if (this.editor && this.imgData) {
+            this.editor?.refreshBackgroundImage?.();
+          } else if (this.editor) {
+            const bgImgWidget = this.widgets?.find(w => w.name === 'bg_img');
+            const bg_img = bgImgWidget?.value || 'None';
+
+            let targetWidth, targetHeight;
+            const savedDims = sessionStorage.getItem(
+              `spline-editor-dims-${this.uuid}`
+            );
+            if (savedDims) {
+              const dims = JSON.parse(savedDims);
+              targetWidth = dims.width;
+              targetHeight = dims.height;
+            } else if (this.properties.bgImageDims) {
+              targetWidth = this.properties.bgImageDims.width;
+              targetHeight = this.properties.bgImageDims.height;
+            }
+
+            if (bg_img === 'None') {
+              // Load cached or default
+              const cachedImageUrl =
+                await this.bgImageManager._loadCorrectCachedRefImage();
+              if (cachedImageUrl) {
+                await this.bgImageManager._applyDarkeningEffectFromUrl(
+                  cachedImageUrl
+                );
+              } else {
+                const timestamp = Date.now();
+                const defaultImageUrl = new URL(
+                  `bg/A.jpg?t=${timestamp}`,
+                  import.meta.url
+                ).href;
+                await this.bgImageManager._applyDarkeningEffectFromUrl(
+                  defaultImageUrl
+                );
+              }
+            } else {
+              const timestamp = Date.now();
+              const imageUrl = new URL(
+                `bg/${bg_img}.jpg?t=${timestamp}`,
+                import.meta.url
+              ).href;
+
+              const cachedImageUrl =
+                await this.bgImageManager._loadCorrectCachedRefImage();
+              if (cachedImageUrl) {
+                await this.bgImageManager.createScaledImageOverlay(
+                  cachedImageUrl,
+                  bg_img,
+                  imageUrl
+                );
+              } else {
+                this.bgImageManager.loadBackgroundImageFromUrl(
+                  imageUrl,
+                  `${bg_img}.jpg`,
+                  targetWidth,
+                  targetHeight
+                );
+              }
+            }
+          }
+
+          // Force active layer update
+          if (this.editor) {
+            const activeWidget = this.layerManager.getActiveWidget();
+            if (activeWidget) {
+              this.layerManager.activeWidget = null;
+              this.layerManager.setActiveWidget(activeWidget);
+            }
+          }
+        } catch (error) {
+          console.error('An error occurred while configuring the editor:', error);
+        }
+      });
+
+      // ============================================================== 
+      // NODE EXECUTED
+      // ============================================================
+      chainCallback(nodeType.prototype, 'onExecuted', async function (message) {
+        let ref_image = message['ref_image'];
+        let coord_in = message['coord_in'];
+        let ref_image_dims = message['ref_image_dims'];
+        let bg_img = message['bg_img']?.[0] || 'None';
+
+        console.log('[PowerSplineEditor onExecuted] Received message:', message);
+
+        // ============================================================
+        // == HANDLE VIDEO
+        // ============================================================
+        if (message.bg_video?.length > 0) {
+          const videoInfo = message.bg_video[0];
+          this.videoManager.handleVideoFromExecution(videoInfo);
+        } else {
+          console.log('[PowerSplineEditor] No bg_video in message');
+          if (this.editor?.videoMetadata) {
+            console.log(
+              '[PowerSplineEditor] Clearing video metadata (switching to image)'
+            );
+            this.editor.videoMetadata = null;
+            if (this.editor.videoElement) {
+              this.editor.videoElement.pause();
+              this.editor.videoElement.style.display = 'none';
+            }
+          }
+          this.videoData = null;
+        }
+
+        // ============================================================== 
+        // HANDLE DIMENSIONS
+        // ============================================================
+        if (ref_image_dims?.length > 0) {
+          const dims = ref_image_dims[0];
+          if (dims.width && dims.height) {
+            this.properties = this.properties || {};
+            if (!this.properties.userAdjustedDims) {
+              this.properties.bgImageDims = {
+                width: dims.width,
+                height: dims.height
+              };
+
+              try {
+                safeSetSessionItem(
+                  `spline-editor-dims-${this.uuid}`,
+                  JSON.stringify({
+                    width: dims.width,
+                    height: dims.height
+                  })
+                );
+              } catch (e) {
+                console.error('Could not save dimensions to session storage', e);
+              }
+            } else {
+              console.log(
+                'Skipped storing ref_image dimensions (user has manually adjusted)'
+              );
+            }
+          }
+        }
+
+        // ============================================================== 
+        // FINISH EXECUTION
+        // ============================================================
+        const finishExecution = (imgData) => {
+          if (imgData) {
+            this.imgData = imgData;
+            try {
+              const size = JSON.stringify(this.imgData).length;
+              if (size < 640 * 480) {
+                safeSetSessionItem(
+                  `spline-editor-img-${this.uuid}`,
+                  JSON.stringify(this.imgData)
+                );
+              }
+            } catch (e) {
+              console.error('Could not save image to session storage', e);
+            }
+            if (this.properties.imgData) {
+              delete this.properties.imgData;
+            }
+          }
+
+          // Initialize editor if needed
+          if (!this.editor) {
+            this.editor = new SplineEditor2(this, false);
+          }
+
+          const finishEditorSetup = async () => {
+            if (coord_in) {
+              const coord_in_str = Array.isArray(coord_in)
+                ? coord_in.join('')
+                : coord_in;
+              this.editor.drawPreviousSpline(coord_in_str);
+            }
+
+            // ✅ WAIT for video scale to be set before loading coordinates
+            if (message.bg_video?.length > 0 && this.editor?.videoMetadata) {
+              console.log('[PowerSplineEditor] Video detected, waiting for scale to be set...');
+
+              // Wait for video to be ready with scale set
+              await new Promise((resolve) => {
+                const checkReady = () => {
+                  // Check if video scale is set and stable
+                  if (this.editor.videoScale && this.editor.scale && Math.abs(this.editor.scale - this.editor.videoScale) < 0.001) {
+                    console.log('[PowerSplineEditor] Video scale ready:', this.editor.scale);
+                    resolve();
+                  } else {
+                    // Poll every 100ms until ready
+                    setTimeout(checkReady, 100);
+                  }
+                };
+
+                // Start checking (with timeout of 5 seconds)
+                const timeoutId = setTimeout(() => {
+                  console.warn('[PowerSplineEditor] Video scale not ready after 5s, proceeding anyway');
+                  resolve();
+                }, 5000);
+
+                checkReady();
+              });
+            }
+
+            if (this.editor && this.imgData) {
+              this.editor?.refreshBackgroundImage?.();
+            } else if (this.editor) {
+              this.editor?.vis?.render();
+            }
           };
 
-          // Add context menu methods for right-click on spline widgets
-          nodeType.prototype.getSlotInPosition = getSlotInPosition;
-          nodeType.prototype.getSlotMenuOptions = getSlotMenuOptions;
+          // Call the async function
+          finishEditorSetup().catch(error => {
+            console.error('[PowerSplineEditor] Error setting up editor:', error);
+          });
+        };
 
-        }//node created
-      } //before register
-})//register
+        // ============================================================
+        // == HANDLE REFERENCE IMAGE
+        // ============================================================
+        if (message.bg_image_path?.length > 0) {
+            const imagePath = message.bg_image_path[0];
+            const imageName = imagePath.split('/').pop();
+            const timestamp = new Date().getTime();
+            const imageUrl = new URL(imagePath + '?t=' + timestamp, import.meta.url);
+
+            console.log(`[onExecuted] Loading new background image from path: ${imageUrl.href}`);
+            
+            const targetWidth = ref_image_dims?.[0]?.width;
+            const targetHeight = ref_image_dims?.[0]?.height;
+
+            this.bgImageManager.loadBackgroundImageFromUrl(
+                imageUrl.href,
+                imageName,
+                targetWidth,
+                targetHeight
+            );
+        } else if (ref_image) {
+          saveRefImageToCache(ref_image, 'bg_image.png').then(success => {
+            if (success) {
+              console.log('Ref image cached successfully for future use');
+            } else {
+              console.warn('Failed to cache ref image');
+            }
+          });
+
+          const timestamp = Date.now();
+          const bgImageUrl = new URL(
+            `bg/${bg_img}.jpg?t=${timestamp}`,
+            import.meta.url
+          ).href;
+          processBgImage(ref_image, bg_img, bgImageUrl, finishExecution);
+        } else {
+          finishExecution(this.imgData);
+        }
+      });
+
+      // ============================================================
+      // == NODE CONTEXT MENU
+      // ============================================================
+      const originalOnContextMenu = nodeType.prototype.onContextMenu;
+      nodeType.prototype.onContextMenu = function (x, y, menu, node) {
+        for (const widget of this.layerManager.getSplineWidgets()) {
+          if (widget.hitAreas?.drivenToggle) {
+            const drivenToggleBounds = widget.hitAreas.drivenToggle.bounds;
+            const widgetAbsX = this.pos[0];
+            const widgetAbsY = this.pos[1] + widget.last_y;
+
+            const toggleWidth = LiteGraph.NODE_WIDGET_HEIGHT * 0.72;
+            const toggleAbsXStart = widgetAbsX + drivenToggleBounds[0];
+            const toggleAbsXEnd = toggleAbsXStart + toggleWidth;
+            const toggleAbsYStart = widgetAbsY;
+            const toggleAbsYEnd = widgetAbsY + LiteGraph.NODE_WIDGET_HEIGHT;
+
+            if (
+              x >= toggleAbsXStart &&
+              x <= toggleAbsXEnd &&
+              y >= toggleAbsYStart &&
+              y <= toggleAbsYEnd
+            ) {
+              showCustomDrivenToggleMenu(null, widget, { x, y });
+              return false;
+            }
+          }
+        }
+
+        return originalOnContextMenu?.apply(this, arguments);
+      };
+
+      // ============================================================
+      // == NODE SERIALIZATION
+      // ============================================================
+      const onSerialize = nodeType.prototype.onSerialize;
+      nodeType.prototype.onSerialize = function (o) {
+        const coordinatesWidget = this.widgets.find(w => w.name === 'coordinates');
+        if (coordinatesWidget) {
+          const splineWidgets = this.widgets.filter(
+            w =>
+              w instanceof PowerSplineWidget ||
+              w instanceof HandDrawLayerWidget ||
+              w instanceof BoxLayerWidget
+          );
+          const values = splineWidgets
+            .map(w => w.value)
+            .filter(v => v);
+          coordinatesWidget.value = JSON.stringify(values);
+        }
+        onSerialize?.apply(this, arguments);
+      };
+
+      // Add context menu methods
+      nodeType.prototype.getSlotInPosition = getSlotInPosition;
+      nodeType.prototype.getSlotMenuOptions = getSlotMenuOptions;
+    }
+  }
+});

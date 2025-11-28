@@ -5,9 +5,13 @@ from io import BytesIO
 from PIL import Image
 import torch
 import numpy as np
+from pathlib import Path
+import os
+import folder_paths
 
 # Import PrepareRefs class
 from .prepare_refs import PrepareRefs
+from .video_background_handler import should_create_video, save_frames_as_video
 
 
 def pil_to_tensor(pil_img):
@@ -69,24 +73,51 @@ async def trigger_prepare_refs(request):
                 "error": "No ref_layer_data or extra_refs provided"
             }, status=400)
 
-        # Decode bg_image to tensor
+        # Decode bg_image to tensor (supports both single images and video frames)
         bg_tensor = None
+        bg_is_video = False
         if bg_image_b64:
-            # Remove data URL prefix if present
-            if bg_image_b64.startswith('data:image'):
-                bg_image_b64 = bg_image_b64.split(',', 1)[1]
+            # Check if bg_image_b64 is a list (video frames) or string (single image)
+            if isinstance(bg_image_b64, list):
+                # Multiple frames - video
+                bg_is_video = True
+                bg_frames = []
+                for idx, frame_b64 in enumerate(bg_image_b64):
+                    # Remove data URL prefix if present
+                    if frame_b64.startswith('data:image'):
+                        frame_b64 = frame_b64.split(',', 1)[1]
 
-            image_bytes = base64.b64decode(bg_image_b64)
-            pil_img = Image.open(BytesIO(image_bytes))
+                    image_bytes = base64.b64decode(frame_b64)
+                    pil_img = Image.open(BytesIO(image_bytes))
 
-            # Convert to RGB if needed
-            if pil_img.mode != 'RGB':
-                pil_img = pil_img.convert('RGB')
+                    # Convert to RGB if needed
+                    if pil_img.mode != 'RGB':
+                        pil_img = pil_img.convert('RGB')
 
-            print(f"[trigger_prepare_refs] Decoded bg_image: {pil_img.size}, mode: {pil_img.mode}")
+                    # Convert to tensor [H, W, C]
+                    frame_tensor = pil_to_tensor(pil_img)
+                    bg_frames.append(frame_tensor)
 
-            # Convert to tensor [1, H, W, C]
-            bg_tensor = pil_to_tensor(pil_img).unsqueeze(0)
+                # Stack into [B, H, W, C]
+                bg_tensor = torch.stack(bg_frames, dim=0)
+                print(f"[trigger_prepare_refs] Decoded bg_video: {len(bg_frames)} frames, shape: {bg_tensor.shape}")
+            else:
+                # Single image
+                # Remove data URL prefix if present
+                if bg_image_b64.startswith('data:image'):
+                    bg_image_b64 = bg_image_b64.split(',', 1)[1]
+
+                image_bytes = base64.b64decode(bg_image_b64)
+                pil_img = Image.open(BytesIO(image_bytes))
+
+                # Convert to RGB if needed
+                if pil_img.mode != 'RGB':
+                    pil_img = pil_img.convert('RGB')
+
+                print(f"[trigger_prepare_refs] Decoded bg_image: {pil_img.size}, mode: {pil_img.mode}")
+
+                # Convert to tensor [1, H, W, C]
+                bg_tensor = pil_to_tensor(pil_img).unsqueeze(0)
 
         # Decode extra_refs to tensor if provided
         extra_refs_tensor = None
@@ -185,6 +216,45 @@ async def trigger_prepare_refs(request):
             "ref_masks": ui_data.get("ref_masks_paths", [])
         }
 
+        # Handle video background if bg_image was a video
+        if bg_is_video and bg_tensor is not None and should_create_video(bg_tensor):
+            try:
+                # Get the web directory path - SAVE TO power_spline_editor FOLDER
+                web_dir = Path(__file__).parent.parent / "web" / "power_spline_editor"
+                bg_folder = web_dir / "bg"
+                bg_folder.mkdir(parents=True, exist_ok=True)
+                video_path = bg_folder / "bg_video.mp4"
+
+                # Calculate appropriate FPS
+                num_frames = bg_tensor.shape[0]
+                video_fps = min(30.0, max(12.0, float(num_frames) / 2.0)) if num_frames > 1 else 24.0
+
+                print(f"[trigger_prepare_refs] Creating bg_video with {num_frames} frames at {video_fps} fps")
+
+                # Save video
+                video_metadata = save_frames_as_video(
+                    images=bg_tensor,
+                    output_path=str(video_path),
+                    fps=video_fps,
+                    codec="libx264",
+                    quality=23
+                )
+
+                # Add video metadata to response
+                paths["bg_video"] = {
+                    "path": "power_spline_editor/bg/bg_video.mp4",  # UPDATED PATH
+                    "num_frames": video_metadata["num_frames"],
+                    "fps": video_metadata["fps"],
+                    "width": video_metadata["width"],
+                    "height": video_metadata["height"],
+                    "duration": video_metadata["duration"]
+                }
+
+                print(f"[trigger_prepare_refs] bg_video created successfully: {video_metadata}")
+            except Exception as e:
+                print(f"[trigger_prepare_refs] WARNING: Failed to create bg_video: {e}")
+                # Continue without video - not a critical error
+
         print(f"[trigger_prepare_refs] Processing complete. Generated paths: {paths}")
 
         # Calculate total refs processed
@@ -203,6 +273,187 @@ async def trigger_prepare_refs(request):
 
     except Exception as e:
         print(f"[trigger_prepare_refs] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+@PromptServer.instance.routes.post("/wanvideowrapper_qq/process_video_file")
+async def process_video_file(request):
+    """
+    Process video file from ComfyUI input folder and create bg_video.mp4
+
+    Input JSON:
+    {
+        "video_filename": "video.mp4",
+        "mask_width": 640,
+        "mask_height": 480
+    }
+
+    Output JSON:
+    {
+        "success": true/false,
+        "paths": {
+            "bg_video": {
+                "path": "bg/bg_video.mp4",
+                "num_frames": 120,
+                "fps": 24.0,
+                "width": 1920,
+                "height": 1080,
+                "duration": 5.0
+            }
+        },
+        "message": "Video processed successfully",
+        "error": "error message if failed"
+    }
+    """
+    try:
+        import cv2
+
+        data = await request.json()
+        video_filename = data.get("video_filename")
+        mask_width = data.get("mask_width", 640)
+        mask_height = data.get("mask_height", 480)
+
+        print(f"[process_video_file DEBUG] Received data: {data}")
+        print(f"[process_video_file DEBUG] Video filename: {video_filename}")
+        print(f"[process_video_file DEBUG] Mask dimensions: {mask_width}x{mask_height}")
+
+        if not video_filename:
+            print("[process_video_file DEBUG] No video_filename provided")
+            return web.json_response({
+                "success": False,
+                "error": "No video_filename provided"
+            }, status=400)
+
+        print(f"[process_video_file] Processing video: {video_filename}")
+
+        # Get ComfyUI input folder
+        input_dir = folder_paths.get_input_directory()
+        print(f"[process_video_file DEBUG] Input directory: {input_dir}")
+        
+        video_path = os.path.join(input_dir, video_filename)
+        print(f"[process_video_file DEBUG] Full video path: {video_path}")
+
+        if not os.path.exists(video_path):
+            print(f"[process_video_file DEBUG] Video file not found at: {video_path}")
+            return web.json_response({
+                "success": False,
+                "error": f"Video file not found: {video_filename}"
+            }, status=404)
+
+        # Load video with OpenCV
+        cap = cv2.VideoCapture(video_path)
+        print(f"[process_video_file DEBUG] OpenCV VideoCapture created")
+
+        if not cap.isOpened():
+            print(f"[process_video_file DEBUG] Could not open video file with OpenCV")
+            return web.json_response({
+                "success": False,
+                "error": f"Could not open video file: {video_filename}"
+            }, status=400)
+
+        # Get video properties
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        print(f"[process_video_file] Video properties: {frame_count} frames, {fps} fps, {width}x{height}")
+        print(f"[process_video_file DEBUG] Raw OpenCV values - FPS: {fps}, Frame Count: {frame_count}, Width: {width}, Height: {height}")
+
+        # Read all frames
+        frames = []
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print(f"[process_video_file DEBUG] Failed to read frame {frame_idx}, stopping")
+                break
+
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Convert to tensor [H, W, C] in range [0, 1]
+            frame_tensor = torch.from_numpy(frame_rgb).float() / 255.0
+            frames.append(frame_tensor)
+            frame_idx += 1
+            
+            # Log first few frames for debugging
+            if frame_idx <= 3:
+                print(f"[process_video_file DEBUG] Frame {frame_idx} shape: {frame_rgb.shape}")
+
+        cap.release()
+        print(f"[process_video_file DEBUG] VideoCapture released, read {len(frames)} frames")
+
+        if len(frames) == 0:
+            print(f"[process_video_file DEBUG] No frames were read from video")
+            return web.json_response({
+                "success": False,
+                "error": "No frames could be read from video"
+            }, status=400)
+
+        # Stack into batch [B, H, W, C]
+        frames_tensor = torch.stack(frames, dim=0)
+
+        print(f"[process_video_file] Loaded {len(frames)} frames, tensor shape: {frames_tensor.shape}")
+
+        # Create bg_video.mp4
+        web_dir = Path(__file__).parent.parent / "web" / "power_spline_editor"  # UPDATED
+        bg_folder = web_dir / "bg"
+        bg_folder.mkdir(parents=True, exist_ok=True)
+        output_video_path = bg_folder / "bg_video.mp4"
+
+        print(f"[process_video_file DEBUG] Output directory: {bg_folder}")
+        print(f"[process_video_file DEBUG] Output path: {output_video_path}")
+
+        # Calculate appropriate FPS
+        video_fps = fps if fps > 0 else 24.0
+        print(f"[process_video_file DEBUG] Using FPS: {video_fps}")
+
+        print(f"[process_video_file] Creating bg_video.mp4 with {len(frames)} frames at {video_fps} fps")
+
+        # Save video
+        try:
+            video_metadata = save_frames_as_video(
+                images=frames_tensor,
+                output_path=str(output_video_path),
+                fps=video_fps,
+                codec="libx264",
+                quality=23
+            )
+            print(f"[process_video_file DEBUG] save_frames_as_video returned: {video_metadata}")
+        except Exception as save_error:
+            print(f"[process_video_file DEBUG] Error in save_frames_as_video: {save_error}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+        # Add path info
+        result_metadata = {
+            "path": "power_spline_editor/bg/bg_video.mp4",  # UPDATED PATH
+            "num_frames": video_metadata["num_frames"],
+            "fps": video_metadata["fps"],
+            "width": video_metadata["width"],
+            "height": video_metadata["height"],
+            "duration": video_metadata["duration"]
+        }
+
+        print(f"[process_video_file] Video created successfully: {result_metadata}")
+
+        return web.json_response({
+            "success": True,
+            "paths": {
+                "bg_video": result_metadata
+            },
+            "message": f"Video processed successfully: {len(frames)} frames"
+        })
+
+    except Exception as e:
+        print(f"[process_video_file] ERROR: {e}")
         import traceback
         traceback.print_exc()
         return web.json_response({

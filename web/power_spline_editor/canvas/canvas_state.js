@@ -76,7 +76,16 @@ export function attachStateHelpers(editor) {
   editor.isShortcutActive = (key) => {
     if (!key) return false;
     const normalized = String(key).toLowerCase();
-    return !!(editor._shortcutKeys && editor._shortcutKeys[normalized]);
+    const lastKeyDownTime = editor._shortcutKeys && editor._shortcutKeys[normalized];
+
+    if (lastKeyDownTime === undefined || lastKeyDownTime === 0) {
+      return false; // Key is not currently pressed or hasn't been pressed
+    }
+    // Consider key active if it was pressed recently (e.g., within a small time window)
+    // to account for race conditions between keydown and mousedown events.
+    const currentTime = performance.now();
+    const latencyThreshold = 500; // milliseconds - increased to account for longer delays
+    return (currentTime - lastKeyDownTime < latencyThreshold);
   };
 
   editor.ensurePointUids = (points) => {
@@ -147,42 +156,26 @@ export function attachStateHelpers(editor) {
   };
 
   editor.normalizePoints = function normalizePoints(points) {
+    const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
+    const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
+
     return points.map(p => {
-      const { x, y } = p;
-      let nx, ny;
-      if (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0) {
-        const relX = x - editor.offsetX;
-        const relY = y - editor.offsetY;
-        const origX = relX / editor.scale;
-        const origY = relY / editor.scale;
-        nx = origX / editor.originalImageWidth;
-        ny = origY / editor.originalImageHeight;
-      } else {
-        nx = x / editor.width;
-        ny = y / editor.height;
-      }
+      const { x, y } = p; // These are media space points
+      const nx = x / mediaWidth;
+      const ny = y / mediaHeight;
       return { ...p, x: nx, y: ny };
     });
   };
 
   editor.denormalizePoints = function denormalizePoints(points) {
-    const isNormalized = points.every(p => Math.abs(p.x) < 10 && Math.abs(p.y) < 10);
-    if (!isNormalized) {
-      return points;
-    }
+    const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
+    const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
 
+    // Assume stored points are always normalized.
     return points.map(p => {
-      const { x: nx, y: ny } = p;
-      let x, y;
-      if (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0) {
-        const origX = nx * editor.originalImageWidth;
-        const origY = ny * editor.originalImageHeight;
-        x = (origX * editor.scale) + editor.offsetX;
-        y = (origY * editor.scale) + editor.offsetY;
-      } else {
-        x = nx * editor.width;
-        y = ny * editor.height;
-      }
+      const { x: nx, y: ny } = p; // These are normalized points
+      const x = nx * mediaWidth;
+      const y = ny * mediaHeight;
       return { ...p, x, y };
     });
   };

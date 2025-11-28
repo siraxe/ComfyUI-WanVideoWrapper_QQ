@@ -19,10 +19,25 @@ import { getReferenceImageFromConnectedNode, findConnectedSourceNode, extractIma
 export async function triggerPrepareRefsBackend(node) {
     try {
         // 1. Get current bg_image from connected node or canvas
+        // Support both single images and video frames (array of base64 images)
         let bgImageBase64 = null;
 
         // Try to get from connected node first
-        bgImageBase64 = await getReferenceImageFromConnectedNode(node, 'bg_image');
+        const sourceNode = findConnectedSourceNode(node, 'bg_image');
+        if (sourceNode) {
+            // Check if it's a multi-frame source (video/batch)
+            const images = await extractImagesFromSourceNode(sourceNode, false);
+            if (images && images.length > 0) {
+                if (images.length > 1) {
+                    // Multiple frames - send as array for video processing
+                    bgImageBase64 = images;
+                    console.log(`[triggerPrepareRefsBackend] Got ${images.length} frames from bg_image (video)`);
+                } else {
+                    // Single frame
+                    bgImageBase64 = images[0];
+                }
+            }
+        }
 
         // Fallback: get from canvas if available
         if (!bgImageBase64 && node.refCanvasEditor?.backgroundImage) {

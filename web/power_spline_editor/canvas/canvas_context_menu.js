@@ -1,5 +1,8 @@
 export function attachContextMenuHandlers(editor) {
   editor.createContextMenu = () => {
+    if (!editor.node.menuItems) {
+      return;
+    }
     editor.node.menuItems.forEach((menuItem, index) => {
       menuItem.addEventListener('click', (e) => {
         e.preventDefault();

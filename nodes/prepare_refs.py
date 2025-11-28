@@ -608,7 +608,11 @@ class PrepareRefs:
             return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks)}
 
         # Extract per-layer images and masks (full-size)
-        ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, width, height, valid_ref_layers, export_alpha)
+        # Use the actual dimensions of internal_processing_image to ensure masks match
+        mask_width = internal_processing_image.shape[2] if internal_processing_image is not None else width
+        mask_height = internal_processing_image.shape[1] if internal_processing_image is not None else height
+        print(f"[PrepareRefs INFO] Extracting lasso shapes at {mask_width}x{mask_height} (internal_processing_image dimensions)")
+        ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, mask_width, mask_height, valid_ref_layers, export_alpha)
 
         # Define fixed square size for all ref images
         FIXED_SQUARE_SIZE = 768
@@ -640,10 +644,15 @@ class PrepareRefs:
         if ref_masks is not None and ref_masks.shape[0] > 0:
             combined_original_dims_mask = combine_masks_union(ref_masks)
         else:
-            combined_original_dims_mask = torch.zeros((height, width), dtype=torch.float32, device=output_bg_image.device)
+            # Create zero mask with dimensions matching output_bg_image
+            mask_height = output_bg_image.shape[1]
+            mask_width = output_bg_image.shape[2]
+            combined_original_dims_mask = torch.zeros((mask_height, mask_width), dtype=torch.float32, device=output_bg_image.device)
+            print(f"[PrepareRefs INFO] Created zero mask with dimensions {mask_width}x{mask_height} to match output_bg_image")
 
         # Apply inpainting if combined mask has active areas
         if torch.any(combined_original_dims_mask > MASK_THRESHOLD):
+            print(f"[PrepareRefs INFO] Applying inpainting with mask of shape {combined_original_dims_mask.shape} to bg_image of shape {output_bg_image.shape}")
             output_bg_image = inpaint_background_torch(output_bg_image, combined_original_dims_mask)
 
         # Determine bounding boxes and optionally crop to square images
@@ -915,8 +924,12 @@ class PrepareRefs:
 
         if bg_image is not None:
             # bg_image expected shape: [B,H,W,C] or [1,H,W,C]
-            final_h = bg_image.shape[1]
-            final_w = bg_image.shape[2]
+            original_h = bg_image.shape[1]
+            original_w = bg_image.shape[2]
+
+            # NEVER resize bg_image - keep original size at all costs
+            print(f"[PrepareRefs INFO] Keeping bg_image at ORIGINAL SIZE: {original_w}x{original_h} (not resizing to {final_w}x{final_h})")
+
             output_bg_image = bg_image
             internal_processing_image = bg_image
         else:

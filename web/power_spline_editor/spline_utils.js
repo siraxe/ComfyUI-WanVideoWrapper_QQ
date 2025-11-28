@@ -4,6 +4,8 @@ import { initializeDrivenConfig, initializeEasingConfig, toggleDrivenState, prep
 import { NodeSizeManager } from './node_size_manager.js';
 import { PowerSplineHeaderWidget } from './layer_header.js';
 import { PowerSplineWidget } from './layer_type_spline.js';
+import { HandDrawLayerWidget } from './layer_type_draw.js';
+import { BoxLayerWidget } from './layer_type_box.js';
 import { TopRowWidget } from './canvas_top_row.js';
 import {
     binarySearch,
@@ -22,6 +24,8 @@ export {
     NodeSizeManager,
     PowerSplineHeaderWidget,
     PowerSplineWidget,
+    HandDrawLayerWidget,
+    BoxLayerWidget,
     TopRowWidget,
     binarySearch,
     fitString,
@@ -33,6 +37,82 @@ export {
     drawNumberWidgetPart,
     RgthreeBaseWidget
 };
+
+/**
+ * Transform mouse coordinates from canvas space to video/image space
+ * @param {Object} splineEditor - The spline editor instance
+ * @param {number} mouseX - Mouse X coordinate in canvas space
+ * @param {number} mouseY - Mouse Y coordinate in canvas space
+ * @returns {Object} Transformed coordinates in video/image space
+ */
+export function transformMouseToVideoSpace(splineEditor, mouseX, mouseY) {
+    // If video is loaded, transform from canvas to video coordinates
+    if (splineEditor.videoMetadata && splineEditor.videoScale !== undefined && splineEditor.videoScale !== null) {
+        const videoScale = splineEditor.videoScale;
+        const videoOffsetX = splineEditor.videoOffsetX || 0;
+        const videoOffsetY = splineEditor.videoOffsetY || 0;
+        
+        // Directly convert from canvas to original media pixel coordinates
+        const origX = (mouseX - videoOffsetX) / videoScale;
+        const origY = (mouseY - videoOffsetY) / videoScale;
+        
+        return { x: origX, y: origY };
+    }
+    
+    // Fallback to image space transformation
+    if (splineEditor.originalImageWidth && splineEditor.originalImageHeight && splineEditor.scale > 0) {
+        const canvasScale = splineEditor.scale;
+        const offsetX = splineEditor.offsetX || 0;
+        const offsetY = splineEditor.offsetY || 0;
+        
+        // Directly convert from canvas to original media pixel coordinates
+        const origX = (mouseX - offsetX) / canvasScale;
+        const origY = (mouseY - offsetY) / canvasScale;
+        
+        return { x: origX, y: origY };
+    }
+    
+    // No transformation needed
+    return { x: mouseX, y: mouseY };
+}
+
+/**
+ * Transform coordinates from video/image space to canvas space
+ * @param {Object} splineEditor - The spline editor instance
+ * @param {number} x - X coordinate in video/image space
+ * @param {number} y - Y coordinate in video/image space
+ * @returns {Object} Transformed coordinates in canvas space
+ */
+export function transformVideoToCanvasSpace(splineEditor, x, y) {
+    // If video is loaded, transform from video to canvas coordinates
+    if (splineEditor.videoMetadata && splineEditor.videoScale !== undefined && splineEditor.videoScale !== null) {
+        const videoScale = splineEditor.videoScale;
+        const videoOffsetX = splineEditor.videoOffsetX || 0;
+        const videoOffsetY = splineEditor.videoOffsetY || 0;
+        
+        // Directly convert from original media pixel coordinates to canvas coordinates
+        const canvasX = (x * videoScale) + videoOffsetX;
+        const canvasY = (y * videoScale) + videoOffsetY;
+        
+        return { x: canvasX, y: canvasY };
+    }
+    
+    // Fallback to image space transformation
+    if (splineEditor.originalImageWidth && splineEditor.originalImageHeight && splineEditor.scale > 0) {
+        const canvasScale = splineEditor.scale;
+        const offsetX = splineEditor.offsetX || 0;
+        const offsetY = splineEditor.offsetY || 0;
+        
+        // Directly convert from original media pixel coordinates to canvas coordinates
+        const canvasX = (x * canvasScale) + offsetX;
+        const canvasY = (y * canvasScale) + offsetY;
+        
+        return { x: canvasX, y: canvasY };
+    }
+    
+    // No transformation needed
+    return { x, y };
+}
 
 //from melmass
 // IMPORTANT: These must match config/constants.py - keep them in sync!

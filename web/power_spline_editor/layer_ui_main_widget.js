@@ -21,6 +21,7 @@ import { createButtonBarWidget } from './layer_add_buttons.js';
 import { PowerSplineWidget } from './layer_type_spline.js';
 import { HandDrawLayerWidget } from './layer_type_draw.js';
 import { BoxLayerWidget } from './layer_type_box.js';
+import { hasBackgroundVideo, syncVideoToFrame } from './canvas/canvas_video_background.js';
 
 /**
  * SplineLayerManager - Manages the lifecycle of all layer widgets
@@ -50,6 +51,16 @@ export class SplineLayerManager {
                 ed.exitHanddrawMode?.(false);
             }
         } catch {}
+
+        // Sync video to box layer timeline position
+        if (widget?.value?.type === 'box_layer') {
+            const currentFrame = widget.value.box_timeline_point || 1;
+            const editor = this.node?.editor;
+            if (editor && hasBackgroundVideo(editor)) {
+                syncVideoToFrame(editor, currentFrame);
+            }
+        }
+
         this.activeWidget = widget;
         if (this.node.editor) {
             this.node.editor.onActiveLayerChanged(); // Notify canvas

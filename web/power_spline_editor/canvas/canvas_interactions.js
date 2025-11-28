@@ -1,5 +1,5 @@
 import { app } from '../../../../scripts/app.js';
-import { BOX_BASE_RADIUS } from '../spline_utils.js';
+import { BOX_BASE_RADIUS, transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js';
 
 export function attachInteractionHandlers(editor) {
   editor.isRotatingBoxHandle = false;
@@ -20,10 +20,12 @@ export function attachInteractionHandlers(editor) {
     for (let idx = 0; idx < editor.points.length; idx++) {
       const point = editor.points[idx];
       if (!point) continue;
-      const dx = Math.abs(coords.x - (point.x ?? 0));
-      const dy = Math.abs(coords.y - (point.y ?? 0));
+      // Convert point to canvas space for comparison with coords (which are in canvas space)
+      const canvasPoint = transformVideoToCanvasSpace(editor, point.x ?? 0, point.y ?? 0);
+      const dx = Math.abs(coords.x - canvasPoint.x);
+      const dy = Math.abs(coords.y - canvasPoint.y);
       const maxDist = Math.max(dx, dy);
-      const radius = editor.getBoxPointRadius(point);
+      const radius = editor.getBoxPointRadius(point); // This radius is already in canvas space
       if (maxDist > radius) {
         continue;
       }
@@ -84,10 +86,20 @@ export function attachInteractionHandlers(editor) {
     const e = (event.touches && event.touches.length > 0) ? event.touches[0] : event;
     const rect = canvasEl.getBoundingClientRect();
     const scale = app.canvas.ds.scale || 1;
-    return {
+    
+    let coords = {
       x: (e.clientX - rect.left) / scale,
       y: (e.clientY - rect.top) / scale
     };
+    
+    // For video backgrounds, we need to transform from canvas to video space
+    // but for rendering controls, we want to keep them in canvas space
+    // So we only transform for internal operations, not for rendering
+    const videoSpaceCoords = transformMouseToVideoSpace(editor, coords.x, coords.y);
+    coords.videoSpaceX = videoSpaceCoords.x;
+    coords.videoSpaceY = videoSpaceCoords.y;
+    
+    return coords;
   };
 
   editor._updateBoxRotationFromCoords = (coords) => {
@@ -101,8 +113,8 @@ export function attachInteractionHandlers(editor) {
     if (!point) {
       return;
     }
-    const dx = (coords.x ?? 0) - (point.x ?? 0);
-    const dy = (coords.y ?? 0) - (point.y ?? 0);
+    const dx = (coords.videoSpaceX ?? 0) - (point.x ?? 0); // Use videoSpaceX
+    const dy = (coords.videoSpaceY ?? 0) - (point.y ?? 0); // Use videoSpaceY
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
       return;
     }
@@ -129,8 +141,21 @@ export function attachInteractionHandlers(editor) {
       const currentRotation = point.rotation || point.boxRotation || 0;
       point.rotation = currentRotation + delta;
       point.boxRotation = point.rotation;
-    } else {
-      // First update - set initial rotation
+    } else if (editor._initialBoxHandleAngle !== undefined) {
+      // During drag, calculate delta relative to initial handle position and box's original rotation
+      let delta = newRotation - editor._initialBoxHandleAngle;
+      // Detect wrapping across -π/π boundary
+      if (delta > Math.PI) {
+        delta -= 2 * Math.PI;
+      } else if (delta < -Math.PI) {
+        delta += 2 * Math.PI;
+      }
+      point.rotation = editor._initialBoxPointRotation + delta;
+      point.boxRotation = point.rotation;
+    }
+    // Fallback if _initialBoxHandleAngle was somehow not set (should not happen with proper flow)
+    else {
+      console.warn("[SplineEditor] _updateBoxRotationFromCoords: _initialBoxHandleAngle not set, setting absolute rotation.");
       point.rotation = newRotation;
       point.boxRotation = newRotation;
     }
@@ -181,6 +206,19 @@ export function attachInteractionHandlers(editor) {
       document.addEventListener('mouseup', end, true);
     }
     const initialCoords = editor._getPointerCoords(rawEvent);
+    // Convert initialCoords to videoSpace for correct angle calculation
+    const videoSpaceInitialCoords = transformMouseToVideoSpace(editor, initialCoords.x, initialCoords.y);
+
+    const point = editor.points[index]; // This is the box center in media space
+    const dxInitial = (videoSpaceInitialCoords.x ?? 0) - (point.x ?? 0);
+    const dyInitial = (videoSpaceInitialCoords.y ?? 0) - (point.y ?? 0);
+    
+    // Calculate the initial handle angle relative to the box center
+    editor._initialBoxHandleAngle = Math.atan2(dyInitial, dxInitial) + Math.PI / 2;
+    // Store the box's current rotation value
+    editor._initialBoxPointRotation = point.rotation || point.boxRotation || 0;
+
+    // Call update with the initial coordinates, now that initial angles are stored
     editor._updateBoxRotationFromCoords(initialCoords);
   };
 
@@ -361,19 +399,15 @@ export function attachInteractionHandlers(editor) {
       }
     }
 
-    let localX = mouseX;
-    let localY = mouseY;
-    if (typeof localX !== 'number' || typeof localY !== 'number') {
-      const coords = editor._getPointerCoords(rawEvent || pv.event);
-      localX = coords.x;
-      localY = coords.y;
-    }
+    const coords = editor._getPointerCoords(rawEvent || pv.event);
+    const videoSpaceX = coords.videoSpaceX;
+    const videoSpaceY = coords.videoSpaceY;
 
     // Use appropriate points array
     const workingPoints = editor._boxKeyframePoints || editor.points;
     const pointX = workingPoints[editor.i].x;
     const pointY = workingPoints[editor.i].y;
-    editor.dragOffset = { x: pointX - localX, y: pointY - localY };
+    editor.dragOffset = { x: pointX - videoSpaceX, y: pointY - videoSpaceY };
 
     if ((rawEvent?.shiftKey) && (rawEvent?.button === 1)) {
       if (editor.i !== 0 && editor.i !== -1) {
@@ -388,17 +422,18 @@ export function attachInteractionHandlers(editor) {
 
     if ((rawEvent?.altKey) && (rawEvent?.button === 0)) {
       editor.isRotatingAll = true;
-      editor.originalPoints = workingPoints.map(p => ({ ...p }));
+      // Store original points including their rotation for global rotation
+      editor.originalPoints = workingPoints.map(p => ({ ...p, rotation: p.rotation || 0, boxRotation: p.boxRotation || 0 }));
       editor.anchorPoint = { ...workingPoints[editor.i] };
       editor.anchorIndex = editor.i;
-      editor.initialRotationAngle = Math.atan2(localY - editor.anchorPoint.y, localX - editor.anchorPoint.x);
+      editor.initialRotationAngle = Math.atan2(videoSpaceY - editor.anchorPoint.y, videoSpaceX - editor.anchorPoint.x);
       editor.isDragging = true;
       return;
     }
 
     if ((rawEvent?.altKey) && (rawEvent?.button === 1)) {
       editor.isDraggingAll = true;
-      editor.dragStartPos = { x: localX, y: localY };
+      editor.dragStartPos = { x: videoSpaceX, y: videoSpaceY };
       editor.translateAllSnapshot = {
         points: workingPoints.map(p => ({ ...p })),
         pivotIndex: editor.i,
@@ -432,7 +467,7 @@ export function attachInteractionHandlers(editor) {
           return;
         }
         editor.scalingPointBaseScale = (targetPoint.scale || 1.0);
-        editor.scalingPointInitialDistance = localX - targetPoint.x;
+        editor.scalingPointInitialDistance = videoSpaceX - targetPoint.x;
         if (Math.abs(editor.scalingPointInitialDistance) < 10) {
           editor.scalingPointInitialDistance = editor.scalingPointInitialDistance >= 0 ? 10 : -10;
         }
@@ -445,7 +480,7 @@ export function attachInteractionHandlers(editor) {
       editor.originalPoints = workingPoints.map(p => ({ ...p }));
       editor.anchorPoint = { ...workingPoints[editor.i] };
       editor.anchorIndex = editor.i;
-      editor.initialXDistance = localX - editor.anchorPoint.x;
+      editor.initialXDistance = videoSpaceX - editor.anchorPoint.x;
       if (Math.abs(editor.initialXDistance) < 10) {
         editor.initialXDistance = editor.initialXDistance >= 0 ? 10 : -10;
       }
@@ -506,17 +541,26 @@ export function attachInteractionHandlers(editor) {
     editor.originalPoints = null;
     editor.isRotatingBoxHandle = false;
     editor.boxRotationIndex = -1;
+    editor._initialBoxHandleAngle = undefined; // Clean up
+    editor._initialBoxPointRotation = undefined; // Clean up
   };
 
   editor.dragHandler = (d, mouseX, mouseY) => {
     let adjustedX = (typeof mouseX === 'number') ? mouseX : (editor.vis.mouse().x / app.canvas.ds.scale);
     let adjustedY = (typeof mouseY === 'number') ? mouseY : (editor.vis.mouse().y / app.canvas.ds.scale);
+    
+    // For video backgrounds, we need to transform from canvas to video space
+    // but for rendering controls, we want to keep them in canvas space
+    // So we only transform for internal operations, not for rendering
+    const videoSpaceCoords = transformMouseToVideoSpace(editor, adjustedX, adjustedY);
+    const videoSpaceX = videoSpaceCoords.x;
+    const videoSpaceY = videoSpaceCoords.y;
 
     // Use appropriate points array
     const workingPoints = editor._boxKeyframePoints || editor.points;
 
     if (editor.isRotatingAll && editor.anchorPoint && editor.originalPoints) {
-      const currentAngle = Math.atan2(adjustedY - editor.anchorPoint.y, adjustedX - editor.anchorPoint.x);
+      const currentAngle = Math.atan2(videoSpaceY - editor.anchorPoint.y, videoSpaceX - editor.anchorPoint.x);
       const rotationAngle = currentAngle - editor.initialRotationAngle;
       const cos = Math.cos(rotationAngle);
       const sin = Math.sin(rotationAngle);
@@ -526,6 +570,8 @@ export function attachInteractionHandlers(editor) {
         if (j === editor.anchorIndex) {
           workingPoints[j].x = editor.anchorPoint.x;
           workingPoints[j].y = editor.anchorPoint.y;
+          workingPoints[j].rotation = originalPoint.rotation; // Maintain original rotation for anchor
+          workingPoints[j].boxRotation = originalPoint.boxRotation; // Maintain original rotation for anchor
           workingPoints[j].highlighted = !!originalPoint.highlighted;
         } else {
           const translatedX = originalPoint.x - editor.anchorPoint.x;
@@ -534,6 +580,8 @@ export function attachInteractionHandlers(editor) {
           const rotatedY = translatedX * sin + translatedY * cos;
           workingPoints[j].x = editor.anchorPoint.x + rotatedX;
           workingPoints[j].y = editor.anchorPoint.y + rotatedY;
+          workingPoints[j].rotation = originalPoint.rotation + rotationAngle; // Apply rotation to point's rotation property
+          workingPoints[j].boxRotation = originalPoint.boxRotation + rotationAngle; // Apply rotation to point's boxRotation property
           workingPoints[j].highlighted = !!originalPoint.highlighted;
         }
       }
@@ -544,8 +592,8 @@ export function attachInteractionHandlers(editor) {
 
     if (editor.isDraggingAll && editor.translateAllSnapshot) {
       const snap = editor.translateAllSnapshot;
-      const deltaX = adjustedX - snap.pivotX;
-      const deltaY = adjustedY - snap.pivotY;
+      const deltaX = videoSpaceX - snap.pivotX;
+      const deltaY = videoSpaceY - snap.pivotY;
       try { if (d && typeof d === 'object') { d.fix = { x: 0, y: 0 }; } } catch {}
       const basePoints = snap ? snap.points : workingPoints;
       for (let j = 0; j < workingPoints.length; j++) {
@@ -562,7 +610,7 @@ export function attachInteractionHandlers(editor) {
     if (editor.isScalingPoint && editor.scalingPointIndex >= 0 && editor.scalingPointInitialDistance !== 0) {
       const point = editor.points[editor.scalingPointIndex];
       if (point) {
-        const currentXDistance = adjustedX - point.x;
+        const currentXDistance = videoSpaceX - point.x;
         const scaleFactor = currentXDistance / editor.scalingPointInitialDistance;
         const dampingFactor = 0.1;
         const dampedFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
@@ -577,7 +625,7 @@ export function attachInteractionHandlers(editor) {
     }
 
     if (editor.isScalingAll && editor.anchorPoint && editor.originalPoints && editor.initialXDistance !== 0) {
-      const currentXDistance = adjustedX - editor.anchorPoint.x;
+      const currentXDistance = videoSpaceX - editor.anchorPoint.x;
       const scaleFactor = currentXDistance / editor.initialXDistance;
       const dampingFactor = 0.1;
       const dampedScaleFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
@@ -604,8 +652,8 @@ export function attachInteractionHandlers(editor) {
 
     if (!editor.isDraggingAll && !editor.isScalingAll && !editor.isRotatingAll) {
       if (editor.dragOffset && editor.i >= 0 && workingPoints[editor.i]) {
-        workingPoints[editor.i].x = adjustedX + editor.dragOffset.x;
-        workingPoints[editor.i].y = adjustedY + editor.dragOffset.y;
+        workingPoints[editor.i].x = videoSpaceX + editor.dragOffset.x;
+        workingPoints[editor.i].y = videoSpaceY + editor.dragOffset.y;
         workingPoints[editor.i].highlighted = !!workingPoints[editor.i].highlighted;
       }
       editor._updateBoxKeysFromWorkingPoints();

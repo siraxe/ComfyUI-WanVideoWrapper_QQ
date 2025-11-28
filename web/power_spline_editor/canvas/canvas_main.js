@@ -8,6 +8,8 @@ import { attachPathHelpers } from './canvas_paths.js';
 import { attachPreviousSplineHelpers } from './canvas_previous_splines.js';
 import { attachInteractionHandlers } from './canvas_interactions.js';
 import { attachHanddrawHelpers } from './canvas_handdraw.js';
+import { initializeVideoBackground, onEditorDimensionsChanged } from './canvas_video_background.js';
+import { PowerSplineWidget, HandDrawLayerWidget, BoxLayerWidget, transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js';
 
 export default class SplineEditor2 {
   constructor(context, reset = false) {
@@ -23,6 +25,11 @@ export default class SplineEditor2 {
     this.scale = 1;
     this.offsetX = 0;
     this.offsetY = 0;
+
+    // Video background properties
+    this.videoElement = null;
+    this.videoMetadata = null;
+    this.videoReady = false;
 
     // Store previous spline data from coord_in
     this.previousSplineData = null;
@@ -68,8 +75,8 @@ export default class SplineEditor2 {
     // context menu
     this.createContextMenu();
 
-    if (reset && context.splineEditor2.parentEl) {
-      context.splineEditor2.parentEl.innerHTML = ''; // Clear the container
+    if (reset && context.splineEditor2.element) {
+      context.splineEditor2.element.innerHTML = ''; // Clear the container
     }
     this.coordWidget = context.widgets.find(w => w.name === "coordinates");
     this.widthWidget = context.widgets.find(w => w.name === "mask_width");
@@ -86,7 +93,7 @@ export default class SplineEditor2 {
     // Global toggle for inactive flow animation (default OFF)
     this._inactiveFlowEnabled = false;
 
-    this._shortcutKeys = { s: false };
+    this._shortcutKeys = { s: 0 }; // Initialize 's' key state with a timestamp (0 means not pressed)
     this._boxPlayModeStartedAt = 0;
     this._boxRefOnlyMode = false;
     this._boxPlayStopGuardMs = 120;
@@ -147,14 +154,14 @@ export default class SplineEditor2 {
         return;
       }
       if (key === 's') {
-        this._shortcutKeys.s = true;
+        this._shortcutKeys.s = performance.now(); // Store timestamp of keydown
       }
     };
     const handleShortcutKeyUp = (ev) => {
       const key = ev?.key?.toLowerCase?.();
       if (!key) return;
       if (key === 's') {
-        this._shortcutKeys.s = false;
+        this._shortcutKeys.s = 0; // Reset to 0 on keyup
       }
       if (key === ' ' && !ev.shiftKey && this._boxPlayModeActive) {
         const elapsed = performance.now() - this._boxPlayModeStartedAt;
@@ -164,7 +171,9 @@ export default class SplineEditor2 {
       }
     };
     const handleShortcutBlur = () => {
-      this._shortcutKeys.s = false;
+      // Do not reset 's' on blur to avoid intermittent issues with Shift+Click hotkey.
+      // This key will be reset on keyup anyway.
+      // If other shortcut keys need resetting, they should be handled individually.
     };
     window.addEventListener('keydown', handleShortcutKeyDown, true);
     window.addEventListener('keyup', handleShortcutKeyUp, true);
@@ -179,6 +188,10 @@ export default class SplineEditor2 {
     this.width = this.widthWidget.value;
     this.height = this.heightWidget.value;
     this.pointsLayer = null;
+    
+    // Store initial dimensions for scaling calculations
+    this.initialWidth = this.width;
+    this.initialHeight = this.height;
 
     this.onActiveLayerChanged = () => {
       const activeWidget = this.getActiveWidget();
@@ -202,6 +215,7 @@ export default class SplineEditor2 {
       } else {
         this.points = [];
       }
+      
       if (this.vis) {
         this.layerRenderer.render();
       }
@@ -218,6 +232,7 @@ export default class SplineEditor2 {
       this.width = this.widthWidget.value;
 
       // Update canvas dimensions
+      this.width = this.widthWidget.value;
       this.vis.width(this.width);
 
       // Force size manager update when canvas width changes (force=true overrides userAdjustedSize)
@@ -229,7 +244,10 @@ export default class SplineEditor2 {
       if (this.originalImageWidth && this.originalImageHeight) {
         this.recenterBackgroundImage();
       }
-
+      
+      // Update video position if video is loaded
+      onEditorDimensionsChanged(this);
+      
       // Reload points from active widget
       this.points = this.getActivePoints();
 
@@ -249,6 +267,7 @@ export default class SplineEditor2 {
       this.height = this.heightWidget.value;
 
       // Update canvas dimensions
+      this.height = this.heightWidget.value;
       this.vis.height(this.height);
 
       // Force size manager update when canvas height changes (force=true overrides userAdjustedSize)
@@ -260,6 +279,9 @@ export default class SplineEditor2 {
       if (this.originalImageWidth && this.originalImageHeight) {
         this.recenterBackgroundImage();
       }
+      
+      // Update video position if video is loaded
+      onEditorDimensionsChanged(this);
 
       // Reload points from active widget
       this.points = this.getActivePoints();
@@ -325,14 +347,18 @@ export default class SplineEditor2 {
 
     // If no points exist, initialize with defaults (box layers get a single centered box)
     if (!this.points || this.points.length === 0) {
-      const centerX = this.width / 2;
-      const centerY = this.height / 2;
+      // Initialize points in media space (not canvas space)
+      const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
+      const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
+      const centerX = mediaWidth / 2;
+      const centerY = mediaHeight / 2;
+
       if (initialActive && initialActive.value?.type === 'box_layer') {
         this.points = [
           { x: centerX, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 },
         ];
         this.ensurePointUids(this.points);
-        this.setActivePoints(this.points);
+        this.setActivePoints(this.points); // setActivePoints will normalize and then denormalize using correct media dimensions
       } else {
         if (reset) {
           // Two points: center and 40px right
@@ -344,8 +370,8 @@ export default class SplineEditor2 {
         } else {
           // Default initial points (bottom-left, top-right)
           this.points = [
-            { x: 0, y: this.height, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 },
-            { x: this.width, y: 0, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
+            { x: 0, y: mediaHeight, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }, // Use mediaHeight
+            { x: mediaWidth, y: 0, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 } // Use mediaWidth
           ];
           this.ensurePointUids(this.points);
         }
@@ -358,9 +384,11 @@ export default class SplineEditor2 {
     if (activeWidget) {
       this.interpolation = activeWidget.value.interpolation || 'linear';
       if (activeWidget.value?.type === 'box_layer' && (!this.points || this.points.length === 0)) {
+        const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
+        const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
         const centerPoint = {
-          x: this.width * 0.5,
-          y: this.height * 0.5,
+          x: mediaWidth * 0.5, // Use media width
+          y: mediaHeight * 0.5, // Use media height
           highlighted: false,
           scale: 1.0,
           boxScale: 1.0,
@@ -381,8 +409,16 @@ export default class SplineEditor2 {
       .antialias(false)
       .event("mousedown", (e) => {
         // Get mouse position (scaled for canvas)
-        const mouseX = this.vis.mouse().x / app.canvas.ds.scale;
-        const mouseY = this.vis.mouse().y / app.canvas.ds.scale;
+        let mouseX = this.vis.mouse().x / app.canvas.ds.scale;
+        let mouseY = this.vis.mouse().y / app.canvas.ds.scale;
+        
+        // For video backgrounds, we need to transform from canvas to video space
+        // but for rendering controls, we want to keep them in canvas space
+        // So we only transform for internal operations, not for rendering
+        const videoSpaceCoords = transformMouseToVideoSpace(this, mouseX, mouseY);
+        const videoSpaceMouseX = videoSpaceCoords.x;
+        const videoSpaceMouseY = videoSpaceCoords.y;
+        
         this.stopAllBoxLayerPlayback?.();
         if (this._boxPlayModeActive) {
           this.exitBoxPlayMode?.();
@@ -397,14 +433,22 @@ export default class SplineEditor2 {
           let lastAddX = mouseX, lastAddY = mouseY;
           const move = (ev) => {
             const rect = canvasEl.getBoundingClientRect();
-            const mx = (ev.clientX - rect.left) / app.canvas.ds.scale;
-            const my = (ev.clientY - rect.top) / app.canvas.ds.scale;
+            let mx = (ev.clientX - rect.left) / app.canvas.ds.scale;
+            let my = (ev.clientY - rect.top) / app.canvas.ds.scale;
+           
+            // For video backgrounds, we need to transform from canvas to video space
+            // but for rendering controls, we want to keep them in canvas space
+            // So we only transform for internal operations, not for rendering
+            const videoSpaceCoords = transformMouseToVideoSpace(this, mx, my);
+            const videoSpaceMx = videoSpaceCoords.x;
+            const videoSpaceMy = videoSpaceCoords.y;
+            
             // Only add if moved enough to reduce point density
-            const dx = mx - lastAddX;
-            const dy = my - lastAddY;
+            const dx = videoSpaceMx - lastAddX;
+            const dy = videoSpaceMy - lastAddY;
             if ((dx*dx + dy*dy) >= 36) { // 6px threshold
-              this._handdrawPath.push({ x: mx, y: my });
-              lastAddX = mx; lastAddY = my;
+              this._handdrawPath.push({ x: videoSpaceMx, y: videoSpaceMy });
+              lastAddX = videoSpaceMx; lastAddY = videoSpaceMy;
             }
             // Live preview
             this.points = this._handdrawPath;
@@ -487,16 +531,16 @@ export default class SplineEditor2 {
 
         // Existing mousedown handlers
         if (pv.event.shiftKey && pv.event.button === 0) { // Use pv.event to access the event object
-          const activeWidget = this.getActiveWidget();
-          if (this._isBoxLayerWidget(activeWidget)) {
+          const shiftWidget = this.getActiveWidget();
+          if (this._isBoxLayerWidget(shiftWidget)) {
             // Only scrub when clicking empty space (avoid grabbing the box itself)
             const hit = this.pickBoxPointFromCoords({ x: mouseX, y: mouseY });
             if (!hit) {
               const maxFrames = Math.max(1, this._getMaxFrames());
               this._boxCanvasScrubActive = true;
-              this._boxCanvasScrubWidget = activeWidget;
+              this._boxCanvasScrubWidget = shiftWidget;
               this._boxCanvasScrubStartX = mouseX;
-              this._boxCanvasScrubStartFrame = Math.max(1, Math.min(maxFrames, Math.round(activeWidget.value?.box_timeline_point || 1)));
+              this._boxCanvasScrubStartFrame = Math.max(1, Math.min(maxFrames, Math.round(shiftWidget.value?.box_timeline_point || 1)));
               // Pixels per frame step; keep a reasonable minimum so small drags still move
               this._boxCanvasScrubStepPx = Math.max(4, this.width / Math.max(1, maxFrames - 1));
               const endScrub = () => {
@@ -523,9 +567,10 @@ export default class SplineEditor2 {
             return this;
           }
 
+          const mediaCoords = transformMouseToVideoSpace(this, mouseX, mouseY); // Convert canvas to media space
           let scaledMouse = {
-            x: mouseX,
-            y: mouseY,
+            x: mediaCoords.x, // Use media space x
+            y: mediaCoords.y, // Use media space y
             highlighted: false,
             scale: 1.0,
             boxScale: 1.0,
@@ -535,6 +580,11 @@ export default class SplineEditor2 {
           };
           this.i = this.points.push(scaledMouse) - 1;
           this.updatePath();
+          this.vis.render();
+          // For box layers, also trigger box visualization update to show green box immediately
+          if (shiftWidget && shiftWidget.value?.type === 'box_layer') {
+            this.layerRenderer.render();
+          }
           return this;
         }
         else if (pv.event.ctrlKey) {
@@ -624,7 +674,15 @@ export default class SplineEditor2 {
         }
       })
       .event("mousemove", (e) => {
-        const coords = this._getPointerCoords(pv.event || e);
+        let coords = this._getPointerCoords(pv.event || e);
+        
+        // For video backgrounds, we need to transform from canvas to video space
+        // but for rendering controls, we want to keep them in canvas space
+        // So we only transform for internal operations, not for rendering
+        const videoSpaceCoords = transformMouseToVideoSpace(this, coords.x, coords.y);
+        const videoSpaceX = videoSpaceCoords.x;
+        const videoSpaceY = videoSpaceCoords.y;
+        
         this.updateBoxCursor(coords);
       })
       .event("mouseout", () => {
@@ -709,11 +767,17 @@ export default class SplineEditor2 {
     svgElement.style['position'] = "relative"
     svgElement.style['display'] = "block"
     svgElement.style['overflow'] = "visible"
+
     // Remove viewBox to allow content outside canvas bounds
     svgElement.removeAttribute('viewBox');
     // Set a very large viewBox or remove clipping
     svgElement.setAttribute('overflow', 'visible');
-    this.node.splineEditor2.parentEl.appendChild(svgElement);
+
+    // CRITICAL: Append canvas to parentEl FIRST before video init
+    this.node.splineEditor2.element.appendChild(svgElement);
+
+    // THEN initialize video background system (now canvas has correct parent)
+    initializeVideoBackground(this);
     // Let the size manager handle height - don't set explicit height here
     this.pathElements = svgElement.getElementsByTagName('path'); // Get all path elements
 

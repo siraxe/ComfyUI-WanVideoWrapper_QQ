@@ -1,5 +1,6 @@
 import { app } from '../../../scripts/app.js';
-import { makeUUID, NodeSizeManager, TopRowWidget } from './spline_utils.js';
+import { makeUUID, NodeSizeManager } from './spline_utils.js';
+import { TopRowWidget, handlePrepareRefsRefresh } from './canvas_top_row.js';
 import { chainCallback, hideWidgetForGood } from './general_utils.js';
 import { getReferenceImageFromConnectedNode } from './graph_query.js';
 import { RefLayerWidget } from './layer_type_ref.js';
@@ -123,6 +124,8 @@ app.registerExtension({
         refreshFramesButton: false,
         bgImgControl: false,
         animToggleButton: false,
+      }, {
+        onRefreshCanvas: handlePrepareRefsRefresh
       }));
 
       this.setupUI();

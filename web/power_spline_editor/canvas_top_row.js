@@ -1,632 +1,765 @@
-import { app } from '../../../scripts/app.js';
+// canvas_top_row.js
 import {
     drawWidgetButton,
     drawNumberWidgetPart,
     RgthreeBaseWidget
 } from './drawing_utils.js';
-import { triggerPrepareRefsBackend } from './trigger_ref_refresh.js';
+import { app } from '../../../scripts/app.js';
 
-// === TOP ROW WIDGET (Combined refresh button, bg_image dropdown, and width/height controls) ===
-export class TopRowWidget extends RgthreeBaseWidget {
-    constructor(name = "TopRowWidget", visibility = {}) {
-        super(name);
-        this.type = "custom";
-        this.options = { serialize: false };
-        this.value = {};
-        this.haveMouseMovedValue = false;
-        this.canvasButtonMouseDown = false;
-        this.framesButtonMouseDown = false;
-        this.visibility = {
-            refreshCanvasButton: true,
-            refreshFramesButton: true,
-            bgImgControl: true,
-            animToggleButton: true,
-            widthControl: true,
-            heightControl: true,
-            ...visibility,
-        };
-        this.hitAreas = {
-            refreshCanvasButton: { bounds: [0, 0], onClick: null },
-            refreshFramesButton: { bounds: [0, 0], onClick: null },
-            bgImgLeftArrow: { bounds: [0, 0], onClick: null },
-            bgImgVal: { bounds: [0, 0], onClick: null },
-            bgImgRightArrow: { bounds: [0, 0], onClick: null },
-            bgImgAny: { bounds: [0, 0], onClick: null },
-            widthDec: { bounds: [0, 0], onClick: null },
-            widthVal: { bounds: [0, 0], onClick: null },
-            widthInc: { bounds: [0, 0], onClick: null },
-            widthAny: { bounds: [0, 0], onMove: null },
-            heightDec: { bounds: [0, 0], onClick: null },
-            heightVal: { bounds: [0, 0], onClick: null },
-            heightInc: { bounds: [0, 0], onClick: null },
-            heightAny: { bounds: [0, 0], onMove: null },
-        };
+
+// == SHARED UTILITIES
+
+
+/**
+ * Check if node is connected to PrepareRefs node
+ */
+export async function checkIfConnectedToPrepareRefs(node, inputName = 'ref_images') {
+  try {
+    const { findConnectedSourceNode } = await import('./graph_query.js');
+    const sourceNodeObj = findConnectedSourceNode(node, inputName);
+    
+    if (sourceNodeObj?.node?.type === 'PrepareRefs') {
+      return sourceNodeObj.node;
     }
+  } catch (e) {
+    console.warn('[checkIfConnectedToPrepareRefs] Error:', e);
+  }
+  return null;
+}
 
-    draw(ctx, node, w, posY, height) {
-        const margin = 15;
-        const spacing = 10; // Reduced spacing to fit within 100%
-        const midY = posY + height * 0.5;
+/**
+ * Load images from ref folder (used by PrepareRefs and PowerSplineEditor)
+ */
+export async function loadImagesFromRefFolder(node, backendPaths = null) {
+  console.log("[loadImagesFromRefFolder] Starting", { backendPaths });
+  const { loadImageAsBase64, findConnectedSourceNode } = await import('./graph_query.js');
+  const timestamp = Date.now();
 
-        ctx.save();
+  // Check if bg_image is connected to something OTHER than PrepareRefs
+  const bgImageSourceNode = findConnectedSourceNode(node, 'bg_image');
+  const bgImageIsConnectedExternally = bgImageSourceNode?.node &&
+    bgImageSourceNode.node.type !== 'PrepareRefs';
 
-        const assignBounds = (name, bounds) => {
-            const area = this.hitAreas[name];
-            if (!area) return;
-            area.bounds = bounds;
-            area.onClick = null;
-            area.onDown = null;
-            area.onUp = null;
-            area.onMove = null;
-            area.onRightDown = null;
+  // 1. Load bg_image_cl.png only if bg_image is NOT connected to external source
+  if (!bgImageIsConnectedExternally) {
+    try {
+      const bgImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
+      console.log("[loadImagesFromRefFolder] Loading bg_image_cl.png from:", bgImageUrl);
+      const bgImageData = await loadImageAsBase64(bgImageUrl);
+
+      if (bgImageData) {
+        console.log("[loadImagesFromRefFolder] bg_image_cl.png loaded successfully");
+        node.originalRefImageData = {
+          name: 'bg_image_cl.png',
+          base64: bgImageData.split(',')[1],
+          type: 'image/png'
         };
 
-        // Get widget values
-        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
-        const widthValue = widthWidget ? widthWidget.value : 512;
-        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
-        const heightValue = heightWidget ? heightWidget.value : 512;
         const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-        const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
+        const bg_img = bgImgWidget ? bgImgWidget.value : "None";
 
-        // Calculate available width for components (excluding margins and spacing)
-        const availableWidth = node.size[0] - margin * 2 - spacing * 4; // Account for spacing between elements
-
-        // Calculate component widths based on percentages (now totaling 100% of available width)
-        const refreshCanvasWidth = availableWidth * 0.12;
-        const refreshFramesWidth = availableWidth * 0.12;
-        const bgImgDropdownWidth = availableWidth * 0.14;
-        const iconButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
-        const dimensionsAreaWidth = availableWidth - (
-            refreshCanvasWidth + spacing +
-            refreshFramesWidth + spacing +
-            bgImgDropdownWidth + spacing +
-            iconButtonWidth
-        );
-
-        // Calculate total width and starting position to center everything
-        const totalWidth = refreshCanvasWidth + spacing + refreshFramesWidth + spacing + bgImgDropdownWidth + spacing + iconButtonWidth + spacing + dimensionsAreaWidth;
-        const startX = margin; // Start from left margin instead of centering
-        let posX = startX;
-
-        // Draw Refresh Canvas button
-        if (this.visibility.refreshCanvasButton) {
-            drawWidgetButton(
-                ctx,
-                { size: [refreshCanvasWidth, height], pos: [posX, posY] },
-                "🔃 Canvas",
-                this.canvasButtonMouseDown
-            );
+        if (node.bgImageManager?.updateBackgroundImage) {
+          await node.bgImageManager.updateBackgroundImage(bg_img);
+          console.log("[loadImagesFromRefFolder] Background image updated");
         }
-        assignBounds("refreshCanvasButton", [posX, refreshCanvasWidth]);
-        posX += refreshCanvasWidth + spacing;
+      }
+    } catch (e) {
+      console.warn('[loadImagesFromRefFolder] Failed to load bg_image_cl.png:', e);
+    }
+  } else {
+    console.log("[loadImagesFromRefFolder] bg_image connected to external source, skipping bg_image_cl.png");
+  }
 
-        // Draw Refresh Frames button
-        if (this.visibility.refreshFramesButton) {
-            drawWidgetButton(
-                ctx,
-                { size: [refreshFramesWidth, height], pos: [posX, posY] },
-                "🕞 Frames",
-                this.framesButtonMouseDown
-            );
-        }
-        assignBounds("refreshFramesButton", [posX, refreshFramesWidth]);
-        posX += refreshFramesWidth + spacing;
+  // 2. Prepare ref images from backend paths (NO loading)
+  let refImages = [];
 
-        // Draw bg_img control with left/right arrows
-        const arrowWidth = 7; // Smaller arrows
+  if (backendPaths?.ref_images && Array.isArray(backendPaths.ref_images)) {
+    console.log("[loadImagesFromRefFolder] Using backend ref_images:", backendPaths.ref_images);
 
-        if (this.visibility.bgImgControl) {
-            // Draw background box
-            ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
-            ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
-            ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
-            ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
+    // Backend returns: ['ref/ref_1.png', 'ref/ref_2.png', 'ref/ref_3.png']
+    // or objects with {filename, width, height}
+    refImages = backendPaths.ref_images.map((item) => {
+      if (typeof item === 'string') {
+        // Extract filename from path like 'ref/ref_1.png'
+        const filename = item.split('/').pop();
+        return {
+          path: `power_spline_editor/ref/${filename}`, // Use full path that won't trigger /view endpoint
+          width: 768,
+          height: 768
+        };
+      } else {
+        // Object format
+        const filename = item.path?.split('/').pop() || item.filename;
+        return {
+          path: `power_spline_editor/ref/${filename}`, // Use full path that won't trigger /view endpoint
+          width: item.width || 768,
+          height: item.height || 768
+        };
+      }
+    });
+  }
 
-            // Draw left arrow (positioned at the very left edge)
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.fillText("<", posX + arrowWidth / 2, midY);
+  console.log("[loadImagesFromRefFolder] Total refs prepared:", refImages.length);
 
-            // Draw text value (centered in the control)
-            ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
+  // 3. Update box layer refs
+  if (refImages.length > 0 && node.layerManager) {
+    const activeWidget = node.layerManager.getActiveWidget?.();
+    if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
+      await updateAllBoxLayersFromRefFolder(node, refImages);
+    } else {
+      await updateBoxLayerWithRefImages(node, activeWidget, refImages);
+    }
+  }
 
-            // Draw right arrow (positioned at the very right edge)
-            ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
-        }
+  // Force final render
+  if (node.editor?.layerRenderer) {
+    console.log("[loadImagesFromRefFolder] Forcing final render");
+    node.editor.layerRenderer.render();
+  }
 
-        assignBounds("bgImgLeftArrow", [posX, arrowWidth]);
-        assignBounds("bgImgVal", [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)]);
-        assignBounds("bgImgRightArrow", [posX + bgImgDropdownWidth - arrowWidth, arrowWidth]);
+  console.log("[loadImagesFromRefFolder] Finished");
+}
 
-        // Combined bounds for the entire control
-        assignBounds("bgImgAny", [posX, bgImgDropdownWidth]);
-        posX += bgImgDropdownWidth + spacing;
+/**
+ * Update a specific box layer with ref images
+ */
+export async function updateBoxLayerWithRefImages(node, boxWidget, refImages) {
+  const attachments = refImages.map((imgObj, i) => ({
+    path: imgObj.path,
+    type: 'image/png',
+    width: imgObj.width || 768,
+    height: imgObj.height || 768,
+    name: `ref_${i + 1}.png`
+  }));
 
-        // Animation toggle icon for inactive flow animation (default OFF)
-        const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? false);
-        if (this.visibility.animToggleButton) {
-            drawWidgetButton(
-                ctx,
-                { size: [iconButtonWidth, height], pos: [posX, posY] },
-                "~", // wavy line icon
-                isAnimOn
-            );
-            if (isAnimOn) {
-                const pad = 0.5;
-                ctx.save();
-                ctx.strokeStyle = '#2cc6ff';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.roundRect(posX + pad, posY + pad, iconButtonWidth - pad * 2, height - pad * 2, [4]);
-                ctx.stroke();
-                ctx.restore();
-            }
-            this.hitAreas.animToggleButton = { bounds: [posX, iconButtonWidth], onClick: (e, p, n) => {
-                if (n?.editor) {
-                    n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
-                    try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
-                    n.setDirtyCanvas(true, true);
-                }
-                return true;
-            }};
-        } else {
-            assignBounds("animToggleButton", [posX, iconButtonWidth]);
-        }
-        posX += iconButtonWidth + spacing;
+  boxWidget.value.ref_attachment = { entries: attachments };
 
-        // Draw rounded area for width/height controls
-        const roundedAreaX = posX;
-        const roundedAreaY = posY;
-        const roundedAreaWidth = dimensionsAreaWidth;
-        const roundedAreaHeight = height;
+  const currentSelection = boxWidget.value.ref_selection;
+  if (attachments.length > 0) {
+    boxWidget.value.ref_selection = currentSelection === 'no_ref' ? 'ref_1' : currentSelection;
+  } else {
+    boxWidget.value.ref_selection = 'no_ref';
+  }
 
-        // Draw rounded rectangle background
-        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
-        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
-        ctx.beginPath();
-        ctx.roundRect(roundedAreaX, roundedAreaY, roundedAreaWidth, roundedAreaHeight, [roundedAreaHeight * 0.5]);
-        ctx.fill();
-        ctx.stroke();
+  if (node.editor?.layerRenderer?.clearRefImageCache) {
+    node.editor.layerRenderer.clearRefImageCache();
+  }
 
-        // Calculate positions for width and height controls within the rounded area
-        // Center the controls in the rounded area
-        const controlSpacing = 20;
-        const numberControlWidth = drawNumberWidgetPart.WIDTH_TOTAL; // Width of each number control
-        const labelWidth = 40; // Approximate width for labels
-        const totalControlWidth = labelWidth + numberControlWidth + controlSpacing + labelWidth + numberControlWidth;
+  node.setDirtyCanvas(true, true);
+}
 
-        // Center the controls in the rounded area
-        const controlsStartX = roundedAreaX + (roundedAreaWidth - totalControlWidth) / 2;
+/**
+ * Update all box layers with ref images
+ */
+export async function updateAllBoxLayersFromRefFolder(node, refImages) {
+  const widgets = node.layerManager?.getSplineWidgets?.() || [];
+  const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
 
-        // Width control with label
-        const widthLabel = "width:";
-        const widthControlX = controlsStartX;
+  if (!boxWidgets.length) {
+    console.log('[updateAllBoxLayersFromRefFolder] No box layers found');
+    return;
+  }
 
-        // Draw width label
-        if (this.visibility.widthControl) {
-            ctx.textBaseline = "middle";
-            ctx.textAlign = "left";
-            ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-            ctx.fillText(widthLabel, widthControlX, midY);
-        }
+  for (const boxWidget of boxWidgets) {
+    await updateBoxLayerWithRefImages(node, boxWidget, refImages);
+  }
 
-        // Draw width control (positioned after label)
-        const widthControlStartX = widthControlX + labelWidth;
-        const [wLeftArrow, wText, wRightArrow] = drawNumberWidgetPart(ctx, {
-            posX: widthControlStartX,
-            posY,
-            height,
-            value: widthValue,
-            direction: 1,
-            textColor: this.visibility.widthControl ? undefined : "transparent",
+  console.log(`[updateAllBoxLayersFromRefFolder] Updated ${boxWidgets.length} box layer(s)`);
+}
+ 
+// == BUTTON HANDLERS
+
+
+/**
+ * Handler for PrepareRefs "Refresh" button
+ */
+export async function handlePrepareRefsRefresh(node) {
+  console.log("[handlePrepareRefsRefresh] Refresh button clicked");
+
+  try {
+    // Try to get image from connected node (ImageResizeKJv2 or LoadImage)
+    const { findConnectedSourceNode, getReferenceImageFromConnectedNode } =
+      await import('./graph_query.js');
+
+    let imageData = null;
+
+    // Check for connected source on bg_image input
+    const sourceNodeObj = findConnectedSourceNode(node, 'bg_image');
+
+    if (sourceNodeObj?.node) {
+      console.log("[handlePrepareRefsRefresh] Found connected node:", sourceNodeObj.node.type);
+
+      // Get image from connected node
+      imageData = await getReferenceImageFromConnectedNode(node, 'bg_image');
+
+      if (imageData) {
+        console.log("[handlePrepareRefsRefresh] Successfully loaded image from connected node");
+
+        // Load the image to the canvas
+        const img = await new Promise((resolve, reject) => {
+          const image = new Image();
+          image.onload = () => {
+            node.refCanvasEditor.loadBackgroundImage(image);
+            resolve(image);
+          };
+          image.onerror = reject;
+          image.src = imageData;
         });
 
-        assignBounds("widthDec", wLeftArrow);
-        assignBounds("widthVal", wText);
-        assignBounds("widthInc", wRightArrow);
-        assignBounds("widthAny", [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]]);
-        if (this.visibility.widthControl) {
-            this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
-            this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
-            this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
-            this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
-        }
+        // Store for persistence
+        node.loadedBgImage = img;
 
-        // Height control with label
-        const heightControlX = widthControlStartX + numberControlWidth + controlSpacing;
-        const heightLabel = "height:";
-
-        // Draw height label
-        if (this.visibility.heightControl) {
-            ctx.textBaseline = "middle";
-            ctx.fillText(heightLabel, heightControlX, midY);
-        }
-
-        // Draw height control (positioned after label)
-        const heightControlStartX = heightControlX + labelWidth;
-        const [hLeftArrow, hText, hRightArrow] = drawNumberWidgetPart(ctx, {
-            posX: heightControlStartX,
-            posY,
-            height,
-            value: heightValue,
-            direction: 1,
-            textColor: this.visibility.heightControl ? undefined : "transparent",
-        });
-
-        assignBounds("heightDec", hLeftArrow);
-        assignBounds("heightVal", hText);
-        assignBounds("heightInc", hRightArrow);
-        assignBounds("heightAny", [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]]);
-        if (this.visibility.heightControl) {
-            this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
-            this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
-            this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
-            this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
-        }
-
-        // Set up event handlers for refresh button
-        if (this.visibility.refreshCanvasButton) {
-            this.hitAreas.refreshCanvasButton.onClick = async () => {
-                // Check if ref_images input is connected to PrepareRefs
-                let isPrepareRefsConnected = false;
-                let prepareRefsNode = null;
-                try {
-                    // Import the graph query function at the top of the file
-                    const { findConnectedSourceNode } = await import('./graph_query.js');
-                    const sourceNodeObj = findConnectedSourceNode(node, 'ref_images');
-                    if (sourceNodeObj && sourceNodeObj.node) {
-                        if (sourceNodeObj.node.type === 'PrepareRefs') {
-                            isPrepareRefsConnected = true;
-                            prepareRefsNode = sourceNodeObj.node;
-                        }
-                    }
-                } catch (e) {
-                    console.warn('Failed to check ref_images connection:', e);
-                }
-
-                if (isPrepareRefsConnected && prepareRefsNode) {
-                    // Trigger backend PrepareRefs processing
-                    const result = await triggerPrepareRefsBackend(prepareRefsNode);
-
-                    if (result.success) {
-                        // Load the newly generated images from ref folder
-                        await this.loadImagesFromRefFolder(node);
-                    } else {
-                        // Silent error handling - log only, no user interruption
-                        console.error('[Refresh] Backend processing failed:', result.error);
-                    }
-                } else {
-                    // Original behavior: fetch from connected nodes
-                    // Update all box layer ref images from connected ref_images
-                    if (node.updateAllBoxLayerRefs) {
-                        try {
-                            await node.updateAllBoxLayerRefs();
-                        } catch (e) {
-                            console.warn('Failed to update box layer refs:', e);
-                        }
-                    }
-
-                    // Wait for reference image update and scale recalculation to complete
-                    if (node.updateReferenceImageFromConnectedNode) {
-                        try {
-                            // This now properly awaits the image loading and scale recalculation
-                            await node.updateReferenceImageFromConnectedNode();
-
-                            // Force a final render with the correct scale
-                            // The scale should already be correct from handleImageLoad -> recenterBackgroundImage
-                            if (node.editor && node.editor.layerRenderer) {
-                                node.editor.layerRenderer.render();
-                            }
-                        } catch (e) {
-                            console.warn('Failed to update reference image:', e);
-                        }
-                    }
-                }
-
-                // Check for frames input and handle box layer keyframe scaling
-                if (node.handleFramesRefresh) {
-                    node.handleFramesRefresh();
-                }
-            };
-            this.hitAreas.refreshCanvasButton.onDown = () => {
-                this.canvasButtonMouseDown = true;
-                node.setDirtyCanvas(true, false);
-            };
-            this.hitAreas.refreshCanvasButton.onUp = () => {
-                this.canvasButtonMouseDown = false;
-                node.setDirtyCanvas(true, false);
-            };
-        }
-
-        if (this.visibility.refreshFramesButton) {
-            this.hitAreas.refreshFramesButton.onClick = () => {
-                if (node.handleFramesRefresh) {
-                    node.handleFramesRefresh();
-                }
-            };
-            this.hitAreas.refreshFramesButton.onDown = () => {
-                this.framesButtonMouseDown = true;
-                node.setDirtyCanvas(true, false);
-            };
-            this.hitAreas.refreshFramesButton.onUp = () => {
-                this.framesButtonMouseDown = false;
-                node.setDirtyCanvas(true, false);
-            };
-        }
-
-        // Set up event handlers for bg_img control
-        if (this.visibility.bgImgControl) {
-            this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
-            this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
-            this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
-        }
-
-        ctx.restore();
-    }
-
-    // Methods for width controls
-    stepWidth(node, step) {
-        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
-        if (widthWidget) {
-            const newValue = widthWidget.value + step;
-            widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
-            if (widthWidget.callback) {
-                widthWidget.callback(widthWidget.value);
-            }
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    promptWidth(node) {
-        if (this.haveMouseMovedValue) return;
-        const widthWidget = node.widgets?.find(w => w.name === "mask_width");
-        if (widthWidget) {
-            const canvas = app.canvas;
-            canvas.prompt("Width", widthWidget.value, (v) => {
-                const newValue = Number(v);
-                widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
-                if (widthWidget.callback) {
-                    widthWidget.callback(widthWidget.value);
-                }
-            });
-        }
-    }
-
-    dragWidth(node, event) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            const widthWidget = node.widgets?.find(w => w.name === "mask_width");
-            if (widthWidget) {
-                const newValue = widthWidget.value + event.deltaX * 2;
-                widthWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasWidth(newValue) : Math.max(64, newValue);
-                if (widthWidget.callback) {
-                    widthWidget.callback(widthWidget.value);
-                }
-                node.setDirtyCanvas(true, true);
-            }
-        }
-    }
-
-    // Methods for height controls
-    stepHeight(node, step) {
-        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
-        if (heightWidget) {
-            const newValue = heightWidget.value + step;
-            heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
-            if (heightWidget.callback) {
-                heightWidget.callback(heightWidget.value);
-            }
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    promptHeight(node) {
-        if (this.haveMouseMovedValue) return;
-        const heightWidget = node.widgets?.find(w => w.name === "mask_height");
-        if (heightWidget) {
-            const canvas = app.canvas;
-            canvas.prompt("Height", heightWidget.value, (v) => {
-                const newValue = Number(v);
-                heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
-                if (heightWidget.callback) {
-                    heightWidget.callback(heightWidget.value);
-                }
-            });
-        }
-    }
-
-    dragHeight(node, event) {
-        if (event.deltaX) {
-            this.haveMouseMovedValue = true;
-            const heightWidget = node.widgets?.find(w => w.name === "mask_height");
-            if (heightWidget) {
-                const newValue = heightWidget.value + event.deltaX * 2;
-                heightWidget.value = node.sizeManager ? node.sizeManager.constrainCanvasHeight(newValue) : Math.max(64, newValue);
-                if (heightWidget.callback) {
-                    heightWidget.callback(heightWidget.value);
-                }
-                node.setDirtyCanvas(true, true);
-            }
-        }
-    }
-
-    // Methods for bg_img controls
-    stepBgImg(node, step) {
-        const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-        if (bgImgWidget) {
-            const options = ["None", "A", "B", "C"];
-            const currentIndex = options.indexOf(bgImgWidget.value);
-            const newIndex = (currentIndex + step + options.length) % options.length;
-            bgImgWidget.value = options[newIndex];
-            if (bgImgWidget.callback) {
-                bgImgWidget.callback(bgImgWidget.value);
-            }
-            node.setDirtyCanvas(true, true);
-        }
-    }
-
-    // Load images from ref folder when PrepareRefs is connected
-    async loadImagesFromRefFolder(node) {
-        const { loadImageAsBase64 } = await import('./graph_query.js');
-        const timestamp = Date.now();
-
-        // 1. Load bg_image_cl.png from ref folder
+        // Save via backend
         try {
-            const bgImageUrl = new URL(`ref/bg_image_cl.png?t=${timestamp}`, import.meta.url).href;
-            const bgImageData = await loadImageAsBase64(bgImageUrl);
-
-            if (bgImageData) {
-                // Store the background image
-                node.originalRefImageData = {
-                    name: 'bg_image_cl.png',
-                    base64: bgImageData.split(',')[1],
-                    type: 'image/png'
-                };
-
-                // Update background image display based on current bg_img selection
-                const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-                const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-                await node.updateBackgroundImage(bg_img);
+          await fetch('/wanvideowrapper_qq/save_prepare_refs_images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ bg_image: imageData, ref_images: [] })
+          })
+          .then(r => r.json())
+          .then(res => {
+            if (res.success && res.paths?.bg_image_path) {
+              node.properties.bg_image_path = res.paths.bg_image_path;
+              try {
+                sessionStorage.setItem(
+                  `prepare-refs-bg-${node.uuid}`,
+                  res.paths.bg_image_path
+                );
+              } catch (e) { /* ignore */ }
             }
+          })
+          .catch(console.error);
         } catch (e) {
-            console.warn('Failed to load bg_image_cl.png from ref folder:', e);
+          console.warn('[handlePrepareRefsRefresh] Failed to save image to backend:', e);
         }
 
-        // 2. Find and load all ref_*.png files from ref folder
-        const refImages = [];
-        const maxRefs = 5; // Try to load up to 5 reference images
-
-        for (let i = 1; i <= maxRefs; i++) {
-            try {
-                const refImageUrl = new URL(`ref/ref_${i}.png?t=${timestamp}`, import.meta.url).href;
-                const refImageData = await loadImageAsBase64(refImageUrl);
-
-                if (refImageData) {
-                    refImages.push(refImageData);
-                } else {
-                    // Stop trying if we can't load this image
-                    break;
-                }
-            } catch (e) {
-                // Stop trying if we encounter an error (file doesn't exist)
-                break;
-            }
-        }
-
-        // 3. Update box layer refs with loaded images
-        if (refImages.length > 0) {
-            const activeWidget = node.layerManager?.getActiveWidget?.();
-            if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
-                console.log('No active box layer to attach ref images');
-                // Try to update all box layers instead
-                await this.updateAllBoxLayersFromRefFolder(node, refImages);
-            } else {
-                // Update active box layer
-                await this.updateBoxLayerWithRefImages(node, activeWidget, refImages);
-            }
-        }
-
-        // Force a final render
-        if (node.editor && node.editor.layerRenderer) {
-            node.editor.layerRenderer.render();
-        }
+        // Refresh canvas display
+        node.forceCanvasRefresh();
+        return;
+      }
     }
 
-    // Update a specific box layer with ref images from folder
-    async updateBoxLayerWithRefImages(node, boxWidget, refImages) {
-        const attachments = [];
+    console.log("[handlePrepareRefsRefresh] No connected image node found");
 
-        for (let i = 0; i < refImages.length; i++) {
-            const imgData = refImages[i];
-            const base64Data = imgData.startsWith('data:')
-                ? imgData.split(',')[1]
-                : imgData;
-            const dataUrl = imgData.startsWith('data:')
-                ? imgData
-                : `data:image/png;base64,${base64Data}`;
+  } catch (e) {
+    console.error('[handlePrepareRefsRefresh] Error:', e);
+  }
 
-            // Load dimensions
-            const dims = await new Promise((resolve) => {
-                const img = new Image();
-                img.onload = () => resolve({ width: img.width, height: img.height });
-                img.onerror = () => resolve({ width: 1, height: 1 });
-                img.src = dataUrl;
-            });
+  // Always force refresh at the end
+  if (node.forceCanvasRefresh) {
+    node.forceCanvasRefresh();
+  }
+}
 
-            const filename = `ref_${i + 1}.png`;
-            attachments.push({
-                path: `ref/${filename}`,
-                type: 'image/png',
-                width: dims.width,
-                height: dims.height,
-                name: filename
-            });
-        }
+/**
+ * Handler for PowerSplineEditor "Canvas" button
+ */
+export async function handleCanvasRefresh(node) {
+  console.log("[handleCanvasRefresh] Canvas button clicked");
 
-        boxWidget.value.ref_attachment = { entries: attachments };
+  try {
+    // Check if connected to PrepareRefs
+    const prepareRefsNode = await checkIfConnectedToPrepareRefs(node, 'ref_images');
 
-        // Preserve existing ref_selection if valid, otherwise default to first ref
-        const currentSelection = boxWidget.value.ref_selection;
-        if (attachments.length > 0) {
-            // Check if current selection is still valid
-            if (currentSelection && currentSelection !== 'no_ref') {
-                const refIndex = parseInt(currentSelection.split('_')[1], 10);
-                if (refIndex > 0 && refIndex <= attachments.length) {
-                    // Keep the current selection as it's still valid
-                    boxWidget.value.ref_selection = currentSelection;
-                } else {
-                    // Current selection is out of range, default to ref_1
-                    boxWidget.value.ref_selection = 'ref_1';
-                }
-            } else {
-                // No current selection or it was 'no_ref', default to ref_1
-                boxWidget.value.ref_selection = 'ref_1';
+    if (prepareRefsNode) {
+      console.log("[handleCanvasRefresh] PrepareRefs connection detected");
+      
+      try {
+        const { triggerPrepareRefsBackend } = await import('./trigger_ref_refresh.js');
+        const result = await triggerPrepareRefsBackend(prepareRefsNode);
+        console.log("[handleCanvasRefresh] triggerPrepareRefsBackend result:", result);
+
+        if (result.success) {
+          console.log("[handleCanvasRefresh] Backend processing successful");
+
+          // Load newly generated images using backend paths
+          await loadImagesFromRefFolder(node, result.paths);
+
+          // Check if video was generated
+          if (result.paths?.bg_video) {
+            console.log('[handleCanvasRefresh] Video generated, loading:', result.paths.bg_video);
+            const { loadBackgroundVideo } = await import('./canvas/canvas_video_background.js');
+            if (node.editor && loadBackgroundVideo) {
+              loadBackgroundVideo(node.editor, result.paths.bg_video);
             }
+          }
         } else {
-            boxWidget.value.ref_selection = 'no_ref';
+          console.error('[handleCanvasRefresh] Backend processing failed:', result.error);
         }
-
-        // Clear ref image cache to force reload
-        if (node.editor?.layerRenderer?.clearRefImageCache) {
-            node.editor.layerRenderer.clearRefImageCache();
+      } catch (e) {
+        console.error('[handleCanvasRefresh] Backend trigger error:', e);
+      }
+    } else {
+      console.log("[handleCanvasRefresh] PrepareRefs NOT connected, using original behavior");
+      
+      // Original behavior: update from connected nodes
+      if (node.refImageManager?.updateAllBoxLayerRefs) {
+        try {
+          await node.refImageManager.updateAllBoxLayerRefs();
+        } catch (e) {
+          console.warn('[handleCanvasRefresh] Failed to update box layer refs:', e);
         }
+      }
 
-        node.setDirtyCanvas(true, true);
+      if (node.refImageManager?.updateReferenceImageFromConnectedNode) {
+        try {
+          await node.refImageManager.updateReferenceImageFromConnectedNode(true);
+
+          if (node.editor?.layerRenderer) {
+            node.editor.layerRenderer.render();
+          }
+        } catch (e) {
+          console.warn('[handleCanvasRefresh] Failed to update reference image:', e);
+        }
+      }
     }
 
-    // Update all box layers with ref images from folder
-    async updateAllBoxLayersFromRefFolder(node, refImages) {
-        const widgets = node.layerManager?.getSplineWidgets?.() || [];
-        const boxWidgets = widgets.filter(w => w?.value?.type === 'box_layer');
+    // Handle frames refresh
+    if (node.handleFramesRefresh) {
+      node.handleFramesRefresh();
+    }
+  } catch (e) {
+    console.error('[handleCanvasRefresh] Error:', e);
+  }
+}
 
-        if (!boxWidgets.length) {
-            console.log('No box layers found to update');
-            return;
-        }
+/**
+ * Handler for "Frames" button (refresh keyframes)
+ */
+export async function handleFramesRefresh(node) {
+  console.log("[handleFramesRefresh] Frames button clicked");
+  
+  if (node.handleFramesRefresh) {
+    try {
+      node.handleFramesRefresh();
+    } catch (e) {
+      console.error('[handleFramesRefresh] Error:', e);
+    }
+  }
+}
 
-        for (const boxWidget of boxWidgets) {
-            await this.updateBoxLayerWithRefImages(node, boxWidget, refImages);
-        }
+// == TOP ROW WIDGET
 
-        console.log(`Updated ${boxWidgets.length} box layer(s) with ref images from folder`);
+
+export class TopRowWidget extends RgthreeBaseWidget {
+  constructor(name = "TopRowWidget", visibility = {}, handlers = {}) {
+    super(name);
+    this.type = "custom";
+    this.options = { serialize: false };
+    this.value = {};
+    this.haveMouseMovedValue = false;
+    this.canvasButtonMouseDown = false;
+    this.framesButtonMouseDown = false;
+    this.visibility = {
+      refreshCanvasButton: true,
+      refreshFramesButton: true,
+      bgImgControl: true,
+      animToggleButton: true,
+      widthControl: true,
+      heightControl: true,
+      ...visibility,
+    };
+    // Store custom handlers
+    this.handlers = {
+      onRefreshCanvas: handlers.onRefreshCanvas || null,
+      onRefreshFrames: handlers.onRefreshFrames || null,
+      ...handlers
+    };
+    this.hitAreas = {
+      refreshCanvasButton: { bounds: [0, 0], onClick: null },
+      refreshFramesButton: { bounds: [0, 0], onClick: null },
+      bgImgLeftArrow: { bounds: [0, 0], onClick: null },
+      bgImgVal: { bounds: [0, 0], onClick: null },
+      bgImgRightArrow: { bounds: [0, 0], onClick: null },
+      bgImgAny: { bounds: [0, 0], onClick: null },
+      widthDec: { bounds: [0, 0], onClick: null },
+      widthVal: { bounds: [0, 0], onClick: null },
+      widthInc: { bounds: [0, 0], onClick: null },
+      widthAny: { bounds: [0, 0], onMove: null },
+      heightDec: { bounds: [0, 0], onClick: null },
+      heightVal: { bounds: [0, 0], onClick: null },
+      heightInc: { bounds: [0, 0], onClick: null },
+      heightAny: { bounds: [0, 0], onMove: null },
+    };
+  }
+
+  draw(ctx, node, w, posY, height) {
+    const margin = 15;
+    const spacing = 10;
+    const midY = posY + height * 0.5;
+
+    ctx.save();
+
+    const assignBounds = (name, bounds) => {
+      const area = this.hitAreas[name];
+      if (!area) return;
+      area.bounds = bounds;
+      area.onClick = null;
+      area.onDown = null;
+      area.onUp = null;
+      area.onMove = null;
+      area.onRightDown = null;
+    };
+
+    // Get widget values
+    const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+    const widthValue = widthWidget ? widthWidget.value : 512;
+    const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+    const heightValue = heightWidget ? heightWidget.value : 512;
+    const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
+    const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
+
+    // Calculate available width
+    const availableWidth = node.size[0] - margin * 2 - spacing * 4;
+
+    // Calculate component widths
+    const refreshCanvasWidth = availableWidth * 0.12;
+    const refreshFramesWidth = availableWidth * 0.12;
+    const bgImgDropdownWidth = availableWidth * 0.14;
+    const iconButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
+    const dimensionsAreaWidth = availableWidth - (
+      refreshCanvasWidth + spacing +
+      refreshFramesWidth + spacing +
+      bgImgDropdownWidth + spacing +
+      iconButtonWidth
+    );
+
+    const startX = margin;
+    let posX = startX;
+
+    // Draw Refresh Canvas button
+    if (this.visibility.refreshCanvasButton) {
+      drawWidgetButton(
+        ctx,
+        { size: [refreshCanvasWidth, height], pos: [posX, posY] },
+        "🔄 Refresh",
+        this.canvasButtonMouseDown
+      );
+    }
+    assignBounds("refreshCanvasButton", [posX, refreshCanvasWidth]);
+    posX += refreshCanvasWidth + spacing;
+
+    // Draw Refresh Frames button
+    if (this.visibility.refreshFramesButton) {
+      drawWidgetButton(
+        ctx,
+        { size: [refreshFramesWidth, height], pos: [posX, posY] },
+        "🕞 Frames",
+        this.framesButtonMouseDown
+      );
+    }
+    assignBounds("refreshFramesButton", [posX, refreshFramesWidth]);
+    posX += refreshFramesWidth + spacing;
+
+    // Draw bg_img control
+    const arrowWidth = 7;
+
+    if (this.visibility.bgImgControl) {
+      ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+      ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
+      ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+      ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+      ctx.fillText("<", posX + arrowWidth / 2, midY);
+      ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
+      ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
     }
 
-    // Mouse event handlers
-    mouse(event, pos, node) {
-        // Use the parent's mouse handling which properly manages hit areas
-        return super.mouse(event, pos, node);
+    assignBounds("bgImgLeftArrow", [posX, arrowWidth]);
+    assignBounds("bgImgVal", [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)]);
+    assignBounds("bgImgRightArrow", [posX + bgImgDropdownWidth - arrowWidth, arrowWidth]);
+    assignBounds("bgImgAny", [posX, bgImgDropdownWidth]);
+    posX += bgImgDropdownWidth + spacing;
+
+    // Animation toggle icon
+    const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? false);
+    if (this.visibility.animToggleButton) {
+      drawWidgetButton(
+        ctx,
+        { size: [iconButtonWidth, height], pos: [posX, posY] },
+        "~",
+        isAnimOn
+      );
+      if (isAnimOn) {
+        const pad = 0.5;
+        ctx.save();
+        ctx.strokeStyle = '#2cc6ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(posX + pad, posY + pad, iconButtonWidth - pad * 2, height - pad * 2, [4]);
+        ctx.stroke();
+        ctx.restore();
+      }
+      this.hitAreas.animToggleButton = {
+        bounds: [posX, iconButtonWidth],
+        onClick: (e, p, n) => {
+          if (n?.editor) {
+            n.editor._inactiveFlowEnabled = !n.editor._inactiveFlowEnabled;
+            try { n.editor.layerRenderer?.updateInactiveDash?.(); } catch {}
+            n.setDirtyCanvas(true, true);
+          }
+          return true;
+        }
+      };
+    } else {
+      assignBounds("animToggleButton", [posX, iconButtonWidth]);
+    }
+    posX += iconButtonWidth + spacing;
+
+    // Draw width/height controls
+    const roundedAreaX = posX;
+    const roundedAreaY = posY;
+    const roundedAreaWidth = dimensionsAreaWidth;
+    const roundedAreaHeight = height;
+
+    ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+    ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+    ctx.beginPath();
+    ctx.roundRect(roundedAreaX, roundedAreaY, roundedAreaWidth, roundedAreaHeight, [roundedAreaHeight * 0.5]);
+    ctx.fill();
+    ctx.stroke();
+
+    const controlSpacing = 20;
+    const numberControlWidth = drawNumberWidgetPart.WIDTH_TOTAL;
+    const labelWidth = 40;
+    const totalControlWidth = labelWidth + numberControlWidth + controlSpacing + labelWidth + numberControlWidth;
+
+    const controlsStartX = roundedAreaX + (roundedAreaWidth - totalControlWidth) / 2;
+
+    // Width control
+    const widthLabel = "width:";
+    const widthControlX = controlsStartX;
+
+    if (this.visibility.widthControl) {
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+      ctx.fillText(widthLabel, widthControlX, midY);
     }
 
-    onMouseUp(event, pos, node) {
-        super.onMouseUp(event, pos, node);
-        this.haveMouseMovedValue = false;
+    const widthControlStartX = widthControlX + labelWidth;
+    const [wLeftArrow, wText, wRightArrow] = drawNumberWidgetPart(ctx, {
+      posX: widthControlStartX,
+      posY,
+      height,
+      value: widthValue,
+      direction: 1,
+      textColor: this.visibility.widthControl ? undefined : "transparent",
+    });
+
+    assignBounds("widthDec", wLeftArrow);
+    assignBounds("widthVal", wText);
+    assignBounds("widthInc", wRightArrow);
+    assignBounds("widthAny", [wLeftArrow[0], wRightArrow[0] + wRightArrow[1] - wLeftArrow[0]]);
+    if (this.visibility.widthControl) {
+      this.hitAreas.widthDec.onClick = () => this.stepWidth(node, -16);
+      this.hitAreas.widthInc.onClick = () => this.stepWidth(node, 16);
+      this.hitAreas.widthVal.onClick = () => this.promptWidth(node);
+      this.hitAreas.widthAny.onMove = (event) => this.dragWidth(node, event);
+    }
+
+    // Height control
+    const heightControlX = widthControlStartX + numberControlWidth + controlSpacing;
+    const heightLabel = "height:";
+
+    if (this.visibility.heightControl) {
+      ctx.textBaseline = "middle";
+      ctx.fillText(heightLabel, heightControlX, midY);
+    }
+
+    const heightControlStartX = heightControlX + labelWidth;
+    const [hLeftArrow, hText, hRightArrow] = drawNumberWidgetPart(ctx, {
+      posX: heightControlStartX,
+      posY,
+      height,
+      value: heightValue,
+      direction: 1,
+      textColor: this.visibility.heightControl ? undefined : "transparent",
+    });
+
+    assignBounds("heightDec", hLeftArrow);
+    assignBounds("heightVal", hText);
+    assignBounds("heightInc", hRightArrow);
+    assignBounds("heightAny", [hLeftArrow[0], hRightArrow[0] + hRightArrow[1] - hLeftArrow[0]]);
+    if (this.visibility.heightControl) {
+      this.hitAreas.heightDec.onClick = () => this.stepHeight(node, -16);
+      this.hitAreas.heightInc.onClick = () => this.stepHeight(node, 16);
+      this.hitAreas.heightVal.onClick = () => this.promptHeight(node);
+      this.hitAreas.heightAny.onMove = (event) => this.dragHeight(node, event);
+    }
+
+    // Setup event handlers for refresh button
+    if (this.visibility.refreshCanvasButton) {
+      this.hitAreas.refreshCanvasButton.onClick = async () => {
+        if (this.handlers.onRefreshCanvas) {
+          await this.handlers.onRefreshCanvas(node);
+        }
+      };
+      this.hitAreas.refreshCanvasButton.onDown = () => {
+        this.canvasButtonMouseDown = true;
+        node.setDirtyCanvas(true, false);
+      };
+      this.hitAreas.refreshCanvasButton.onUp = () => {
         this.canvasButtonMouseDown = false;
-        this.framesButtonMouseDown = false;
+        node.setDirtyCanvas(true, false);
+      };
     }
 
-    computeSize(width) {
-        return [width, LiteGraph.NODE_WIDGET_HEIGHT];
+    if (this.visibility.refreshFramesButton) {
+      this.hitAreas.refreshFramesButton.onClick = async () => {
+        if (this.handlers.onRefreshFrames) {
+          await this.handlers.onRefreshFrames(node);
+        }
+      };
+      this.hitAreas.refreshFramesButton.onDown = () => {
+        this.framesButtonMouseDown = true;
+        node.setDirtyCanvas(true, false);
+      };
+      this.hitAreas.refreshFramesButton.onUp = () => {
+        this.framesButtonMouseDown = false;
+        node.setDirtyCanvas(true, false);
+      };
     }
+
+    // Setup bg_img control handlers
+    if (this.visibility.bgImgControl) {
+      this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
+      this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
+      this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
+    }
+
+    ctx.restore();
+  }
+
+  // Width controls
+  stepWidth(node, step) {
+    const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+    if (widthWidget) {
+      const newValue = widthWidget.value + step;
+      widthWidget.value = node.sizeManager
+        ? node.sizeManager.constrainCanvasWidth(newValue)
+        : Math.max(64, newValue);
+      if (widthWidget.callback) {
+        widthWidget.callback(widthWidget.value);
+      }
+      node.setDirtyCanvas(true, true);
+    }
+  }
+
+  promptWidth(node) {
+    if (this.haveMouseMovedValue) return;
+    const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+    if (widthWidget) {
+      const canvas = app.canvas;
+      canvas.prompt("Width", widthWidget.value, (v) => {
+        const newValue = Number(v);
+        widthWidget.value = node.sizeManager
+          ? node.sizeManager.constrainCanvasWidth(newValue)
+          : Math.max(64, newValue);
+        if (widthWidget.callback) {
+          widthWidget.callback(widthWidget.value);
+        }
+      });
+    }
+  }
+
+  dragWidth(node, event) {
+    if (event.deltaX) {
+      this.haveMouseMovedValue = true;
+      const widthWidget = node.widgets?.find(w => w.name === "mask_width");
+      if (widthWidget) {
+        const newValue = widthWidget.value + event.deltaX * 2;
+        widthWidget.value = node.sizeManager
+          ? node.sizeManager.constrainCanvasWidth(newValue)
+          : Math.max(64, newValue);
+        if (widthWidget.callback) {
+          widthWidget.callback(widthWidget.value);
+        }
+        node.setDirtyCanvas(true, true);
+      }
+    }
+  }
+
+  // Height controls
+  stepHeight(node, step) {
+    const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+    if (heightWidget) {
+      const newValue = heightWidget.value + step;
+      heightWidget.value = node.sizeManager
+        ? node.sizeManager.constrainCanvasHeight(newValue)
+        : Math.max(64, newValue);
+      if (heightWidget.callback) {
+        heightWidget.callback(heightWidget.value);
+      }
+      node.setDirtyCanvas(true, true);
+    }
+  }
+
+  promptHeight(node) {
+    if (this.haveMouseMovedValue) return;
+    const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+    if (heightWidget) {
+      const canvas = app.canvas;
+      canvas.prompt("Height", heightWidget.value, (v) => {
+        const newValue = Number(v);
+        heightWidget.value = node.sizeManager
+          ? node.sizeManager.constrainCanvasHeight(newValue)
+          : Math.max(64, newValue);
+        if (heightWidget.callback) {
+          heightWidget.callback(heightWidget.value);
+        }
+      });
+    }
+  }
+
+  dragHeight(node, event) {
+    if (event.deltaX) {
+      this.haveMouseMovedValue = true;
+      const heightWidget = node.widgets?.find(w => w.name === "mask_height");
+      if (heightWidget) {
+        const newValue = heightWidget.value + event.deltaX * 2;
+        heightWidget.value = node.sizeManager
+          ? node.sizeManager.constrainCanvasHeight(newValue)
+          : Math.max(64, newValue);
+        if (heightWidget.callback) {
+          heightWidget.callback(heightWidget.value);
+        }
+        node.setDirtyCanvas(true, true);
+      }
+    }
+  }
+
+  // BG image controls
+  stepBgImg(node, step) {
+    const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
+    if (bgImgWidget) {
+      const options = ["None", "A", "B", "C"];
+      const currentIndex = options.indexOf(bgImgWidget.value);
+      const newIndex = (currentIndex + step + options.length) % options.length;
+      bgImgWidget.value = options[newIndex];
+      if (bgImgWidget.callback) {
+        bgImgWidget.callback(bgImgWidget.value);
+      }
+      node.setDirtyCanvas(true, true);
+    }
+  }
+
+  // Mouse event handlers
+  mouse(event, pos, node) {
+    return super.mouse(event, pos, node);
+  }
+
+  onMouseUp(event, pos, node) {
+    super.onMouseUp(event, pos, node);
+    this.haveMouseMovedValue = false;
+    this.canvasButtonMouseDown = false;
+    this.framesButtonMouseDown = false;
+  }
+
+  computeSize(width) {
+    return [width, LiteGraph.NODE_WIDGET_HEIGHT];
+  }
 }
