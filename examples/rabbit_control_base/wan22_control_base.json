@@ -2,7 +2,7 @@
   "id": "206247b6-9fec-4ed2-8927-e4f388c674d4",
   "revision": 0,
   "last_node_id": 274,
-  "last_link_id": 511,
+  "last_link_id": 512,
   "nodes": [
     {
       "id": 104,
@@ -968,7 +968,7 @@
       ],
       "size": [
         628.69873046875,
-        688.4586119570974
+        334
       ],
       "flags": {},
       "order": 50,
@@ -1050,7 +1050,7 @@
       ],
       "size": [
         432.51849365234375,
-        578.730682890294
+        334
       ],
       "flags": {},
       "order": 48,
@@ -1168,18 +1168,20 @@
         }
       ],
       "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "cnr_id": "wanvideowrapper_qq",
         "ver": "9d9c90632881180cb5eaf3ab380b174e057bb8b7",
         "Node name for S&R": "WanVideoPowerLoraLoader",
-        "Show Strengths": "Single Strength",
         "low_mem_load": true,
         "merge_loras": false,
         "overwrite_duplicates": false,
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "Show Strengths": "Single Strength",
         "ue_properties": {
           "version": "7.2.2",
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {}
-        }
+        },
+        "uiState": "{}"
       },
       "widgets_values": [
         {},
@@ -1193,11 +1195,16 @@
           "strength": 1,
           "strengthTwo": null,
           "low_strength": 1,
-          "is_low": true,
-          "low_variant_name": "wan_22_lighting\\Wan22_A14B_T2V_LOW_Lightning_4steps_lora_250928_fp16.safetensors"
+          "is_low": false,
+          "low_variant_name": null,
+          "low_active": true,
+          "use_for_both": false,
+          "low_only": false,
+          "high_only": false
         },
         {},
-        ""
+        "",
+        "{}"
       ]
     },
     {
@@ -1479,7 +1486,7 @@
         }
       },
       "widgets_values": [
-        "snowy-rabbit-gathering-stockcake-1824665364.jpg",
+        "snowy-rabbit-gathering.jpg",
         "image"
       ],
       "color": "#2a363b",
@@ -1646,9 +1653,10 @@
         }
       ],
       "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "cnr_id": "wanvideowrapper_qq",
         "ver": "0a2536acb32c76369fa019dfcadd77cb92650373",
         "Node name for S&R": "WanFrames",
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -1671,7 +1679,7 @@
       ],
       "size": [
         309.3501892089844,
-        509.83993633722855
+        510.19629983340997
       ],
       "flags": {},
       "order": 36,
@@ -1733,12 +1741,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "control_00007.mp4",
+            "filename": "control_00002.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "control_00007.png",
+            "workflow": "control_00002.png",
             "fullpath": ""
           }
         }
@@ -2247,7 +2255,9 @@
         false,
         64,
         true,
-        128
+        128,
+        false,
+        false
       ],
       "color": "#223",
       "bgcolor": "#335"
@@ -2742,14 +2752,14 @@
         }
       ],
       "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "0a75c7958fe320efcb052f1d9f8451fd20c730a8",
+        "Node name for S&R": "VHS_VideoCombine",
         "ue_properties": {
           "version": "7.2.2",
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {}
-        },
-        "cnr_id": "comfyui-videohelpersuite",
-        "ver": "0a75c7958fe320efcb052f1d9f8451fd20c730a8",
-        "Node name for S&R": "VHS_VideoCombine"
+        }
       },
       "widgets_values": {
         "frame_rate": 16,
@@ -2766,12 +2776,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "control_00006.mp4",
+            "filename": "control_00001.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "control_00006.png",
+            "workflow": "control_00001.png",
             "fullpath": ""
           }
         }
@@ -2875,7 +2885,7 @@
       ],
       "size": [
         305.3199157714844,
-        82
+        106
       ],
       "flags": {},
       "order": 45,
@@ -2898,9 +2908,10 @@
         }
       ],
       "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "cnr_id": "wanvideowrapper_qq",
         "ver": "9d9c90632881180cb5eaf3ab380b174e057bb8b7",
         "Node name for S&R": "WanVideoCacheSamples",
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -2909,162 +2920,8 @@
       },
       "widgets_values": [
         "cache_data",
-        "wanvideo_cached_samples.pt"
-      ]
-    },
-    {
-      "id": 264,
-      "type": "PowerSplineEditor",
-      "pos": [
-        -796.9005842176789,
-        371.8861879488691
-      ],
-      "size": [
-        701,
-        722
-      ],
-      "flags": {},
-      "order": 29,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "ref_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 488
-        },
-        {
-          "name": "coord_in",
-          "shape": 7,
-          "type": "STRING",
-          "link": null
-        },
-        {
-          "name": "frames",
-          "shape": 7,
-          "type": "INT",
-          "link": 494
-        }
-      ],
-      "outputs": [
-        {
-          "name": "ref_image",
-          "type": "IMAGE",
-          "links": [
-            500
-          ]
-        },
-        {
-          "name": "coord_out",
-          "type": "STRING",
-          "links": [
-            501
-          ]
-        },
-        {
-          "name": "frames",
-          "type": "INT",
-          "links": [
-            502
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
-        "ver": "edaa843d7d840adcd8b0a7528f6303c49932041d",
-        "Node name for S&R": "PowerSplineEditor",
-        "userAdjustedSize": true,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        },
-        "bgImageDims": {
-          "width": 657.5999755859375,
-          "height": 480
-        },
-        "userAdjustedDims": true
-      },
-      "widgets_values": [
-        "[{\"on\":true,\"name\":\"Spline 1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":6,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1},\"scale\":1.84,\"points_store\":\"[{\\\"x\\\":0.16734756890663047,\\\"y\\\":0.8291453830740663,\\\"highlighted\\\":false},{\\\"x\\\":0.40826350018417734,\\\"y\\\":0.5354926052428199,\\\"highlighted\\\":false},{\\\"x\\\":0.44699653146644214,\\\"y\\\":0.926485751402128,\\\"highlighted\\\":true,\\\"fix\\\":null},{\\\"x\\\":0.7060983180155901,\\\"y\\\":0.5176323253815309,\\\"highlighted\\\":false},{\\\"x\\\":0.7201990955148635,\\\"y\\\":0.9296307777561326,\\\"highlighted\\\":true,\\\"fix\\\":null},{\\\"x\\\":1.0321787976862866,\\\"y\\\":0.5585176679835905,\\\"highlighted\\\":false},{\\\"x\\\":1.0550925611226054,\\\"y\\\":0.9453559095261559,\\\"highlighted\\\":false}]\",\"coordinates\":\"[]\"},{\"on\":true,\"name\":\"Spline 1_1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1},\"scale\":1.89,\"points_store\":\"[{\\\"x\\\":0.49342522075763895,\\\"y\\\":0.6083132461402964,\\\"highlighted\\\":false},{\\\"x\\\":0.6752187518114265,\\\"y\\\":0.49242980482164167,\\\"highlighted\\\":false},{\\\"x\\\":0.6939596823385212,\\\"y\\\":0.7908319550438878,\\\"highlighted\\\":true},{\\\"x\\\":0.8999363806551236,\\\"y\\\":0.534384963040345,\\\"highlighted\\\":false},{\\\"x\\\":0.9064718018990809,\\\"y\\\":0.8072868674994239,\\\"highlighted\\\":true},{\\\"x\\\":1.0802300820658168,\\\"y\\\":0.5511732979852062,\\\"highlighted\\\":false},{\\\"x\\\":1.096043389626622,\\\"y\\\":0.8181391373940944,\\\"highlighted\\\":false}]\",\"coordinates\":\"[]\"},{\"on\":true,\"name\":\"Spline 3\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1},\"scale\":1.01,\"points_store\":\"[{\\\"x\\\":0.1825084381354701,\\\"y\\\":0.5597005375309391,\\\"highlighted\\\":false},{\\\"x\\\":0.3365074749955557,\\\"y\\\":0.6076201622338966,\\\"highlighted\\\":false},{\\\"x\\\":0.3189020559617375,\\\"y\\\":0.35938667690686077,\\\"highlighted\\\":false},{\\\"x\\\":0.6634434660802881,\\\"y\\\":0.627109436647994,\\\"highlighted\\\":false},{\\\"x\\\":0.7567427823191606,\\\"y\\\":0.3196802409162543,\\\"highlighted\\\":false},{\\\"x\\\":0.8208569029648533,\\\"y\\\":0.65848825171457,\\\"highlighted\\\":false}]\",\"coordinates\":\"[]\"}]",
-        null,
-        "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
-        656,
-        480,
-        "None",
-        {},
-        "",
-        null,
-        null,
-        {
-          "on": true,
-          "name": "Spline 1",
-          "interpolation": "basis",
-          "repeat": 1,
-          "offset": 6,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1
-          },
-          "scale": 1.84,
-          "points_store": "[{\"x\":0.16734756890663047,\"y\":0.8291453830740663,\"highlighted\":false},{\"x\":0.40826350018417734,\"y\":0.5354926052428199,\"highlighted\":false},{\"x\":0.44699653146644214,\"y\":0.926485751402128,\"highlighted\":true,\"fix\":null},{\"x\":0.7060983180155901,\"y\":0.5176323253815309,\"highlighted\":false},{\"x\":0.7201990955148635,\"y\":0.9296307777561326,\"highlighted\":true,\"fix\":null},{\"x\":1.0321787976862866,\"y\":0.5585176679835905,\"highlighted\":false},{\"x\":1.0550925611226054,\"y\":0.9453559095261559,\"highlighted\":false}]",
-          "coordinates": "[]"
-        },
-        {
-          "on": true,
-          "name": "Spline 1_1",
-          "interpolation": "basis",
-          "repeat": 1,
-          "offset": 0,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1
-          },
-          "scale": 1.89,
-          "points_store": "[{\"x\":0.49342522075763895,\"y\":0.6083132461402964,\"highlighted\":false},{\"x\":0.6752187518114265,\"y\":0.49242980482164167,\"highlighted\":false},{\"x\":0.6939596823385212,\"y\":0.7908319550438878,\"highlighted\":true},{\"x\":0.8999363806551236,\"y\":0.534384963040345,\"highlighted\":false},{\"x\":0.9064718018990809,\"y\":0.8072868674994239,\"highlighted\":true},{\"x\":1.0802300820658168,\"y\":0.5511732979852062,\"highlighted\":false},{\"x\":1.096043389626622,\"y\":0.8181391373940944,\"highlighted\":false}]",
-          "coordinates": "[]"
-        },
-        {
-          "on": true,
-          "name": "Spline 3",
-          "interpolation": "points",
-          "repeat": 1,
-          "offset": 0,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1
-          },
-          "scale": 1.01,
-          "points_store": "[{\"x\":0.1825084381354701,\"y\":0.5597005375309391,\"highlighted\":false},{\"x\":0.3365074749955557,\"y\":0.6076201622338966,\"highlighted\":false},{\"x\":0.3189020559617375,\"y\":0.35938667690686077,\"highlighted\":false},{\"x\":0.6634434660802881,\"y\":0.627109436647994,\"highlighted\":false},{\"x\":0.7567427823191606,\"y\":0.3196802409162543,\"highlighted\":false},{\"x\":0.8208569029648533,\"y\":0.65848825171457,\"highlighted\":false}]",
-          "coordinates": "[]"
-        }
+        "wanvideo_cached_samples.pt",
+        true
       ]
     },
     {
@@ -3118,7 +2975,7 @@
           "type": "IMAGE",
           "links": [
             215,
-            488
+            512
           ]
         },
         {
@@ -3158,8 +3015,7 @@
         "0,0,0",
         "center",
         16,
-        "cpu",
-        "<tr><td>Output: </td><td><b>1</b> x <b>944</b> x <b>528 | 5.70MB</b></td></tr>"
+        "cpu"
       ]
     },
     {
@@ -3171,7 +3027,7 @@
       ],
       "size": [
         270,
-        358
+        406
       ],
       "flags": {},
       "order": 32,
@@ -3222,9 +3078,10 @@
         }
       ],
       "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "cnr_id": "wanvideowrapper_qq",
         "ver": "7f2c53a50344a37df99e3bf83e254ce18a170c72",
         "Node name for S&R": "DrawShapeOnPath",
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -3242,7 +3099,183 @@
         0,
         0,
         "black",
+        true,
+        1,
         true
+      ]
+    },
+    {
+      "id": 264,
+      "type": "PowerSplineEditor",
+      "pos": [
+        -796.9005842176789,
+        371.8861879488691
+      ],
+      "size": [
+        701,
+        762
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "bg_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 512
+        },
+        {
+          "name": "ref_images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "frames",
+          "shape": 7,
+          "type": "INT",
+          "link": 494
+        },
+        {
+          "name": "ref_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "coord_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "bg_image",
+          "type": "IMAGE",
+          "links": [
+            500
+          ]
+        },
+        {
+          "name": "coord_out",
+          "type": "STRING",
+          "links": [
+            501
+          ]
+        },
+        {
+          "name": "frames",
+          "type": "INT",
+          "links": [
+            502
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "wanvideowrapper_qq",
+        "ver": "edaa843d7d840adcd8b0a7528f6303c49932041d",
+        "Node name for S&R": "PowerSplineEditor",
+        "userAdjustedSize": true,
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        },
+        "bgImageDims": {
+          "width": 657.5999755859375,
+          "height": 480
+        },
+        "userAdjustedDims": true
+      },
+      "widgets_values": [
+        "[{\"on\":true,\"name\":\"Spline 1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":6,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.84,\"points_store\":\"[{\\\"x\\\":0.16734756890663047,\\\"y\\\":0.8291453830740662,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":1},{\\\"x\\\":0.40826350018417734,\\\"y\\\":0.53549260524282,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":2},{\\\"x\\\":0.44699653146644214,\\\"y\\\":0.926485751402128,\\\"highlighted\\\":true,\\\"fix\\\":null,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":3},{\\\"x\\\":0.7060983180155901,\\\"y\\\":0.5176323253815309,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":4},{\\\"x\\\":0.7201990955148635,\\\"y\\\":0.9296307777561326,\\\"highlighted\\\":true,\\\"fix\\\":null,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":5},{\\\"x\\\":1.0321787976862866,\\\"y\\\":0.5585176679835905,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":6},{\\\"x\\\":1.0550925611226054,\\\"y\\\":0.9453559095261558,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":7}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 1_1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.89,\"points_store\":\"[{\\\"x\\\":0.49342522075763895,\\\"y\\\":0.6083132461402964,\\\"highlighted\\\":false},{\\\"x\\\":0.6752187518114265,\\\"y\\\":0.49242980482164167,\\\"highlighted\\\":false},{\\\"x\\\":0.6939596823385212,\\\"y\\\":0.7908319550438878,\\\"highlighted\\\":true},{\\\"x\\\":0.8999363806551236,\\\"y\\\":0.534384963040345,\\\"highlighted\\\":false},{\\\"x\\\":0.9064718018990809,\\\"y\\\":0.8072868674994239,\\\"highlighted\\\":true},{\\\"x\\\":1.0802300820658168,\\\"y\\\":0.5511732979852062,\\\"highlighted\\\":false},{\\\"x\\\":1.096043389626622,\\\"y\\\":0.8181391373940944,\\\"highlighted\\\":false}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 3\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.01,\"points_store\":\"[{\\\"x\\\":0.1825084381354701,\\\"y\\\":0.5597005375309391,\\\"highlighted\\\":false},{\\\"x\\\":0.3365074749955557,\\\"y\\\":0.6076201622338966,\\\"highlighted\\\":false},{\\\"x\\\":0.3189020559617375,\\\"y\\\":0.35938667690686077,\\\"highlighted\\\":false},{\\\"x\\\":0.6634434660802881,\\\"y\\\":0.627109436647994,\\\"highlighted\\\":false},{\\\"x\\\":0.7567427823191606,\\\"y\\\":0.3196802409162543,\\\"highlighted\\\":false},{\\\"x\\\":0.8208569029648533,\\\"y\\\":0.65848825171457,\\\"highlighted\\\":false}]\",\"coordinates\":\"[]\",\"type\":\"spline\"}]",
+        null,
+        "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
+        656,
+        480,
+        "None",
+        {},
+        "",
+        null,
+        null,
+        {
+          "on": true,
+          "name": "Spline 1",
+          "interpolation": "basis",
+          "repeat": 1,
+          "offset": 6,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.84,
+          "points_store": "[{\"x\":0.16734756890663047,\"y\":0.8291453830740662,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":1},{\"x\":0.40826350018417734,\"y\":0.53549260524282,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":2},{\"x\":0.44699653146644214,\"y\":0.926485751402128,\"highlighted\":true,\"fix\":null,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":3},{\"x\":0.7060983180155901,\"y\":0.5176323253815309,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":4},{\"x\":0.7201990955148635,\"y\":0.9296307777561326,\"highlighted\":true,\"fix\":null,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":5},{\"x\":1.0321787976862866,\"y\":0.5585176679835905,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":6},{\"x\":1.0550925611226054,\"y\":0.9453559095261558,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":7}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": true,
+          "name": "Spline 1_1",
+          "interpolation": "basis",
+          "repeat": 1,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.89,
+          "points_store": "[{\"x\":0.49342522075763895,\"y\":0.6083132461402964,\"highlighted\":false},{\"x\":0.6752187518114265,\"y\":0.49242980482164167,\"highlighted\":false},{\"x\":0.6939596823385212,\"y\":0.7908319550438878,\"highlighted\":true},{\"x\":0.8999363806551236,\"y\":0.534384963040345,\"highlighted\":false},{\"x\":0.9064718018990809,\"y\":0.8072868674994239,\"highlighted\":true},{\"x\":1.0802300820658168,\"y\":0.5511732979852062,\"highlighted\":false},{\"x\":1.096043389626622,\"y\":0.8181391373940944,\"highlighted\":false}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": true,
+          "name": "Spline 3",
+          "interpolation": "points",
+          "repeat": 1,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.01,
+          "points_store": "[{\"x\":0.1825084381354701,\"y\":0.5597005375309391,\"highlighted\":false},{\"x\":0.3365074749955557,\"y\":0.6076201622338966,\"highlighted\":false},{\"x\":0.3189020559617375,\"y\":0.35938667690686077,\"highlighted\":false},{\"x\":0.6634434660802881,\"y\":0.627109436647994,\"highlighted\":false},{\"x\":0.7567427823191606,\"y\":0.3196802409162543,\"highlighted\":false},{\"x\":0.8208569029648533,\"y\":0.65848825171457,\"highlighted\":false}]",
+          "coordinates": "[]",
+          "type": "spline"
+        }
       ]
     }
   ],
@@ -3616,14 +3649,6 @@
       "INT"
     ],
     [
-      488,
-      109,
-      0,
-      264,
-      0,
-      "IMAGE"
-    ],
-    [
       489,
       97,
       0,
@@ -3710,6 +3735,14 @@
       274,
       0,
       "IMAGE"
+    ],
+    [
+      512,
+      109,
+      0,
+      264,
+      0,
+      "IMAGE"
     ]
   ],
   "groups": [
@@ -3756,13 +3789,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.5054470284993099,
+      "scale": 0.6727499949325819,
       "offset": [
-        1479.397374863866,
-        589.8946647145658
+        1199.878614460796,
+        231.92547667385043
       ]
     },
-    "frontendVersion": "1.29.1",
+    "frontendVersion": "1.33.5",
     "node_versions": {
       "ComfyUI-WanVideoWrapper": "5a2383621a05825d0d0437781afcb8552d9590fd",
       "comfy-core": "0.3.26",
@@ -3770,11 +3803,12 @@
       "ComfyUI-VideoHelperSuite": "0a75c7958fe320efcb052f1d9f8451fd20c730a8"
     },
     "VHS_latentpreview": true,
-    "VHS_latentpreviewrate": 8,
+    "VHS_latentpreviewrate": 4,
     "VHS_MetadataImage": true,
     "VHS_KeepIntermediate": true,
     "ue_links": [],
-    "links_added_by_ue": []
+    "links_added_by_ue": [],
+    "workflowRendererVersion": "LG"
   },
   "version": 0.4
 }

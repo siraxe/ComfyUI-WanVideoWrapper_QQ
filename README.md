@@ -1,7 +1,11 @@
 # ComfyUI-WanVideoWrapper_QQ
+**Version 1.1.1** - 2025-12-01
+- Added ability to connect video to bg_image and animate over it [Example](examples/ttm_ref_vid/ttm_ref_vid_example.json)
+
+https://github.com/user-attachments/assets/dffe5da8-7626-45cf-ad22-777b5a14879f
 
 **Version 1.1.0** - 2025-11-26
-- Added to `Prepare Refs` (needs cv2) to cut out parts for `Power Spline Editor` [Example](examples/ttm_ref_cutout/ttm_ref_cutout_example.json)
+- Added `Prepare Refs` (needs cv2) to cut out parts for `Power Spline Editor` [Example](examples/ttm_ref_cutout/ttm_ref_cutout_example.json)
 - `Power Spline Editor` can trigger ref preparation with Canvas button in backend without starting comfyui run
 
 <table>
