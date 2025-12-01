@@ -38,10 +38,6 @@ export function initializeVideoBackground(editor) {
         const parentEl = canvasElement.parentElement;
         if (parentEl) {
             parentEl.insertBefore(videoElement, canvasElement);
-            console.log('[VideoBackground] Video element inserted into DOM:', {
-                parentId: parentEl.id,
-                videoId: videoElement.id
-            });
         } else {
             console.warn('[VideoBackground] Parent element not found');
         }
@@ -51,7 +47,6 @@ export function initializeVideoBackground(editor) {
 
     // Set up event listeners
     videoElement.addEventListener('loadedmetadata', () => {
-        console.log('[VideoBackground] Video metadata loaded');
         editor.videoReady = true;
         // Recenter video when metadata is loaded
         if (editor.videoMetadata) {
@@ -60,24 +55,12 @@ export function initializeVideoBackground(editor) {
     });
 
     videoElement.addEventListener('canplay', () => {
-        console.log('[VideoBackground] Video can play');
         editor.videoReady = true;
     });
 
     videoElement.addEventListener('error', (e) => {
         console.error('[VideoBackground] Video error:', e, videoElement.error);
-        console.error('[VideoBackground DEBUG] Video element error details:', {
-            src: videoElement.src,
-            networkState: videoElement.networkState,
-            readyState: videoElement.readyState,
-            error: videoElement.error
-        });
         editor.videoReady = false;
-    });
-
-    videoElement.addEventListener('seeked', () => {
-        // Seeked event fired when seeking completes
-        // Useful for debugging or showing loading states
     });
 }
 
@@ -87,7 +70,6 @@ export function initializeVideoBackground(editor) {
  * @param {Object} videoMetadata - Video metadata from backend
  */
 export function loadBackgroundVideo(editor, videoMetadata) {
-    console.log('[VideoBackground DEBUG] loadBackgroundVideo called with metadata:', videoMetadata);
     if (!videoMetadata || !videoMetadata.path) {
         console.error('[VideoBackground] Error: loadBackgroundVideo called with invalid or missing video path.', videoMetadata);
         clearBackgroundVideo(editor);
@@ -119,50 +101,30 @@ export function loadBackgroundVideo(editor, videoMetadata) {
     const baseVideoPath = new URL(`../${cleanPath}`, import.meta.url).href;
     const videoPath = `${baseVideoPath}?t=${timestamp}`;
 
-    console.log('[VideoBackground DEBUG] Path construction details:', {
-        importMetaUrl: import.meta.url,
-        originalPath: videoMetadata.path,
-        cleanPath: cleanPath,
-        finalVideoPath: videoPath
-    });
-
-    console.log('[VideoBackground] Loading video:', videoPath, videoMetadata);
-
     // Ensure video element is in DOM (in case it wasn't inserted during init)
     try {
         const canvasElement = editor.vis?.canvas?.();
-
-        console.log('[VideoBackground DEBUG] DOM elements:', {
-            hasCanvas: !!canvasElement,
-            videoElementInDOM: !!editor.videoElement.parentElement,
-            videoElementId: editor.videoElement.id
-        });
 
         if (canvasElement && !editor.videoElement.parentElement) {
             // Get the actual parent div (canvas() returns a span)
             const parentEl = canvasElement.parentElement;
             if (parentEl) {
                 parentEl.insertBefore(editor.videoElement, canvasElement);
-                console.log('[VideoBackground] Video element re-inserted into DOM');
             }
         }
     } catch (e) {
         console.error('[VideoBackground] Could not insert video element during load:', e);
     }
 
-    // ✅ ADD EVENT LISTENER TO SET SCALE BEFORE UPDATING LAYERS
+    // Add event listener to set scale before updating layers
     const onMetadataLoaded = () => {
-        console.log('[VideoBackground] Metadata loaded, setting scale...');
-
-        // NOW set the proper scale and offset
+        // Set the proper scale and offset
         recenterBackgroundVideo(editor);
 
-        // ✅ THEN reload layer coordinates with correct scale
+        // Reload layer coordinates with correct scale
         if (editor.node && editor.updateLayerCoordinatesAfterScaleChange) {
-            console.log('[VideoBackground] Updating layer coordinates with correct scale');
             editor.updateLayerCoordinatesAfterScaleChange();
         } else if (editor.refreshActiveLayerCoordinates) {
-            console.log('[VideoBackground] Refreshing active layer coordinates');
             editor.refreshActiveLayerCoordinates();
         }
 
@@ -176,8 +138,6 @@ export function loadBackgroundVideo(editor, videoMetadata) {
     // Load video
     editor.videoElement.src = videoPath;
     editor.videoElement.load();
-
-    console.log('[VideoBackground DEBUG] Video element src set:', editor.videoElement.src);
 
     // Show video element
     editor.videoElement.style.display = 'block';
@@ -238,11 +198,11 @@ export function recenterBackgroundVideo(editor) {
 
     // Store for coordinate transformations (matching image background)
     editor.videoScale = scale;
-    editor.scale = scale;  // ADD THIS LINE - Ensure coordinate system consistency
+    editor.scale = scale;  // Ensure coordinate system consistency
     editor.videoOffsetX = offsetX;
-    editor.offsetX = offsetX;  // ADD THIS LINE - Ensure coordinate system consistency
+    editor.offsetX = offsetX;  // Ensure coordinate system consistency
     editor.videoOffsetY = offsetY;
-    editor.offsetY = offsetY;  // ADD THIS LINE - Ensure coordinate system consistency
+    editor.offsetY = offsetY;  // Ensure coordinate system consistency
     editor.originalVideoWidth = videoWidth;
     editor.originalImageWidth = videoWidth;  // Keep consistency
     editor.originalVideoHeight = videoHeight;
@@ -254,31 +214,6 @@ export function recenterBackgroundVideo(editor) {
     editor.videoElement.style.top = `${offsetY}px`;
     editor.videoElement.style.width = `${newWidth}px`;
     editor.videoElement.style.height = `${newHeight}px`;
-
-    console.log('[VideoBackground] Video centered:', {
-        scale,
-        width: newWidth,
-        height: newHeight,
-        offsetX,
-        offsetY
-    });
-
-    // Debug: Check video element state
-    console.log('[VideoBackground] Video element state:', {
-        src: editor.videoElement.src,
-        display: editor.videoElement.style.display,
-        left: editor.videoElement.style.left,
-        top: editor.videoElement.style.top,
-        width: editor.videoElement.style.width,
-        height: editor.videoElement.style.height,
-        zIndex: editor.videoElement.style.zIndex,
-        position: editor.videoElement.style.position,
-        inDOM: document.body.contains(editor.videoElement),
-        parentElement: editor.videoElement.parentElement?.tagName,
-        parentElementId: editor.videoElement.parentElement?.id,
-        nextSibling: editor.videoElement.nextSibling?.tagName,
-        previousSibling: editor.videoElement.previousSibling?.tagName
-    });
 }
 
 /**
@@ -345,11 +280,11 @@ export function clearBackgroundVideo(editor) {
 
     // Clear positioning data
     editor.videoScale = null;
-    editor.scale = null;  // ADD THIS - Clear main scale
+    editor.scale = null;
     editor.videoOffsetX = null;
-    editor.offsetX = null;  // ADD THIS - Clear main offset
+    editor.offsetX = null;
     editor.videoOffsetY = null;
-    editor.offsetY = null;  // ADD THIS - Clear main offset
+    editor.offsetY = null;
     editor.originalVideoWidth = null;
     editor.originalVideoHeight = null;
 
@@ -368,8 +303,6 @@ export function clearBackgroundVideo(editor) {
     if (editor.node && editor.node.imgData) {
         editor.node.editor?.refreshBackgroundImage?.();
     }
-
-    console.log('[VideoBackground] Video cleared');
 }
 
 /**
@@ -407,7 +340,11 @@ export function onEditorDimensionsChanged(editor) {
  * @returns {number} Video scale factor
  */
 export function getVideoScale(editor) {
-    if (editor.videoMetadata && editor.videoScale !== undefined && editor.videoScale !== null) {
+    if (
+        editor.videoMetadata &&
+        editor.videoScale !== undefined &&
+        editor.videoScale !== null
+    ) {
         return editor.videoScale;
     }
     return 1; // Default to no scaling

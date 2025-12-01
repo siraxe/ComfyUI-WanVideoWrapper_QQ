@@ -332,7 +332,6 @@ app.registerExtension({
         };
 
         this.handleFramesRefresh = async function () {
-          console.log("[PowerSplineEditor] handleFramesRefresh called");
           if (this.dimensionManager) {
             await this.dimensionManager.handleFramesRefresh();
           }

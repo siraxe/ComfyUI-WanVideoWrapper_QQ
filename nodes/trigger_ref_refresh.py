@@ -318,12 +318,7 @@ async def process_video_file(request):
         mask_width = data.get("mask_width", 640)
         mask_height = data.get("mask_height", 480)
 
-        print(f"[process_video_file DEBUG] Received data: {data}")
-        print(f"[process_video_file DEBUG] Video filename: {video_filename}")
-        print(f"[process_video_file DEBUG] Mask dimensions: {mask_width}x{mask_height}")
-
         if not video_filename:
-            print("[process_video_file DEBUG] No video_filename provided")
             return web.json_response({
                 "success": False,
                 "error": "No video_filename provided"
@@ -333,13 +328,10 @@ async def process_video_file(request):
 
         # Get ComfyUI input folder
         input_dir = folder_paths.get_input_directory()
-        print(f"[process_video_file DEBUG] Input directory: {input_dir}")
         
         video_path = os.path.join(input_dir, video_filename)
-        print(f"[process_video_file DEBUG] Full video path: {video_path}")
 
         if not os.path.exists(video_path):
-            print(f"[process_video_file DEBUG] Video file not found at: {video_path}")
             return web.json_response({
                 "success": False,
                 "error": f"Video file not found: {video_filename}"
@@ -347,10 +339,8 @@ async def process_video_file(request):
 
         # Load video with OpenCV
         cap = cv2.VideoCapture(video_path)
-        print(f"[process_video_file DEBUG] OpenCV VideoCapture created")
 
         if not cap.isOpened():
-            print(f"[process_video_file DEBUG] Could not open video file with OpenCV")
             return web.json_response({
                 "success": False,
                 "error": f"Could not open video file: {video_filename}"
@@ -358,12 +348,6 @@ async def process_video_file(request):
 
         # Get video properties
         fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        print(f"[process_video_file] Video properties: {frame_count} frames, {fps} fps, {width}x{height}")
-        print(f"[process_video_file DEBUG] Raw OpenCV values - FPS: {fps}, Frame Count: {frame_count}, Width: {width}, Height: {height}")
 
         # Read all frames
         frames = []
@@ -387,10 +371,8 @@ async def process_video_file(request):
                 print(f"[process_video_file DEBUG] Frame {frame_idx} shape: {frame_rgb.shape}")
 
         cap.release()
-        print(f"[process_video_file DEBUG] VideoCapture released, read {len(frames)} frames")
 
         if len(frames) == 0:
-            print(f"[process_video_file DEBUG] No frames were read from video")
             return web.json_response({
                 "success": False,
                 "error": "No frames could be read from video"
@@ -407,15 +389,8 @@ async def process_video_file(request):
         bg_folder.mkdir(parents=True, exist_ok=True)
         output_video_path = bg_folder / "bg_video.mp4"
 
-        print(f"[process_video_file DEBUG] Output directory: {bg_folder}")
-        print(f"[process_video_file DEBUG] Output path: {output_video_path}")
-
         # Calculate appropriate FPS
         video_fps = fps if fps > 0 else 24.0
-        print(f"[process_video_file DEBUG] Using FPS: {video_fps}")
-
-        print(f"[process_video_file] Creating bg_video.mp4 with {len(frames)} frames at {video_fps} fps")
-
         # Save video
         try:
             video_metadata = save_frames_as_video(
@@ -425,7 +400,6 @@ async def process_video_file(request):
                 codec="libx264",
                 quality=23
             )
-            print(f"[process_video_file DEBUG] save_frames_as_video returned: {video_metadata}")
         except Exception as save_error:
             print(f"[process_video_file DEBUG] Error in save_frames_as_video: {save_error}")
             import traceback

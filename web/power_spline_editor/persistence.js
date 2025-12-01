@@ -21,14 +21,9 @@ export function initializeDrivenConfig(widgetValue, loadedValue = null) {
         widgetValue._drivenConfig = { ...DRIVEN_DEFAULTS, ...widgetValue.driven };
     }
 
-    // Ensure _drivenConfig exists, using loaded data or defaults
     const loadedConfig = loadedValue?._drivenConfig;
     widgetValue._drivenConfig = { ...DRIVEN_DEFAULTS, ...(loadedConfig || widgetValue._drivenConfig || {}) };
     
-    // After migration, if d_scale was from an old workflow and is 0, 
-    // but the user wants it to default to 1.0, we can set a minimum value.
-    // However, for backward compatibility we should be careful.
-    // Let's ensure d_scale is at least the default value if it's invalid
     if (typeof widgetValue._drivenConfig.d_scale !== 'number' || isNaN(widgetValue._drivenConfig.d_scale)) {
         widgetValue._drivenConfig.d_scale = DRIVEN_DEFAULTS.d_scale;
     }
@@ -121,8 +116,6 @@ export function prepareDrivenMenu(widget) {
 // == EASING CONFIG PERSISTENCE
 
 /**
- * Initializes the EASING configuration on a widget's value object.
- * Since easing is always active, we use `easingConfig` as the single source of truth.
  * @param {object} widgetValue The widget.value object to initialize.
  */
 export function initializeEasingConfig(widgetValue, loadedValue = null) {

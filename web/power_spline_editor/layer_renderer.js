@@ -590,7 +590,6 @@ export class LayerRenderer {
                     url = new URL(`/extensions/ComfyUI-WanVideoWrapper_QQ/${attachment.path}?v=${this._cacheBustCounter}`, window.location.origin).href;
                 }
                 this._refImageCache.set(cacheKey, url);
-                console.log(`[DEBUG] Image URL for ${attachment.path}: ${url}`);
             }
 
             return this._refImageCache.get(cacheKey);

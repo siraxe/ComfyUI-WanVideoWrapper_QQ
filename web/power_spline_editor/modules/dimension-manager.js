@@ -21,7 +21,6 @@ export function createDimensionManager(node) {
         // Step 1: Find all box type layers
         const boxLayers = this._getBoxLayers();
         if (boxLayers.length === 0) {
-          console.log('[DimensionManager] No box layers found');
           return;
         }
 
@@ -37,19 +36,14 @@ export function createDimensionManager(node) {
         // Step 3: Determine target frames
         const targetFrames = this._getTargetFrames();
         if (!targetFrames) {
-          console.log('[DimensionManager] No target frames found');
           return;
         }
-
-        console.log('[DimensionManager] Target frames:', targetFrames);
 
         // Step 4: Get current max frames from timeline
         try {
           const module = await import('../canvas/canvas_constants.js');
           const currentMaxFrames =
             node.editor?._getMaxFrames?.() ?? module.BOX_TIMELINE_MAX_POINTS ?? 50;
-
-          console.log('[DimensionManager] Current max frames:', currentMaxFrames);
 
           // Step 5: Decide scaling behavior
           await this._scaleFrames(
@@ -119,8 +113,6 @@ export function createDimensionManager(node) {
         if (node.uuid) {
           safeSetSessionItem(`spline-editor-maxframes-${node.uuid}`, String(frames));
         }
-
-        console.log('[DimensionManager] Persisted max frames:', frames);
       };
 
       // Determine last keyframe
@@ -137,26 +129,16 @@ export function createDimensionManager(node) {
             )
           : 0;
 
-      console.log('[DimensionManager] Last keyframe:', lastKeyFrame);
-
       if (targetFrames > currentMaxFrames) {
         // Expand canvas
-        console.log(
-          '[DimensionManager] Expanding canvas from',
-          currentMaxFrames,
-          'to',
-          targetFrames
-        );
         persistMaxFrames(targetFrames);
       } else {
         // Contract or maintain canvas
         if (lastKeyFrame <= targetFrames) {
           // Can safely set to target frames
-          console.log('[DimensionManager] Setting to target frames:', targetFrames);
           persistMaxFrames(targetFrames);
         } else {
           // Need to scale keyframes
-          console.log('[DimensionManager] Scaling keyframes');
           const scaleRatio = targetFrames / currentMaxFrames;
 
           if (boxLayersWithKeys.length > 0) {
@@ -179,9 +161,6 @@ export function createDimensionManager(node) {
               layer.value.box_keys = Array.from(keysByFrame.values()).sort(
                 (a, b) => a.frame - b.frame
               );
-
-              console.log('[DimensionManager] Scaled', originalKeys.length,
-                'keyframes to', layer.value.box_keys.length);
             }
           }
 
@@ -281,8 +260,6 @@ export function createDimensionManager(node) {
      * Update canvas dimensions
      */
     updateCanvasDimensions(width, height) {
-      console.log('[DimensionManager] Updating canvas dimensions:', width, 'x', height);
-
       if (!node.editor) {
         console.warn('[DimensionManager] Editor not initialized');
         return;
@@ -314,17 +291,6 @@ export function createDimensionManager(node) {
      * Scale spline points based on dimension change
      */
     scaleSplinePoints(oldWidth, oldHeight, newWidth, newHeight) {
-      console.log(
-        '[DimensionManager] Scaling spline points from',
-        oldWidth,
-        'x',
-        oldHeight,
-        'to',
-        newWidth,
-        'x',
-        newHeight
-      );
-
       const scaleX = newWidth / oldWidth;
       const scaleY = newHeight / oldHeight;
 
@@ -341,7 +307,6 @@ export function createDimensionManager(node) {
       });
 
       if (!splineWidgets?.length) {
-        console.log('[DimensionManager] No spline widgets found');
         return;
       }
 
@@ -357,11 +322,6 @@ export function createDimensionManager(node) {
             }));
 
             widget.value.points_store = JSON.stringify(transformedPoints);
-            console.log(
-              '[DimensionManager] Scaled',
-              points.length,
-              'points in widget'
-            );
           } catch (e) {
             console.error(
               '[DimensionManager] Error updating spline points:',
@@ -397,7 +357,6 @@ export function createDimensionManager(node) {
         );
         if (savedDims) {
           const dims = JSON.parse(savedDims);
-          console.log('[DimensionManager] Restored dimensions from session:', dims);
           return dims;
         }
       } catch (error) {
@@ -418,11 +377,6 @@ export function createDimensionManager(node) {
           `spline-editor-dims-${node.uuid}`,
           JSON.stringify({ width, height })
         );
-
-        console.log('[DimensionManager] Saved dimensions to session:', {
-          width,
-          height
-        });
       } catch (error) {
         console.error('[DimensionManager] Error saving dimensions:', error);
       }
@@ -452,11 +406,6 @@ export function createDimensionManager(node) {
           );
         }
       } catch {}
-
-      console.log('[DimensionManager] Marked dimensions as user-adjusted:', {
-        width,
-        height
-      });
     }
   };
 }

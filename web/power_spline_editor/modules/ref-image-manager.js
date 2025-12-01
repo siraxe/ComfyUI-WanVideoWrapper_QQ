@@ -30,28 +30,20 @@ export function createRefImageManager(node) {
       );
 
       // First, check what's connected to bg_image input
-      console.log('[DEBUG] Checking bg_image input first...');
       const sourceNode = findConnectedSourceNode(node, 'bg_image');
-      console.log(
-        '[DEBUG] Found source node:',
-        sourceNode?.node?.type || 'null'
-      );
 
       let isVideoSource = false;
       if (sourceNode?.node) {
         isVideoSource = this._isNodeVideoOrVideoProcessing(sourceNode.node);
-        console.log('[DEBUG] Is video source (evaluated by helper):', isVideoSource);
       }
 
       // Check if we have video loaded - if so, skip (unless forced)
       if (!forceUpdate && node.editor?.videoMetadata) {
-        console.log('Video background already loaded, skipping reference image update');
         return;
       }
 
       // Check if videoData exists (video might be pending) - skip unless forced
       if (!forceUpdate && node.videoData) {
-        console.log('Video data pending - run the workflow to load video background');
         return;
       }
 
@@ -61,7 +53,6 @@ export function createRefImageManager(node) {
         (!isVideoSource || !sourceNode);
 
       if (shouldClearExistingVideo) {
-        console.log('Clearing existing video background.');
         if (node.editor) {
           const { clearBackgroundVideo } = await import(
             '../canvas/canvas_video_background.js'
@@ -97,16 +88,12 @@ export function createRefImageManager(node) {
             const videoWidget = sourceNode.node.widgets?.find(
               w => w.name === 'video'
             );
-            console.log('[DEBUG] Video widget found:', videoWidget ? 'yes' : 'no');
 
             if (videoWidget?.value) {
               videoFilename = videoWidget.value;
               console.log('[Canvas] Found video filename:', videoFilename);
             }
           } else if (isVideoSource) {
-            console.log(
-              '[Canvas] Detected video processing node (e.g., ImageResizeKJv2) as source.'
-            );
             const images = await extractImagesFromSourceNode(sourceNode, false);
             if (images?.length > 1) {
               videoFrames = images;
@@ -177,7 +164,6 @@ export function createRefImageManager(node) {
           `../ref/bg_image_cl.png?t=${timestamp}`,
           import.meta.url
         ).href;
-        console.log('[DEBUG] Loading from ref folder:', refImageUrl);
 
         const response = await fetch(refImageUrl);
         if (!response.ok) {
@@ -215,7 +201,6 @@ export function createRefImageManager(node) {
         }
 
         await new Promise(resolve => setTimeout(resolve, 200));
-        console.log('Successfully loaded bg_image_cl.png from ref folder');
       } catch (error) {
         console.error('Error loading bg_image_cl.png:', error);
         alert('Error loading bg_image_cl.png: ' + error.message);
