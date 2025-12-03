@@ -1,6 +1,7 @@
 # ComfyUI-WanVideoWrapper_QQ
 **Version 1.2.0** - 2025-12-01
 - Added ability to connect video to bg_image and animate over it [Example](examples/ttm_ref_vid/ttm_ref_vid_example.json)
+- [timeline hotkey/usage](git_assets/docs/power_spline_editor.md) 
 
 https://github.com/user-attachments/assets/dffe5da8-7626-45cf-ad22-777b5a14879f
 
