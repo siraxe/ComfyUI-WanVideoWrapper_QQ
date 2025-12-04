@@ -18,7 +18,7 @@ class PowerSplineEditor:
                 "coordinates": ("STRING", {"multiline": False}),
                 "mask_width": ("INT", {"default": 640, "min": 8, "max": 4096, "step": 8}),
                 "mask_height": ("INT", {"default": 480, "min": 8, "max": 4096, "step": 8}),
-                "bg_img": (["None", "A", "B", "C"], {"default": "None", "tooltip": "Select background image to overlay at 60% opacity"}),
+                "bg_opacity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Background opacity (0 = black, 1 = full brightness)"}),
             },
             "optional": {
                 "bg_image": ("IMAGE", {"forceInput": True} ),
@@ -421,7 +421,7 @@ class PowerSplineEditor:
             })
         return samples
 
-    def splinedata(self, mask_width, mask_height, coordinates, points_store, bg_img,
+    def splinedata(self, mask_width, mask_height, coordinates, points_store, bg_opacity,
                    bg_image=None, ref_images=None, frames=None):
 
         # Use default frames value if not provided (from input)
@@ -1050,9 +1050,6 @@ class PowerSplineEditor:
                 "height": video_metadata["height"],
                 "duration": video_metadata["duration"]
             }]
-
-        # Include bg_img selection in UI output so frontend can use it
-        ui_out["bg_img"] = [bg_img]
 
         # Always return UI data with at least dimensions for proper canvas initialization
         return {"ui": ui_out, "result": result}

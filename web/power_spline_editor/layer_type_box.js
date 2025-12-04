@@ -599,10 +599,10 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             host.editor?.layerRenderer?.clearRefImageCache?.();
 
             if (next === 'no_ref') {
-                host.clearRefImageFromActiveBoxLayer?.();
+                host.refImageManager?.clearRefImageFromActiveBoxLayer?.();
             } else {
                 // Always refresh images from connected node to pick up any changes
-                await host.attachRefImageToActiveBoxLayer?.(next);
+                await host.refImageManager?.attachRefImageToActiveBoxLayer?.(next);
             }
             try {
                 const keyId = host.id ?? host.uuid;

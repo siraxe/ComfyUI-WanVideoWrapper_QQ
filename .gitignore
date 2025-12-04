@@ -3,6 +3,7 @@ nodes/__pycache__/
 
 .claude
 .claude2
+.claude3
 .claude-code-router
 .env
 .env2

@@ -55,11 +55,8 @@ export async function loadImagesFromRefFolder(node, backendPaths = null) {
           type: 'image/png'
         };
 
-        const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-        const bg_img = bgImgWidget ? bgImgWidget.value : "None";
-
         if (node.bgImageManager?.updateBackgroundImage) {
-          await node.bgImageManager.updateBackgroundImage(bg_img);
+          await node.bgImageManager.updateBackgroundImage();
           console.log("[loadImagesFromRefFolder] Background image updated");
         }
       }
@@ -305,6 +302,20 @@ export async function handleCanvasRefresh(node) {
         try {
           await node.refImageManager.updateReferenceImageFromConnectedNode(true);
 
+          // Create the editor if it doesn't exist
+          if (!node.editor) {
+            const SplineEditor2 = (await import('./canvas/canvas_main.js')).default;
+            node.editor = new SplineEditor2(node);
+          }
+
+          // Refresh the background image to trigger canvas render
+          if (node.editor?.refreshBackgroundImage) {
+            await node.editor.refreshBackgroundImage();
+          } else if (node.editor?.vis) {
+            // Fallback: Force canvas render if refreshBackgroundImage not available
+            node.editor.vis.render();
+          }
+
           if (node.editor?.layerRenderer) {
             node.editor.layerRenderer.render();
           }
@@ -353,7 +364,7 @@ export class TopRowWidget extends RgthreeBaseWidget {
     this.visibility = {
       refreshCanvasButton: true,
       refreshFramesButton: true,
-      bgImgControl: true,
+      bgOpacityControl: true,
       animToggleButton: true,
       widthControl: true,
       heightControl: true,
@@ -368,10 +379,10 @@ export class TopRowWidget extends RgthreeBaseWidget {
     this.hitAreas = {
       refreshCanvasButton: { bounds: [0, 0], onClick: null },
       refreshFramesButton: { bounds: [0, 0], onClick: null },
-      bgImgLeftArrow: { bounds: [0, 0], onClick: null },
-      bgImgVal: { bounds: [0, 0], onClick: null },
-      bgImgRightArrow: { bounds: [0, 0], onClick: null },
-      bgImgAny: { bounds: [0, 0], onClick: null },
+      bgOpacityDec: { bounds: [0, 0], onClick: null },
+      bgOpacityVal: { bounds: [0, 0], onClick: null },
+      bgOpacityInc: { bounds: [0, 0], onClick: null },
+      bgOpacityAny: { bounds: [0, 0], onMove: null },
       widthDec: { bounds: [0, 0], onClick: null },
       widthVal: { bounds: [0, 0], onClick: null },
       widthInc: { bounds: [0, 0], onClick: null },
@@ -406,8 +417,8 @@ export class TopRowWidget extends RgthreeBaseWidget {
     const widthValue = widthWidget ? widthWidget.value : 512;
     const heightWidget = node.widgets?.find(w => w.name === "mask_height");
     const heightValue = heightWidget ? heightWidget.value : 512;
-    const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-    const bgImgValue = bgImgWidget ? bgImgWidget.value : "None";
+    const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+    const bgOpacityValue = bgOpacityWidget ? Math.round(bgOpacityWidget.value * 100) : 100;
 
     // Calculate available width
     const availableWidth = node.size[0] - margin * 2 - spacing * 4;
@@ -415,12 +426,12 @@ export class TopRowWidget extends RgthreeBaseWidget {
     // Calculate component widths
     const refreshCanvasWidth = availableWidth * 0.12;
     const refreshFramesWidth = availableWidth * 0.12;
-    const bgImgDropdownWidth = availableWidth * 0.14;
+    const bgOpacityControlWidth = availableWidth * 0.18;
     const iconButtonWidth = Math.max(20, Math.min(28, availableWidth * 0.05));
     const dimensionsAreaWidth = availableWidth - (
       refreshCanvasWidth + spacing +
       refreshFramesWidth + spacing +
-      bgImgDropdownWidth + spacing +
+      bgOpacityControlWidth + spacing +
       iconButtonWidth
     );
 
@@ -451,28 +462,38 @@ export class TopRowWidget extends RgthreeBaseWidget {
     assignBounds("refreshFramesButton", [posX, refreshFramesWidth]);
     posX += refreshFramesWidth + spacing;
 
-    // Draw bg_img control
-    const arrowWidth = 7;
+    // Draw bg_opacity control
+    const bgOpacityLabelWidth = 30;
 
-    if (this.visibility.bgImgControl) {
+    if (this.visibility.bgOpacityControl) {
+      // Draw background
       ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
-      ctx.fillRect(posX, posY, bgImgDropdownWidth, height);
+      ctx.fillRect(posX, posY, bgOpacityControlWidth, height);
       ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
-      ctx.strokeRect(posX, posY, bgImgDropdownWidth, height);
+      ctx.strokeRect(posX, posY, bgOpacityControlWidth, height);
 
-      ctx.textAlign = "center";
+      // Draw label
+      ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
-      ctx.fillText("<", posX + arrowWidth / 2, midY);
-      ctx.fillText(bgImgValue, posX + bgImgDropdownWidth / 2, midY);
-      ctx.fillText(">", posX + bgImgDropdownWidth - arrowWidth / 2, midY);
+      ctx.fillText("BG:", posX + 5, midY);
     }
 
-    assignBounds("bgImgLeftArrow", [posX, arrowWidth]);
-    assignBounds("bgImgVal", [posX + arrowWidth, bgImgDropdownWidth - (arrowWidth * 2)]);
-    assignBounds("bgImgRightArrow", [posX + bgImgDropdownWidth - arrowWidth, arrowWidth]);
-    assignBounds("bgImgAny", [posX, bgImgDropdownWidth]);
-    posX += bgImgDropdownWidth + spacing;
+    const bgOpacityControlX = posX + bgOpacityLabelWidth;
+    const [bgOpLeftArrow, bgOpText, bgOpRightArrow] = drawNumberWidgetPart(ctx, {
+      posX: bgOpacityControlX,
+      posY,
+      height,
+      value: bgOpacityValue,
+      direction: 1,
+      textColor: this.visibility.bgOpacityControl ? undefined : "transparent",
+    });
+
+    assignBounds("bgOpacityDec", bgOpLeftArrow);
+    assignBounds("bgOpacityVal", bgOpText);
+    assignBounds("bgOpacityInc", bgOpRightArrow);
+    assignBounds("bgOpacityAny", [bgOpLeftArrow[0], bgOpRightArrow[0] + bgOpRightArrow[1] - bgOpLeftArrow[0]]);
+    posX += bgOpacityControlWidth + spacing;
 
     // Animation toggle icon
     const isAnimOn = !!(node?.editor?._inactiveFlowEnabled ?? false);
@@ -624,11 +645,12 @@ export class TopRowWidget extends RgthreeBaseWidget {
       };
     }
 
-    // Setup bg_img control handlers
-    if (this.visibility.bgImgControl) {
-      this.hitAreas.bgImgLeftArrow.onClick = () => this.stepBgImg(node, -1);
-      this.hitAreas.bgImgVal.onClick = () => this.stepBgImg(node, 1);
-      this.hitAreas.bgImgRightArrow.onClick = () => this.stepBgImg(node, 1);
+    // Setup bg_opacity control handlers
+    if (this.visibility.bgOpacityControl) {
+      this.hitAreas.bgOpacityDec.onClick = () => this.stepBgOpacity(node, -5);
+      this.hitAreas.bgOpacityInc.onClick = () => this.stepBgOpacity(node, 5);
+      this.hitAreas.bgOpacityVal.onClick = () => this.promptBgOpacity(node);
+      this.hitAreas.bgOpacityAny.onMove = (event) => this.dragBgOpacity(node, event);
     }
 
     ctx.restore();
@@ -732,18 +754,46 @@ export class TopRowWidget extends RgthreeBaseWidget {
     }
   }
 
-  // BG image controls
-  stepBgImg(node, step) {
-    const bgImgWidget = node.widgets?.find(w => w.name === "bg_img");
-    if (bgImgWidget) {
-      const options = ["None", "A", "B", "C"];
-      const currentIndex = options.indexOf(bgImgWidget.value);
-      const newIndex = (currentIndex + step + options.length) % options.length;
-      bgImgWidget.value = options[newIndex];
-      if (bgImgWidget.callback) {
-        bgImgWidget.callback(bgImgWidget.value);
+  // BG opacity controls
+  stepBgOpacity(node, step) {
+    const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+    if (bgOpacityWidget) {
+      const newValue = Math.max(0, Math.min(100, Math.round(bgOpacityWidget.value * 100) + step)) / 100;
+      bgOpacityWidget.value = newValue;
+      if (bgOpacityWidget.callback) {
+        bgOpacityWidget.callback(newValue);
       }
       node.setDirtyCanvas(true, true);
+    }
+  }
+
+  promptBgOpacity(node) {
+    if (this.haveMouseMovedValue) return;
+    const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+    if (bgOpacityWidget) {
+      const canvas = app.canvas;
+      canvas.prompt("Background Opacity (0-100)", Math.round(bgOpacityWidget.value * 100), (v) => {
+        const newValue = Math.max(0, Math.min(100, Number(v))) / 100;
+        bgOpacityWidget.value = newValue;
+        if (bgOpacityWidget.callback) {
+          bgOpacityWidget.callback(newValue);
+        }
+      });
+    }
+  }
+
+  dragBgOpacity(node, event) {
+    if (event.deltaX) {
+      this.haveMouseMovedValue = true;
+      const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+      if (bgOpacityWidget) {
+        const newValue = Math.max(0, Math.min(100, Math.round(bgOpacityWidget.value * 100) + event.deltaX)) / 100;
+        bgOpacityWidget.value = newValue;
+        if (bgOpacityWidget.callback) {
+          bgOpacityWidget.callback(newValue);
+        }
+        node.setDirtyCanvas(true, true);
+      }
     }
   }
 

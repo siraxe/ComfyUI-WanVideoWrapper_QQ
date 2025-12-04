@@ -32,7 +32,6 @@ import {
   showCustomDrivenToggleMenu
 } from './context_menu.js';
 import { drawDriverLines } from './driver_line_renderer.js';
-import { processBgImage } from './image_overlay.js';
 
 import { createBackgroundImageManager } from './modules/background-image-manager.js';
 import { createRefImageManager } from './modules/ref-image-manager.js';
@@ -91,6 +90,79 @@ app.registerExtension({
         element.style.margin = '0';
         element.style.padding = '0';
         element.style.display = 'block';
+
+        // ============================================================
+        // == CONTEXT MENU INITIALIZATION
+        // ============================================================
+        // Create context menu container
+        const contextMenuContainer = document.createElement('div');
+        contextMenuContainer.className = 'spline-editor-context-menu';
+        contextMenuContainer.style.cssText = `
+          position: fixed !important;
+          display: none !important;
+          background-color: #1a1a1a !important;
+          border: 1px solid #000 !important;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.8) !important;
+          z-index: 10000 !important;
+          padding: 4px !important;
+          border-radius: 0px !important;
+          min-width: 160px !important;
+          font-family: Arial, sans-serif !important;
+          font-size: 11px !important;
+        `;
+
+        // Define menu items with their labels
+        const menuItemLabels = [
+          'Invert point order',  // Item 0: toggles to "Edit" for handdraw layers
+          'Smooth',              // Item 1: only visible for handdraw layers
+          'Remove',              // Item 2
+          'Load Image',          // Item 3
+          'Clear Image',         // Item 4
+          'Clear All Splines'    // Item 5
+        ];
+
+        // Create menu items array
+        const menuItems = menuItemLabels.map(label => {
+          const menuItem = document.createElement('div');
+          menuItem.textContent = label;
+          menuItem.style.cssText = `
+            padding: 6px 12px !important;
+            cursor: pointer !important;
+            color: #ddd !important;
+            background-color: #1a1a1a !important;
+            user-select: none !important;
+            white-space: nowrap !important;
+          `;
+
+          // Add hover effects
+          menuItem.addEventListener('mouseenter', () => {
+            menuItem.style.backgroundColor = '#2a2a2a';
+          });
+          menuItem.addEventListener('mouseleave', () => {
+            menuItem.style.backgroundColor = '#1a1a1a';
+          });
+
+          contextMenuContainer.appendChild(menuItem);
+          return menuItem;
+        });
+
+        // Attach menu to document body
+        document.body.appendChild(contextMenuContainer);
+
+        // Store references on the node for SplineEditor2 to access
+        this.contextMenu = contextMenuContainer;
+        this.menuItems = menuItems;
+
+        // Clean up context menu when node is removed
+        const originalOnRemoved = this.onRemoved;
+        this.onRemoved = function() {
+          if (this.contextMenu && this.contextMenu.parentNode) {
+            this.contextMenu.parentNode.removeChild(this.contextMenu);
+          }
+          if (originalOnRemoved) {
+            originalOnRemoved.call(this);
+          }
+        };
 
         // Add fake image widget for copy/paste
         const fakeimagewidget = this.addWidget('COMBO', 'image', null, () => {}, {
@@ -164,17 +236,17 @@ app.registerExtension({
         }
 
         // ============================================================
-        // == SETUP BG_IMG WIDGET WITH CALLBACK
+        // == SETUP BG_OPACITY WIDGET WITH CALLBACK
         // ============================================================
-        const bgImgWidget = this.widgets.find(w => w.name === 'bg_img');
-        if (bgImgWidget) {
-          hideWidgetForGood(this, bgImgWidget);
-          const originalCallback = bgImgWidget.callback;
-          bgImgWidget.callback = (value) => {
+        const bgOpacityWidget = this.widgets.find(w => w.name === 'bg_opacity');
+        if (bgOpacityWidget) {
+          hideWidgetForGood(this, bgOpacityWidget);
+          const originalCallback = bgOpacityWidget.callback;
+          bgOpacityWidget.callback = (value) => {
             if (originalCallback) {
-              originalCallback(value);
+              originalCallback.call(bgOpacityWidget, value);
             }
-            this.bgImageManager.updateBackgroundImage(value);
+            this.bgImageManager?.updateBackgroundImage();
             return value;
           };
         }
@@ -331,6 +403,10 @@ app.registerExtension({
           this.sizeManager.updateSize(true);
         };
 
+        this.commitHanddraw = function (points) {
+          return commitHanddrawPath(this, points);
+        };
+
         this.handleFramesRefresh = async function () {
           if (this.dimensionManager) {
             await this.dimensionManager.handleFramesRefresh();
@@ -342,10 +418,6 @@ app.registerExtension({
         // ============================================================
         this.initOverlayRefresh = async function () {
           try {
-            const bg_img =
-              (this.widgets && this.widgets.find(w => w.name === 'bg_img'))
-                ?.value || 'None';
-
             const isConnectedToPrepareRefs =
               this.refImageManager.checkIfConnectedToPrepareRefs();
 
@@ -372,7 +444,7 @@ app.registerExtension({
                     type: 'image/png'
                   };
 
-                  await this.bgImageManager.updateBackgroundImage(bg_img);
+                  await this.bgImageManager.updateBackgroundImage();
                   this.editor?.refreshBackgroundImage?.();
                   return;
                 }
@@ -397,18 +469,16 @@ app.registerExtension({
                 if (this.uuid) {
                   sessionStorage.removeItem(`spline-editor-img-${this.uuid}`);
                 }
-                await this.bgImageManager.updateBackgroundImage(bg_img);
+                await this.bgImageManager.updateBackgroundImage();
                 this.editor?.refreshBackgroundImage?.();
                 return;
               }
             }
           } catch {}
 
-          // Fallback: just apply current selection
+          // Fallback: just apply current opacity
           try {
-            const bgImgWidget = this.widgets?.find(w => w.name === 'bg_img');
-            const bg_img = bgImgWidget?.value || 'None';
-            await this.bgImageManager.updateBackgroundImage(bg_img);
+            await this.bgImageManager.updateBackgroundImage();
             this.editor?.refreshBackgroundImage?.();
           } catch {}
         }.bind(this);
@@ -696,64 +766,8 @@ app.registerExtension({
           if (this.editor && this.imgData) {
             this.editor?.refreshBackgroundImage?.();
           } else if (this.editor) {
-            const bgImgWidget = this.widgets?.find(w => w.name === 'bg_img');
-            const bg_img = bgImgWidget?.value || 'None';
-
-            let targetWidth, targetHeight;
-            const savedDims = sessionStorage.getItem(
-              `spline-editor-dims-${this.uuid}`
-            );
-            if (savedDims) {
-              const dims = JSON.parse(savedDims);
-              targetWidth = dims.width;
-              targetHeight = dims.height;
-            } else if (this.properties.bgImageDims) {
-              targetWidth = this.properties.bgImageDims.width;
-              targetHeight = this.properties.bgImageDims.height;
-            }
-
-            if (bg_img === 'None') {
-              // Load cached or default
-              const cachedImageUrl =
-                await this.bgImageManager._loadCorrectCachedRefImage();
-              if (cachedImageUrl) {
-                await this.bgImageManager._applyDarkeningEffectFromUrl(
-                  cachedImageUrl
-                );
-              } else {
-                const timestamp = Date.now();
-                const defaultImageUrl = new URL(
-                  `bg/A.jpg?t=${timestamp}`,
-                  import.meta.url
-                ).href;
-                await this.bgImageManager._applyDarkeningEffectFromUrl(
-                  defaultImageUrl
-                );
-              }
-            } else {
-              const timestamp = Date.now();
-              const imageUrl = new URL(
-                `bg/${bg_img}.jpg?t=${timestamp}`,
-                import.meta.url
-              ).href;
-
-              const cachedImageUrl =
-                await this.bgImageManager._loadCorrectCachedRefImage();
-              if (cachedImageUrl) {
-                await this.bgImageManager.createScaledImageOverlay(
-                  cachedImageUrl,
-                  bg_img,
-                  imageUrl
-                );
-              } else {
-                this.bgImageManager.loadBackgroundImageFromUrl(
-                  imageUrl,
-                  `${bg_img}.jpg`,
-                  targetWidth,
-                  targetHeight
-                );
-              }
-            }
+            // Load reference image with current opacity
+            await this.bgImageManager.updateBackgroundImage();
           }
 
           // Force active layer update
@@ -776,7 +790,6 @@ app.registerExtension({
         let ref_image = message['ref_image'];
         let coord_in = message['coord_in'];
         let ref_image_dims = message['ref_image_dims'];
-        let bg_img = message['bg_img']?.[0] || 'None';
 
         console.log('[PowerSplineEditor onExecuted] Received message:', message);
 
@@ -937,12 +950,23 @@ app.registerExtension({
             }
           });
 
-          const timestamp = Date.now();
-          const bgImageUrl = new URL(
-            `bg/${bg_img}.jpg?t=${timestamp}`,
-            import.meta.url
-          ).href;
-          processBgImage(ref_image, bg_img, bgImageUrl, finishExecution);
+          // Store the reference image and apply current opacity
+          this.originalRefImageData = {
+            name: 'ref_image.png',
+            base64: ref_image,
+            type: 'image/png'
+          };
+
+          // Get current opacity and apply it to the reference image
+          const bgOpacityWidget = this.widgets?.find(w => w.name === 'bg_opacity');
+          const opacity = bgOpacityWidget ? bgOpacityWidget.value : 1.0;
+
+          this.bgImageManager._applyOpacityToImage(ref_image, 'image/png', opacity)
+            .then(() => finishExecution(this.imgData))
+            .catch((error) => {
+              console.error('Error applying opacity to reference image:', error);
+              finishExecution(this.imgData);
+            });
         } else {
           finishExecution(this.imgData);
         }

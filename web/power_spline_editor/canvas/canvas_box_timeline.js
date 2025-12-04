@@ -1,5 +1,6 @@
 import { BOX_TIMELINE_MAX_POINTS } from './canvas_constants.js';
 import { syncVideoToFrame, hasBackgroundVideo } from './canvas_video_background.js';
+import { applyBoxTimelineFrame } from './canvas_scrub.js';
 import { transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js'; // Added transformVideoToCanvasSpace
 
 export function attachBoxTimelineHelpers(editor) {
@@ -296,20 +297,10 @@ export function attachBoxTimelineHelpers(editor) {
     return true;
   };
 
+  // Attach the single source of truth from canvas_scrub.js
+  // This ensures consistent behavior for both image and video backgrounds
   editor.applyBoxTimelineFrame = (widget, frame) => {
-    if (!editor._isBoxLayerWidget(widget)) return;
-    const clampedFrame = Math.max(1, Math.min(editor._getMaxFrames(), Math.round(frame || 1)));
-    widget.value.box_timeline_point = clampedFrame;
-    if (editor._boxPreviewState && editor._boxPreviewState.widget === widget) {
-      editor._boxPreviewState = null;
-    }
-    const targetPoint = editor._computeBoxLayerPosition(widget, clampedFrame);
-    editor._applyBoxLayerPoint(widget, targetPoint);
-
-    // Sync video to frame
-    if (hasBackgroundVideo(editor)) {
-      syncVideoToFrame(editor, clampedFrame);
-    }
+    applyBoxTimelineFrame(editor, widget, frame);
   };
 
   editor.addBoxLayerKey = (widget, frame) => { // Removed newPointMediaCoords parameter
@@ -347,6 +338,12 @@ export function attachBoxTimelineHelpers(editor) {
     editor.applyBoxTimelineFrame(widget, targetFrame);
     editor._forceRebuildNextRender = true;
     try { editor.layerRenderer?.render(); } catch {}
+    setTimeout(() => {
+        try {
+            editor._forceRebuildNextRender = true;
+            editor.layerRenderer?.render();
+        } catch {}
+    }, 0);
     try { editor.node?.setDirtyCanvas?.(true, true); } catch {}
 
     return true;

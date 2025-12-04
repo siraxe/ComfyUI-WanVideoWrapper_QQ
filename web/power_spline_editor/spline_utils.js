@@ -184,9 +184,10 @@ export const create_documentation_stylesheet = () => {
         font: 12px monospace;
         line-height: 1.5em;
         padding: 0px;
-        z-index: 0;
+        z-index: 1;
         overflow: visible;
         display: block;
+        isolation: isolate;
        }
         `
       document.head.appendChild(styleTag)

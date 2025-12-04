@@ -9,7 +9,7 @@ import {
   processBgImage,
   createImageOverlayForConfigure
 } from '../image_overlay.js';
-import { clearBackgroundVideo } from '../canvas/canvas_video_background.js';
+import { clearBackgroundVideo, updateVideoBrightness, hasBackgroundVideo } from '../canvas/canvas_video_background.js';
 import {
   loadImageAsBase64,
   getCachedRefImage,
@@ -27,149 +27,66 @@ import {
 export function createBackgroundImageManager(node) {
   return {
     /**
-     * Update background image based on bg_img selection
-     * Handles "None", "A", "B", "C" selections
+     * Update background image with current opacity
      */
-    async updateBackgroundImage(bg_img) {
-      console.log('[updateBackgroundImage] Called with bg_img:', bg_img);
+    async updateBackgroundImage() {
+      console.log('[updateBackgroundImage] Called');
 
-      // Clear video when updating background image
-      if (node.editor && node.editor.videoMetadata) {
-        console.log('[updateBackgroundImage] Clearing video background');
-        if (clearBackgroundVideo) {
-          clearBackgroundVideo(node.editor);
-        }
-      }
-      node.videoData = null;
+      // Get opacity value
+      const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+      const opacity = bgOpacityWidget ? bgOpacityWidget.value : 1.0;
 
-      // Get target dimensions from saved state or properties
-      let targetWidth, targetHeight;
-      const savedDims = sessionStorage.getItem(
-        `spline-editor-dims-${node.uuid}`
-      );
-      if (savedDims) {
-        const dims = JSON.parse(savedDims);
-        targetWidth = dims.width;
-        targetHeight = dims.height;
-      } else if (node.properties?.bgImageDims) {
-        // Fallback to dimensions stored in properties
-        targetWidth = node.properties.bgImageDims.width;
-        targetHeight = node.properties.bgImageDims.height;
+      // Check if we have a video background instead of an image
+      if (node.editor && hasBackgroundVideo(node.editor)) {
+        console.log('[updateBackgroundImage] Video detected, updating video brightness');
+        updateVideoBrightness(node.editor, opacity);
+        return; // Don't process image when video is active
       }
 
-      // Determine which image to load based on the bg_img selection
-      if (bg_img === 'None') {
-        await this._handleNoneSelection(targetWidth, targetHeight);
-      } else {
-        await this._handleImageSelection(bg_img, targetWidth, targetHeight);
-      }
+      // No video, proceed with image processing
+      // Load reference image with opacity applied
+      await this._loadReferenceImageWithOpacity(opacity);
     },
 
     /**
-     * Handle "None" background selection with darkening effect
+     * Load reference image and apply opacity (darkening)
      */
-    async _handleNoneSelection(targetWidth, targetHeight) {
+    async _loadReferenceImageWithOpacity(opacity) {
       try {
-        // For "None" selection, use the original reference image with darkening
-        if (node.originalRefImageData?.base64) {
-          await this._applyDarkeningEffect(
-            node.originalRefImageData.base64,
-            'image/jpeg'
-          );
-        } else {
-          // Try to load cached bg_image first
-          const cachedImageUrl = await this._loadCorrectCachedRefImage();
-          if (cachedImageUrl) {
-            await this._applyDarkeningEffectFromUrl(cachedImageUrl);
-          } else {
-            // Final fallback to default A.jpg with darkening
-            const timestamp = Date.now();
-            const defaultImageUrl = new URL(
-              `bg/A.jpg?t=${timestamp}`,
-              import.meta.url
-            ).href;
-            await this._applyDarkeningEffectFromUrl(defaultImageUrl);
-          }
-        }
-      } catch (error) {
-        console.error('Error handling None selection:', error);
-        const timestamp = Date.now();
-        const defaultImageUrl = new URL(
-          `../bg/A.jpg?t=${timestamp}`,
-          import.meta.url
-        ).href;
-        this.loadBackgroundImageFromUrl(
-          defaultImageUrl,
-          'A.jpg',
-          targetWidth,
-          targetHeight
-        );
-      }
-    },
-
-    /**
-     * Handle "A", "B", "C" background selections with overlay
-     */
-    async _handleImageSelection(bg_img, targetWidth, targetHeight) {
-      try {
-        const timestamp = Date.now();
-        const imageUrl = new URL(
-          `../bg/${bg_img}.jpg?t=${timestamp}`,
-          import.meta.url
-        ).href;
-
-        // Prioritize original reference image (from refresh) over cached
-        let refImageForOverlay = null;
+        // Try to get the reference image from various sources
+        let refImageData = null;
 
         if (node.originalRefImageData?.base64) {
           // Use original ref image if available (from refresh button)
           const imgType = node.originalRefImageData.type || 'image/jpeg';
-          refImageForOverlay = `data:${imgType};base64,${node.originalRefImageData.base64}`;
+          refImageData = {
+            base64: node.originalRefImageData.base64,
+            type: imgType
+          };
         } else {
           // Try to load cached ref image
           const cachedImageUrl = await this._loadCorrectCachedRefImage();
           if (cachedImageUrl) {
-            refImageForOverlay = cachedImageUrl;
+            // Convert URL to base64
+            refImageData = await this._urlToBase64(cachedImageUrl);
           }
         }
 
-        if (refImageForOverlay) {
-          // Create overlay with the reference image
-          await this.createScaledImageOverlay(
-            refImageForOverlay,
-            bg_img,
-            imageUrl
-          );
+        if (refImageData) {
+          // Apply opacity to the reference image
+          await this._applyOpacityToImage(refImageData.base64, refImageData.type, opacity);
         } else {
-          // Fallback: load background image directly
-          this.loadBackgroundImageFromUrl(
-            imageUrl,
-            `${bg_img}.jpg`,
-            targetWidth,
-            targetHeight
-          );
+          console.warn('[_loadReferenceImageWithOpacity] No reference image found');
         }
       } catch (error) {
-        console.error(`Error handling ${bg_img} selection:`, error);
-        // Fallback: load default image directly
-        const timestamp = Date.now();
-        const defaultImageUrl = new URL(
-          `bg/A.jpg?t=${timestamp}`,
-          import.meta.url
-        ).href;
-        this.loadBackgroundImageFromUrl(
-          defaultImageUrl,
-          'A.jpg',
-          targetWidth,
-          targetHeight
-        );
+        console.error('Error loading reference image with opacity:', error);
       }
     },
 
     /**
-     * Apply darkening effect to base64 image
+     * Apply opacity to base64 image (0.0 = black, 1.0 = full brightness)
      */
-    async _applyDarkeningEffect(base64Data, imageType) {
+    async _applyOpacityToImage(base64Data, imageType, opacity) {
       return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
@@ -178,14 +95,15 @@ export function createBackgroundImageManager(node) {
           canvas.height = img.height;
           const ctx = canvas.getContext('2d');
 
+          // Draw the image with the specified opacity
+          ctx.globalAlpha = opacity;
           ctx.drawImage(img, 0, 0);
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.globalAlpha = 1.0; // Reset
 
-          const darkenedDataUrl = canvas.toDataURL('image/jpeg');
+          const processedDataUrl = canvas.toDataURL('image/jpeg');
           node.imgData = {
             name: 'bg_image.png',
-            base64: darkenedDataUrl.split(',')[1],
+            base64: processedDataUrl.split(',')[1],
             type: 'image/jpeg'
           };
 
@@ -193,44 +111,36 @@ export function createBackgroundImageManager(node) {
           resolve();
         };
         img.onerror = () => {
-          console.error('Error loading image for darkening');
-          reject(new Error('Failed to load image for darkening'));
+          console.error('Error loading image for opacity adjustment');
+          reject(new Error('Failed to load image'));
         };
         img.src = `data:${imageType};base64,${base64Data}`;
       });
     },
 
     /**
-     * Apply darkening effect to image from URL
+     * Convert image URL to base64
      */
-    async _applyDarkeningEffectFromUrl(imageUrl) {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-
-          ctx.drawImage(img, 0, 0);
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          const darkenedDataUrl = canvas.toDataURL('image/jpeg');
-          node.imgData = {
-            name: 'bg_image.png',
-            base64: darkenedDataUrl.split(',')[1],
-            type: 'image/jpeg'
+    async _urlToBase64(imageUrl) {
+      return new Promise(async (resolve, reject) => {
+        try {
+          const response = await fetch(imageUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.status}`);
+          }
+          const blob = await response.blob();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result;
+            const base64 = dataUrl.split(',')[1];
+            const type = blob.type || 'image/jpeg';
+            resolve({ base64, type });
           };
-
-          node.editor?.refreshBackgroundImage?.();
-          resolve();
-        };
-        img.onerror = () => {
-          console.error('Error loading image from URL for darkening');
-          reject(new Error('Failed to load image from URL'));
-        };
-        img.src = imageUrl;
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        } catch (error) {
+          reject(error);
+        }
       });
     },
 
@@ -312,122 +222,6 @@ export function createBackgroundImageManager(node) {
       }
     },
 
-    /**
-     * Create scaled overlay of reference and background image
-     */
-    async createScaledImageOverlay(refImageUrl, bg_img, bgImageUrl) {
-      try {
-        // Load both images
-        const [refResponse, bgResponse] = await Promise.all([
-          fetch(refImageUrl),
-          fetch(bgImageUrl)
-        ]);
-
-        if (!refResponse.ok || !bgResponse.ok) {
-          throw new Error(
-            `Failed to load images: ref=${refResponse.status}, bg=${bgResponse.status}`
-          );
-        }
-
-        const [refBlob, bgBlob] = await Promise.all([
-          refResponse.blob(),
-          bgResponse.blob()
-        ]);
-
-        // Convert to base64
-        const [refBase64, bgBase64] = await Promise.all([
-          blobToBase64(refBlob),
-          blobToBase64(bgBlob)
-        ]);
-
-        // Scale the bg image to match the ref image dimensions
-        const scaledBgImageData = await scaleImageToRefDimensions(
-          bgBase64,
-          'image/jpeg', // Assuming JPEG for background images
-          refBase64
-        );
-
-        // Create the overlay with the scaled images
-        await this._createOverlay(refBase64, scaledBgImageData.base64, bg_img);
-      } catch (error) {
-        console.error(
-          `Error creating scaled image overlay for ${bg_img}:`,
-          error
-        );
-        // Fallback to loading the background image directly
-        this.loadBackgroundImageFromUrl(bgImageUrl, `${bg_img}.jpg`, null, null);
-      }
-    },
-
-    /**
-     * Create overlay by combining ref and background images
-     */
-    async _createOverlay(refBase64, scaledBgBase64, bg_img) {
-      return new Promise((resolve, reject) => {
-        const refImg = new Image();
-        const scaledBgImg = new Image();
-
-        let refImageLoaded = false;
-        let scaledBgImageLoaded = false;
-
-        // Function to create overlay when both images are loaded
-        const createOverlayWhenBothLoaded = () => {
-          if (refImageLoaded && scaledBgImageLoaded) {
-            try {
-              const canvas = document.createElement('canvas');
-              canvas.width = refImg.width;
-              canvas.height = refImg.height;
-              const ctx = canvas.getContext('2d');
-
-              // Draw the original ref_image first
-              ctx.drawImage(refImg, 0, 0);
-
-              // Then draw the scaled background image as an overlay with 40% opacity
-              ctx.globalAlpha = 0.4;
-              ctx.drawImage(scaledBgImg, 0, 0);
-              ctx.globalAlpha = 1.0; // Reset to default
-
-              // Convert the combined image to data URL
-              const combinedDataUrl = canvas.toDataURL('image/jpeg');
-
-              node.imgData = {
-                name: `${bg_img}.jpg`,
-                base64: combinedDataUrl.split(',')[1],
-                type: 'image/jpeg'
-              };
-
-              // Refresh the background image
-              node.editor?.refreshBackgroundImage?.();
-              resolve();
-            } catch (error) {
-              reject(error);
-            }
-          }
-        };
-
-        refImg.onload = () => {
-          refImageLoaded = true;
-          createOverlayWhenBothLoaded();
-        };
-        scaledBgImg.onload = () => {
-          scaledBgImageLoaded = true;
-          createOverlayWhenBothLoaded();
-        };
-
-        refImg.onerror = () => {
-          console.error(`Failed to load ref_image for scaled overlay`);
-          reject(new Error('Failed to load ref image'));
-        };
-        scaledBgImg.onerror = () => {
-          console.error(`Failed to load scaled background image for overlay`);
-          reject(new Error('Failed to load scaled background image'));
-        };
-
-        // Load images
-        refImg.src = `data:image/jpeg;base64,${refBase64}`;
-        scaledBgImg.src = `data:image/jpeg;base64,${scaledBgBase64}`;
-      });
-    },
 
     /**
      * Load background image from URL with optional scaling
@@ -438,6 +232,10 @@ export function createBackgroundImageManager(node) {
           console.error(`Failed to load image from ${imageUrl}`);
           return;
         }
+
+        // Get current opacity from widget
+        const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
+        const opacity = bgOpacityWidget ? bgOpacityWidget.value : 1.0;
 
         // If we have target dimensions, load and scale the image
         if (targetWidth && targetHeight) {
@@ -450,8 +248,11 @@ export function createBackgroundImageManager(node) {
             canvas.height = targetHeight;
             const ctx = canvas.getContext('2d');
 
+            // Apply opacity while drawing
+            ctx.globalAlpha = opacity;
             // Draw the original image scaled to the target dimensions
             ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+            ctx.globalAlpha = 1.0; // Reset
 
             // Convert back to base64
             const scaledDataUrl = canvas.toDataURL('image/jpeg');
@@ -511,23 +312,47 @@ export function createBackgroundImageManager(node) {
             }
           };
           img.onerror = () => {
-            // If scaling fails, just use the original image
+            // If scaling fails, apply opacity to the original image
+            const img2 = new Image();
+            img2.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img2.width;
+              canvas.height = img2.height;
+              const ctx = canvas.getContext('2d');
+              ctx.globalAlpha = opacity;
+              ctx.drawImage(img2, 0, 0);
+              ctx.globalAlpha = 1.0;
+              const processedDataUrl = canvas.toDataURL('image/jpeg');
+              node.imgData = {
+                name: imageName,
+                base64: processedDataUrl.split(',')[1],
+                type: 'image/jpeg'
+              };
+              node.editor?.refreshBackgroundImage?.();
+            };
+            img2.src = dataUrl;
+          };
+          img.src = dataUrl;
+        } else {
+          // No target dimensions, apply opacity to the original image
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.globalAlpha = opacity;
+            ctx.drawImage(img, 0, 0);
+            ctx.globalAlpha = 1.0;
+            const processedDataUrl = canvas.toDataURL('image/jpeg');
             node.imgData = {
               name: imageName,
-              base64: dataUrl.split(',')[1],
+              base64: processedDataUrl.split(',')[1],
               type: 'image/jpeg'
             };
             node.editor?.refreshBackgroundImage?.();
           };
           img.src = dataUrl;
-        } else {
-          // No target dimensions, just use the original image
-          node.imgData = {
-            name: imageName,
-            base64: dataUrl.split(',')[1],
-            type: 'image/jpeg'
-          };
-          node.editor?.refreshBackgroundImage?.();
         }
       });
     },
@@ -537,11 +362,8 @@ export function createBackgroundImageManager(node) {
      */
     async initializeBackgroundImage() {
       try {
-        const bgImgWidget = node.widgets?.find(w => w.name === 'bg_img');
-        const bg_img = bgImgWidget?.value || 'None';
-
-        // Load initial image
-        await this.updateBackgroundImage(bg_img);
+        // Load initial image with default opacity
+        await this.updateBackgroundImage();
       } catch (error) {
         console.error('Error initializing background image:', error);
       }

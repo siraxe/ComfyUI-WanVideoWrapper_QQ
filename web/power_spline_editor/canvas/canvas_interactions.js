@@ -586,6 +586,8 @@ export function attachInteractionHandlers(editor) {
         }
       }
       editor._updateBoxKeysFromWorkingPoints();
+      // Force rebuild to update interpolated lines for box layers
+      editor._forceRebuildNextRender = true;
       editor.layerRenderer.render();
       return;
     }
@@ -603,6 +605,8 @@ export function attachInteractionHandlers(editor) {
         workingPoints[j].highlighted = !!workingPoints[j].highlighted;
       }
       editor._updateBoxKeysFromWorkingPoints();
+      // Force rebuild to update interpolated lines for box layers
+      editor._forceRebuildNextRender = true;
       editor.layerRenderer.render();
       return;
     }
@@ -646,6 +650,8 @@ export function attachInteractionHandlers(editor) {
         }
       }
       editor._updateBoxKeysFromWorkingPoints();
+      // Force rebuild to update interpolated lines for box layers
+      editor._forceRebuildNextRender = true;
       editor.layerRenderer.render();
       return;
     }
@@ -657,6 +663,8 @@ export function attachInteractionHandlers(editor) {
         workingPoints[editor.i].highlighted = !!workingPoints[editor.i].highlighted;
       }
       editor._updateBoxKeysFromWorkingPoints();
+      // Force rebuild to update interpolated lines for box layers
+      editor._forceRebuildNextRender = true;
       editor.layerRenderer.render();
     }
   };

@@ -9,6 +9,7 @@ import { attachPreviousSplineHelpers } from './canvas_previous_splines.js';
 import { attachInteractionHandlers } from './canvas_interactions.js';
 import { attachHanddrawHelpers } from './canvas_handdraw.js';
 import { initializeVideoBackground, onEditorDimensionsChanged } from './canvas_video_background.js';
+import { initializeScrubState, startBoxCanvasScrub, shouldStartScrubbing } from './canvas_scrub.js';
 import { PowerSplineWidget, HandDrawLayerWidget, BoxLayerWidget, transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js';
 
 export default class SplineEditor2 {
@@ -330,11 +331,8 @@ export default class SplineEditor2 {
     };
 
     // Box-layer timeline scrubbing state (shift + left-drag on empty canvas)
-    this._boxCanvasScrubActive = false;
-    this._boxCanvasScrubStartX = 0;
-    this._boxCanvasScrubStartFrame = 1;
-    this._boxCanvasScrubWidget = null;
-    this._boxCanvasScrubStepPx = 1;
+    // Initialize using the canvas_scrub module
+    initializeScrubState(this);
 
     // Double-click tracking for layer switching
     this.lastCanvasClickTime = 0;
@@ -425,12 +423,12 @@ export default class SplineEditor2 {
         }
         if (this._handdrawActive) {
           // Start capturing freehand path until mouseup on document
-          this._handdrawPath = [{ x: mouseX, y: mouseY }];
+          this._handdrawPath = [{ x: videoSpaceMouseX, y: videoSpaceMouseY }];
           // Preview on active layer while drawing
           this.points = this._handdrawPath;
           this.layerRenderer.render();
           const canvasEl = this.vis.canvas();
-          let lastAddX = mouseX, lastAddY = mouseY;
+          let lastAddX = videoSpaceMouseX, lastAddY = videoSpaceMouseY;
           const move = (ev) => {
             const rect = canvasEl.getBoundingClientRect();
             let mx = (ev.clientX - rect.left) / app.canvas.ds.scale;
@@ -532,38 +530,18 @@ export default class SplineEditor2 {
         // Existing mousedown handlers
         if (pv.event.shiftKey && pv.event.button === 0) { // Use pv.event to access the event object
           const shiftWidget = this.getActiveWidget();
+
+          // Check if we should start scrubbing using the canvas_scrub module
+          const shouldScrub = shouldStartScrubbing(this, shiftWidget, { x: mouseX, y: mouseY });
+
+          if (shouldScrub) {
+            // Start synchronized timeline scrubbing for all box layers
+            startBoxCanvasScrub(this, shiftWidget, mouseX, mouseY);
+            return this;
+          }
+
+          // If we have a box layer but hit a point, don't start scrubbing
           if (this._isBoxLayerWidget(shiftWidget)) {
-            // Only scrub when clicking empty space (avoid grabbing the box itself)
-            const hit = this.pickBoxPointFromCoords({ x: mouseX, y: mouseY });
-            if (!hit) {
-              const maxFrames = Math.max(1, this._getMaxFrames());
-              this._boxCanvasScrubActive = true;
-              this._boxCanvasScrubWidget = shiftWidget;
-              this._boxCanvasScrubStartX = mouseX;
-              this._boxCanvasScrubStartFrame = Math.max(1, Math.min(maxFrames, Math.round(shiftWidget.value?.box_timeline_point || 1)));
-              // Pixels per frame step; keep a reasonable minimum so small drags still move
-              this._boxCanvasScrubStepPx = Math.max(4, this.width / Math.max(1, maxFrames - 1));
-              const endScrub = () => {
-                document.removeEventListener('mousemove', moveScrub, true);
-                document.removeEventListener('mouseup', endScrub, true);
-                this._boxCanvasScrubActive = false;
-                this._boxCanvasScrubWidget = null;
-              };
-              const moveScrub = (ev) => {
-                if (!this._boxCanvasScrubActive || !this._boxCanvasScrubWidget) return;
-                const coords = this._getPointerCoords(ev);
-                const deltaX = (coords?.x ?? mouseX) - this._boxCanvasScrubStartX;
-                const deltaFrames = Math.round(deltaX / this._boxCanvasScrubStepPx);
-                const targetFrame = Math.max(
-                  1,
-                  Math.min(maxFrames, this._boxCanvasScrubStartFrame + deltaFrames)
-                );
-                this.applyBoxTimelineFrame?.(this._boxCanvasScrubWidget, targetFrame);
-              };
-              document.addEventListener('mousemove', moveScrub, true);
-              document.addEventListener('mouseup', endScrub, true);
-              return this;
-            }
             return this;
           }
 
@@ -767,6 +745,8 @@ export default class SplineEditor2 {
     svgElement.style['position'] = "relative"
     svgElement.style['display'] = "block"
     svgElement.style['overflow'] = "visible"
+    svgElement.style['pointerEvents'] = "auto"  // Explicitly enable pointer events
+    svgElement.style['isolation'] = "isolate"   // Create isolated stacking context
 
     // Remove viewBox to allow content outside canvas bounds
     svgElement.removeAttribute('viewBox');

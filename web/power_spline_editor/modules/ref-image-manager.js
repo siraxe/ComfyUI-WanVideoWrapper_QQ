@@ -137,13 +137,9 @@ export function createRefImageManager(node) {
           sessionStorage.removeItem(`spline-editor-img-${node.uuid}`);
         }
 
-        // Get current bg_img selection
-        const bgImgWidget = node.widgets?.find(w => w.name === 'bg_img');
-        const bg_img = bgImgWidget?.value || 'None';
-
-        // Update background
+        // Update background with current opacity
         if (node.bgImageManager) {
-          await node.bgImageManager.updateBackgroundImage(bg_img);
+          await node.bgImageManager.updateBackgroundImage();
         }
 
         // Wait for processing
@@ -191,13 +187,9 @@ export function createRefImageManager(node) {
           sessionStorage.removeItem(`spline-editor-img-${node.uuid}`);
         }
 
-        // Get current bg_img selection
-        const bgImgWidget = node.widgets?.find(w => w.name === 'bg_img');
-        const bg_img = bgImgWidget?.value || 'None';
-
-        // Update background
+        // Update background with current opacity
         if (node.bgImageManager) {
-          await node.bgImageManager.updateBackgroundImage(bg_img);
+          await node.bgImageManager.updateBackgroundImage();
         }
 
         await new Promise(resolve => setTimeout(resolve, 200));
@@ -291,6 +283,7 @@ export function createRefImageManager(node) {
      */
     async attachRefImageToActiveBoxLayer(desiredSelection = 'ref_1') {
       const activeWidget = node.layerManager?.getActiveWidget?.();
+
       if (!activeWidget || activeWidget.value?.type !== 'box_layer') {
         alert('Activate a box layer first to attach a ref image.');
         return;
@@ -538,7 +531,6 @@ export function createRefImageManager(node) {
             const response = await fetch(refImageUrl);
 
             if (!response.ok) {
-              console.log(`ref_${i}.png not found in ref folder, skipping`);
               continue;
             }
 
@@ -564,21 +556,19 @@ export function createRefImageManager(node) {
             await saveRefImageToCache(base64Data, filename);
 
             attachments.push({
-              path: `../ref/${filename}`,
+              path: `ref/${filename}`,
               type: 'image/png',
               width: dims.width,
               height: dims.height,
               name: filename
             });
-
-            console.log(`Successfully loaded ref_${i}.png from ref folder`);
           } catch (error) {
             console.error(`Error loading ref_${i}.png:`, error);
           }
         }
 
         if (attachments.length === 0) {
-          console.error('No ref images found in ref folder');
+          console.error('[loadRefImagesFromRefFolder] No ref images found in ref folder');
           return;
         }
 
@@ -608,10 +598,6 @@ export function createRefImageManager(node) {
         if (node.layerRenderer?.clearRefImageCache) {
           node.layerRenderer.clearRefImageCache();
         }
-
-        console.log(
-          `Successfully loaded ${attachments.length} ref images from ref folder`
-        );
       } catch (error) {
         console.error('Error loading ref images from ref folder:', error);
       }

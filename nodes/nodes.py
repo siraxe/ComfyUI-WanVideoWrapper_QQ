@@ -5,7 +5,7 @@ class WanFrames:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "frames": ("INT", {"default": 4, "min": 4, "max": 1000, "step": 4, "tooltip": "Number of frames, must be divisible by 4"})
+                "frames": ("INT", {"default": 5, "min": 5, "max": 1000, "step": 4, "tooltip": "Number of frames, 4 * n + 1"})
             }
         }
 
@@ -16,7 +16,7 @@ class WanFrames:
     DESCRIPTION = "Calculates frame count as input + 1, ensuring input is divisible by 4"
 
     def calculate_frames(self, frames):
-        return (frames + 1,)
+        return (frames,)
 
 class WanVideoMerge:
     @classmethod
