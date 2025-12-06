@@ -858,7 +858,7 @@ class PrepareRefs:
                     bg_img = bg_img.cpu()
                 transform_to_pil = transforms.ToPILImage()
                 img_tensor = bg_img[0]
-                if img_tensor.dim() == 3 and img_tensor.shape[2] == 3:
+                if img_tensor.dim() == 3 and img_tensor.shape[0] not in (3, 4) and img_tensor.shape[2] in (3, 4):
                     img_tensor = img_tensor.permute(2, 0, 1)
                 img_tensor = clamp_float_tensor(img_tensor)
                 pil = transform_to_pil(img_tensor)
@@ -888,7 +888,7 @@ class PrepareRefs:
 
                 img_tensor = ref_imgs_cpu[idx]
                 # ensure CHW for ToPILImage
-                if img_tensor.dim() == 3 and img_tensor.shape[2] == 3:
+                if img_tensor.dim() == 3 and img_tensor.shape[0] not in (3, 4) and img_tensor.shape[2] in (3, 4):
                     img_tensor = img_tensor.permute(2, 0, 1)
 
                 img_tensor = clamp_float_tensor(img_tensor)

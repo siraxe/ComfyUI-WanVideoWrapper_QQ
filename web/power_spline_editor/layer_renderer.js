@@ -349,7 +349,8 @@ export class LayerRenderer {
             _getRefImageUrl: (w, a) => this._getRefImageUrl(w, a),
             _sanitizeBoxKeys: (w) => this._sanitizeBoxKeys(w),
             _createSVGPath: (t, p, s, r) => this._createSVGPath(t, p, s, r),
-            _createSVGCircle: (p, s) => this._createSVGCircle(p, s)
+            _createSVGCircle: (p, s) => this._createSVGCircle(p, s),
+            clampPointScale: (v) => this.clampPointScale(v)
         };
     }
 
