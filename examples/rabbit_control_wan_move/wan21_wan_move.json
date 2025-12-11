@@ -1140,70 +1140,6 @@
       "bgcolor": "#355"
     },
     {
-      "id": 126,
-      "type": "WanVideoTextEncodeCached",
-      "pos": [
-        701.9636701183945,
-        -280.27967385479184
-      ],
-      "size": [
-        474.5360107421875,
-        366.7752685546875
-      ],
-      "flags": {},
-      "order": 7,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "extender_args",
-          "shape": 7,
-          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "text_embeds",
-          "type": "WANVIDEOTEXTEMBEDS",
-          "links": [
-            527
-          ]
-        },
-        {
-          "name": "negative_text_embeds",
-          "type": "WANVIDEOTEXTEMBEDS",
-          "links": null
-        },
-        {
-          "name": "positive_prompt",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "aux_id": "ComfyUI-WanVideoWrapper",
-        "Node name for S&R": "WanVideoTextEncodeCached",
-        "ver": "bbf14ec9e9965c1a8582eea02b50913e79a036d0",
-        "cnr_id": "ComfyUI-WanVideoWrapper",
-        "ue_properties": {
-          "version": "7.2.2",
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {}
-        }
-      },
-      "widgets_values": [
-        "umt5-xxl-enc-bf16.safetensors",
-        "bf16",
-        "multiple rabbits in snow , all are moving around",
-        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
-        "disabled",
-        true,
-        "gpu"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
-    },
-    {
       "id": 38,
       "type": "WanVideoVAELoader",
       "pos": [
@@ -1215,7 +1151,7 @@
         106
       ],
       "flags": {},
-      "order": 8,
+      "order": 7,
       "mode": 0,
       "inputs": [
         {
@@ -1311,7 +1247,7 @@
         218.08512315438895
       ],
       "flags": {},
-      "order": 9,
+      "order": 8,
       "mode": 0,
       "inputs": [
         {
@@ -1440,50 +1376,6 @@
       ]
     },
     {
-      "id": 198,
-      "type": "Seed (rgthree)",
-      "pos": [
-        1245.93115234375,
-        -597.31396484375
-      ],
-      "size": [
-        315,
-        130
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "dir": 4,
-          "name": "SEED",
-          "shape": 3,
-          "type": "INT",
-          "links": [
-            356
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "rgthree-comfy",
-        "ver": "2b9eb36d3e1741e88dbfccade0e08137f7fa2bfb",
-        "randomMax": 1125899906842624,
-        "randomMin": 0,
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        }
-      },
-      "widgets_values": [
-        580589296699952,
-        "",
-        "",
-        ""
-      ]
-    },
-    {
       "id": 210,
       "type": "WanFrames",
       "pos": [
@@ -1495,7 +1387,7 @@
         86.4462890625
       ],
       "flags": {},
-      "order": 11,
+      "order": 9,
       "mode": 0,
       "inputs": [],
       "outputs": [
@@ -1596,12 +1488,12 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "WanVideoWrapper_22FunControl_00003.mp4",
+            "filename": "WanVideoWrapper_22FunControl_00004.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "WanVideoWrapper_22FunControl_00003.png",
+            "workflow": "WanVideoWrapper_22FunControl_00004.png",
             "fullpath": ""
           }
         }
@@ -1730,221 +1622,16 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "WanVideoWrapper_I2V_00009.mp4",
+            "filename": "WanVideoWrapper_I2V_00010.mp4",
             "subfolder": "",
             "type": "temp",
             "format": "video/h264-mp4",
             "frame_rate": 16,
-            "workflow": "WanVideoWrapper_I2V_00009.png",
+            "workflow": "WanVideoWrapper_I2V_00010.png",
             "fullpath": ""
           }
         }
       }
-    },
-    {
-      "id": 264,
-      "type": "PowerSplineEditor",
-      "pos": [
-        -579.2135211410896,
-        275.91661991416834
-      ],
-      "size": [
-        701,
-        778
-      ],
-      "flags": {},
-      "order": 17,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "bg_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 512
-        },
-        {
-          "name": "ref_images",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": null
-        },
-        {
-          "name": "frames",
-          "shape": 7,
-          "type": "INT",
-          "link": 494
-        },
-        {
-          "name": "ref_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": null
-        },
-        {
-          "name": "coord_in",
-          "shape": 7,
-          "type": "STRING",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "bg_image",
-          "type": "IMAGE",
-          "links": [
-            500,
-            516
-          ]
-        },
-        {
-          "name": "coord_out",
-          "type": "STRING",
-          "links": [
-            501
-          ]
-        },
-        {
-          "name": "frames",
-          "type": "INT",
-          "links": [
-            502,
-            515
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "wanvideowrapper_qq",
-        "ver": "edaa843d7d840adcd8b0a7528f6303c49932041d",
-        "Node name for S&R": "PowerSplineEditor",
-        "userAdjustedSize": true,
-        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
-        "ue_properties": {
-          "widget_ue_connectable": {},
-          "input_ue_unconnectable": {},
-          "version": "7.2.2"
-        },
-        "bgImageDims": {
-          "width": 657.5999755859375,
-          "height": 480
-        },
-        "userAdjustedDims": true
-      },
-      "widgets_values": [
-        "[{\"on\":true,\"name\":\"Spline 1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":6,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.84,\"points_store\":\"[{\\\"x\\\":0.16734756890663047,\\\"y\\\":0.8291453830740662,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":1},{\\\"x\\\":0.40826350018417734,\\\"y\\\":0.53549260524282,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":2},{\\\"x\\\":0.44699653146644214,\\\"y\\\":0.926485751402128,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":3},{\\\"x\\\":0.7060983180155901,\\\"y\\\":0.5176323253815309,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":4},{\\\"x\\\":0.7201990955148635,\\\"y\\\":0.9296307777561326,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":5},{\\\"x\\\":1.0321787976862866,\\\"y\\\":0.5585176679835905,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":6},{\\\"x\\\":1.0550925611226054,\\\"y\\\":0.9453559095261558,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":7}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 1_1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.89,\"points_store\":\"[{\\\"x\\\":0.5176157041508205,\\\"y\\\":0.5983325571878648,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":15},{\\\"x\\\":0.6752187518114265,\\\"y\\\":0.4924298048216416,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":16},{\\\"x\\\":0.6939596823385212,\\\"y\\\":0.7908319550438878,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":17},{\\\"x\\\":0.8999363806551236,\\\"y\\\":0.534384963040345,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":18},{\\\"x\\\":0.906471801899081,\\\"y\\\":0.8072868674994239,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":19},{\\\"x\\\":1.0802300820658168,\\\"y\\\":0.5511732979852062,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":20},{\\\"x\\\":1.096043389626622,\\\"y\\\":0.8181391373940944,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":21}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"points\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"out_in\",\"driven\":{\"driver\":\"ctrl\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.01,\"points_store\":\"[{\\\"x\\\":0.18250843813547013,\\\"y\\\":0.5597005375309391,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":69},{\\\"x\\\":0.33650747499555567,\\\"y\\\":0.6076201622338966,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":70},{\\\"x\\\":0.3189020559617375,\\\"y\\\":0.35938667690686077,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":71},{\\\"x\\\":0.6634434660802881,\\\"y\\\":0.627109436647994,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":72},{\\\"x\\\":0.7567427823191606,\\\"y\\\":0.3196802409162543,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":73},{\\\"x\\\":0.8208569029648533,\\\"y\\\":0.65848825171457,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":74}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"ctrl\",\"interpolation\":\"basis\",\"repeat\":3,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"each\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.45017837281084355,\\\"y\\\":0.29219575515030644,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":75},{\\\"x\\\":0.48158412199326667,\\\"y\\\":0.19722740420275295,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":76},{\\\"x\\\":0.5114532649158007,\\\"y\\\":0.3066348664441768,\\\"highlighted\\\":true,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":77,\\\"rotation\\\":0,\\\"boxRotation\\\":0},{\\\"x\\\":0.4791579496859034,\\\"y\\\":0.17651608118909268,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":78,\\\"rotation\\\":0,\\\"boxRotation\\\":0},{\\\"x\\\":0.4505015308970577,\\\"y\\\":0.3155803472596375,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":79,\\\"rotation\\\":0,\\\"boxRotation\\\":0}]\",\"coordinates\":\"[]\",\"type\":\"spline\"}]",
-        null,
-        "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
-        656,
-        480,
-        0.3,
-        {},
-        "",
-        null,
-        null,
-        {
-          "on": true,
-          "name": "Spline 1",
-          "interpolation": "basis",
-          "repeat": 1,
-          "offset": 6,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1,
-            "acceleration": 0
-          },
-          "scale": 1.84,
-          "points_store": "[{\"x\":0.16734756890663047,\"y\":0.8291453830740662,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":1},{\"x\":0.40826350018417734,\"y\":0.53549260524282,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":2},{\"x\":0.44699653146644214,\"y\":0.926485751402128,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":3},{\"x\":0.7060983180155901,\"y\":0.5176323253815309,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":4},{\"x\":0.7201990955148635,\"y\":0.9296307777561326,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":5},{\"x\":1.0321787976862866,\"y\":0.5585176679835905,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":6},{\"x\":1.0550925611226054,\"y\":0.9453559095261558,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":7}]",
-          "coordinates": "[]",
-          "type": "spline"
-        },
-        {
-          "on": true,
-          "name": "Spline 1_1",
-          "interpolation": "basis",
-          "repeat": 1,
-          "offset": 0,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1,
-            "acceleration": 0
-          },
-          "scale": 1.89,
-          "points_store": "[{\"x\":0.5176157041508205,\"y\":0.5983325571878648,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":15},{\"x\":0.6752187518114265,\"y\":0.4924298048216416,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":16},{\"x\":0.6939596823385212,\"y\":0.7908319550438878,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":17},{\"x\":0.8999363806551236,\"y\":0.534384963040345,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":18},{\"x\":0.906471801899081,\"y\":0.8072868674994239,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":19},{\"x\":1.0802300820658168,\"y\":0.5511732979852062,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":20},{\"x\":1.096043389626622,\"y\":0.8181391373940944,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":21}]",
-          "coordinates": "[]",
-          "type": "spline"
-        },
-        {
-          "on": true,
-          "name": "points",
-          "interpolation": "points",
-          "repeat": 1,
-          "offset": 0,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "out_in",
-          "driven": {
-            "driver": "ctrl",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "_drivenConfig": {
-            "driver": "ctrl",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "full",
-            "strength": 1,
-            "acceleration": 0
-          },
-          "scale": 1.01,
-          "points_store": "[{\"x\":0.18250843813547013,\"y\":0.5597005375309391,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":69},{\"x\":0.33650747499555567,\"y\":0.6076201622338966,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":70},{\"x\":0.3189020559617375,\"y\":0.35938667690686077,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":71},{\"x\":0.6634434660802881,\"y\":0.627109436647994,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":72},{\"x\":0.7567427823191606,\"y\":0.3196802409162543,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":73},{\"x\":0.8208569029648533,\"y\":0.65848825171457,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":74}]",
-          "coordinates": "[]",
-          "type": "spline"
-        },
-        {
-          "on": true,
-          "name": "ctrl",
-          "interpolation": "basis",
-          "repeat": 3,
-          "offset": 0,
-          "a_pause": 0,
-          "z_pause": 0,
-          "easing": "in_out",
-          "driven": false,
-          "_drivenConfig": {
-            "driver": "",
-            "rotate": 0,
-            "d_scale": 1
-          },
-          "easingConfig": {
-            "path": "each",
-            "strength": 1,
-            "acceleration": 0
-          },
-          "scale": 1,
-          "points_store": "[{\"x\":0.45017837281084355,\"y\":0.29219575515030644,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":75},{\"x\":0.48158412199326667,\"y\":0.19722740420275295,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":76},{\"x\":0.5114532649158007,\"y\":0.3066348664441768,\"highlighted\":true,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":77,\"rotation\":0,\"boxRotation\":0},{\"x\":0.4791579496859034,\"y\":0.17651608118909268,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":78,\"rotation\":0,\"boxRotation\":0},{\"x\":0.4505015308970577,\"y\":0.3155803472596375,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":79,\"rotation\":0,\"boxRotation\":0}]",
-          "coordinates": "[]",
-          "type": "spline"
-        }
-      ]
     },
     {
       "id": 27,
@@ -2116,6 +1803,343 @@
         -1,
         false
       ]
+    },
+    {
+      "id": 264,
+      "type": "PowerSplineEditor",
+      "pos": [
+        -579.2135211410896,
+        275.91661991416834
+      ],
+      "size": [
+        701,
+        802
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "bg_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 512
+        },
+        {
+          "name": "ref_images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "frames",
+          "shape": 7,
+          "type": "INT",
+          "link": 494
+        },
+        {
+          "name": "ref_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "coord_in",
+          "shape": 7,
+          "type": "STRING",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "bg_image",
+          "type": "IMAGE",
+          "links": [
+            500,
+            516
+          ]
+        },
+        {
+          "name": "coord_out",
+          "type": "STRING",
+          "links": [
+            501
+          ]
+        },
+        {
+          "name": "frames",
+          "type": "INT",
+          "links": [
+            502,
+            515
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "wanvideowrapper_qq",
+        "ver": "edaa843d7d840adcd8b0a7528f6303c49932041d",
+        "Node name for S&R": "PowerSplineEditor",
+        "userAdjustedSize": true,
+        "aux_id": "ComfyUI-WanVideoWrapper_QQ",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        },
+        "bgImageDims": {
+          "width": 657.5999755859375,
+          "height": 480
+        },
+        "userAdjustedDims": true
+      },
+      "widgets_values": [
+        "[{\"on\":true,\"name\":\"Spline 1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":6,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.84,\"points_store\":\"[{\\\"x\\\":0.16734756890663047,\\\"y\\\":0.8291453830740662,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":1},{\\\"x\\\":0.40826350018417734,\\\"y\\\":0.53549260524282,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":2},{\\\"x\\\":0.44699653146644214,\\\"y\\\":0.926485751402128,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":3},{\\\"x\\\":0.7060983180155901,\\\"y\\\":0.5176323253815309,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":4},{\\\"x\\\":0.7201990955148635,\\\"y\\\":0.9296307777561326,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":5},{\\\"x\\\":1.0321787976862866,\\\"y\\\":0.5585176679835905,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":6},{\\\"x\\\":1.0550925611226054,\\\"y\\\":0.9453559095261558,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":7}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 1_1\",\"interpolation\":\"basis\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.89,\"points_store\":\"[{\\\"x\\\":0.5176157041508205,\\\"y\\\":0.5983325571878648,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":15},{\\\"x\\\":0.6752187518114265,\\\"y\\\":0.4924298048216416,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":16},{\\\"x\\\":0.6939596823385212,\\\"y\\\":0.7908319550438878,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":17},{\\\"x\\\":0.8999363806551236,\\\"y\\\":0.534384963040345,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":18},{\\\"x\\\":0.906471801899081,\\\"y\\\":0.8072868674994239,\\\"highlighted\\\":true,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":19},{\\\"x\\\":1.0802300820658168,\\\"y\\\":0.5511732979852062,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":20},{\\\"x\\\":1.096043389626622,\\\"y\\\":0.8181391373940944,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":21}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"points\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"out_in\",\"driven\":{\"driver\":\"ctrl\",\"rotate\":0,\"d_scale\":1},\"_drivenConfig\":{\"driver\":\"ctrl\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1,\"acceleration\":0},\"scale\":1.01,\"points_store\":\"[{\\\"x\\\":0.18250843813547013,\\\"y\\\":0.5597005375309391,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":69},{\\\"x\\\":0.33650747499555567,\\\"y\\\":0.6076201622338966,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":70},{\\\"x\\\":0.3189020559617375,\\\"y\\\":0.35938667690686077,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":71},{\\\"x\\\":0.6634434660802881,\\\"y\\\":0.627109436647994,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":72},{\\\"x\\\":0.7567427823191606,\\\"y\\\":0.3196802409162543,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":73},{\\\"x\\\":0.8208569029648533,\\\"y\\\":0.65848825171457,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":74}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":false,\"name\":\"ctrl\",\"interpolation\":\"basis\",\"repeat\":3,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"each\",\"strength\":1,\"acceleration\":0},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.450283451157349,\\\"y\\\":0.29979950816586654,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":75},{\\\"x\\\":0.4714772813575939,\\\"y\\\":0.235711143558211,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":76},{\\\"x\\\":0.491634149440885,\\\"y\\\":0.30954358627166756,\\\"highlighted\\\":true,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":77,\\\"rotation\\\":0,\\\"boxRotation\\\":0},{\\\"x\\\":0.46984000521365865,\\\"y\\\":0.22173433120375174,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":78,\\\"rotation\\\":0,\\\"boxRotation\\\":0},{\\\"x\\\":0.4505015308970577,\\\"y\\\":0.3155803472596375,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":79,\\\"rotation\\\":0,\\\"boxRotation\\\":0}]\",\"coordinates\":\"[]\",\"type\":\"spline\"},{\"on\":true,\"name\":\"Spline 6\",\"interpolation\":\"points\",\"repeat\":1,\"offset\":0,\"a_pause\":0,\"z_pause\":0,\"easing\":\"in_out\",\"driven\":false,\"_drivenConfig\":{\"driver\":\"\",\"rotate\":0,\"d_scale\":1},\"easingConfig\":{\"path\":\"full\",\"strength\":1},\"scale\":1,\"points_store\":\"[{\\\"x\\\":0.04870500239204743,\\\"y\\\":0.0580394241932819,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":80},{\\\"x\\\":0.45010895060866096,\\\"y\\\":0.11051033620593265,\\\"highlighted\\\":false,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"scale\\\":1,\\\"boxRotation\\\":0,\\\"rotation\\\":0,\\\"uid\\\":81},{\\\"x\\\":0.6185736458872484,\\\"y\\\":0.22043111257980985,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":82,\\\"rotation\\\":0},{\\\"x\\\":0.9256067043391751,\\\"y\\\":0.09966477625538536,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":83,\\\"rotation\\\":0},{\\\"x\\\":0.9608587869007719,\\\"y\\\":0.9625140174956762,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":84,\\\"rotation\\\":0},{\\\"x\\\":0.6133427400614909,\\\"y\\\":0.9710529769227345,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":85,\\\"rotation\\\":0},{\\\"x\\\":0.3545252156185916,\\\"y\\\":0.9706462321709316,\\\"highlighted\\\":false,\\\"scale\\\":1,\\\"boxScale\\\":1,\\\"pointScale\\\":1,\\\"uid\\\":86,\\\"rotation\\\":0}]\",\"coordinates\":\"[]\",\"type\":\"spline\"}]",
+        null,
+        "[{\"x\":200,\"y\":240},{\"x\":304,\"y\":240}]",
+        656,
+        480,
+        0.3,
+        {},
+        "",
+        null,
+        null,
+        {
+          "on": true,
+          "name": "Spline 1",
+          "interpolation": "basis",
+          "repeat": 1,
+          "offset": 6,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.84,
+          "points_store": "[{\"x\":0.16734756890663047,\"y\":0.8291453830740662,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":1},{\"x\":0.40826350018417734,\"y\":0.53549260524282,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":2},{\"x\":0.44699653146644214,\"y\":0.926485751402128,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":3},{\"x\":0.7060983180155901,\"y\":0.5176323253815309,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":4},{\"x\":0.7201990955148635,\"y\":0.9296307777561326,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":5},{\"x\":1.0321787976862866,\"y\":0.5585176679835905,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":6},{\"x\":1.0550925611226054,\"y\":0.9453559095261558,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":7}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": true,
+          "name": "Spline 1_1",
+          "interpolation": "basis",
+          "repeat": 1,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.89,
+          "points_store": "[{\"x\":0.5176157041508205,\"y\":0.5983325571878648,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":15},{\"x\":0.6752187518114265,\"y\":0.4924298048216416,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":16},{\"x\":0.6939596823385212,\"y\":0.7908319550438878,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":17},{\"x\":0.8999363806551236,\"y\":0.534384963040345,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":18},{\"x\":0.906471801899081,\"y\":0.8072868674994239,\"highlighted\":true,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":19},{\"x\":1.0802300820658168,\"y\":0.5511732979852062,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":20},{\"x\":1.096043389626622,\"y\":0.8181391373940944,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":21}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": true,
+          "name": "points",
+          "interpolation": "points",
+          "repeat": 1,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "out_in",
+          "driven": {
+            "driver": "ctrl",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "_drivenConfig": {
+            "driver": "ctrl",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1.01,
+          "points_store": "[{\"x\":0.18250843813547013,\"y\":0.5597005375309391,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":69},{\"x\":0.33650747499555567,\"y\":0.6076201622338966,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":70},{\"x\":0.3189020559617375,\"y\":0.35938667690686077,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":71},{\"x\":0.6634434660802881,\"y\":0.627109436647994,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":72},{\"x\":0.7567427823191606,\"y\":0.3196802409162543,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":73},{\"x\":0.8208569029648533,\"y\":0.65848825171457,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":74}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": false,
+          "name": "ctrl",
+          "interpolation": "basis",
+          "repeat": 3,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "each",
+            "strength": 1,
+            "acceleration": 0
+          },
+          "scale": 1,
+          "points_store": "[{\"x\":0.450283451157349,\"y\":0.29979950816586654,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":75},{\"x\":0.4714772813575939,\"y\":0.235711143558211,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":76},{\"x\":0.491634149440885,\"y\":0.30954358627166756,\"highlighted\":true,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":77,\"rotation\":0,\"boxRotation\":0},{\"x\":0.46984000521365865,\"y\":0.22173433120375174,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":78,\"rotation\":0,\"boxRotation\":0},{\"x\":0.4505015308970577,\"y\":0.3155803472596375,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":79,\"rotation\":0,\"boxRotation\":0}]",
+          "coordinates": "[]",
+          "type": "spline"
+        },
+        {
+          "on": true,
+          "name": "Spline 6",
+          "interpolation": "points",
+          "repeat": 1,
+          "offset": 0,
+          "a_pause": 0,
+          "z_pause": 0,
+          "easing": "in_out",
+          "driven": false,
+          "_drivenConfig": {
+            "driver": "",
+            "rotate": 0,
+            "d_scale": 1
+          },
+          "easingConfig": {
+            "path": "full",
+            "strength": 1
+          },
+          "scale": 1,
+          "points_store": "[{\"x\":0.04870500239204743,\"y\":0.0580394241932819,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":80},{\"x\":0.45010895060866096,\"y\":0.11051033620593265,\"highlighted\":false,\"boxScale\":1,\"pointScale\":1,\"scale\":1,\"boxRotation\":0,\"rotation\":0,\"uid\":81},{\"x\":0.6185736458872484,\"y\":0.22043111257980985,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":82,\"rotation\":0},{\"x\":0.9256067043391751,\"y\":0.09966477625538536,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":83,\"rotation\":0},{\"x\":0.9608587869007719,\"y\":0.9625140174956762,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":84,\"rotation\":0},{\"x\":0.6133427400614909,\"y\":0.9710529769227345,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":85,\"rotation\":0},{\"x\":0.3545252156185916,\"y\":0.9706462321709316,\"highlighted\":false,\"scale\":1,\"boxScale\":1,\"pointScale\":1,\"uid\":86,\"rotation\":0}]",
+          "coordinates": "[]",
+          "type": "spline"
+        }
+      ]
+    },
+    {
+      "id": 198,
+      "type": "Seed (rgthree)",
+      "pos": [
+        1245.93115234375,
+        -597.31396484375
+      ],
+      "size": [
+        315,
+        130
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "dir": 4,
+          "name": "SEED",
+          "shape": 3,
+          "type": "INT",
+          "links": [
+            356
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "rgthree-comfy",
+        "ver": "2b9eb36d3e1741e88dbfccade0e08137f7fa2bfb",
+        "randomMax": 1125899906842624,
+        "randomMin": 0,
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.2.2"
+        }
+      },
+      "widgets_values": [
+        580589296699953,
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 126,
+      "type": "WanVideoTextEncodeCached",
+      "pos": [
+        701.9636701183945,
+        -280.27967385479184
+      ],
+      "size": [
+        474.5360107421875,
+        366.7752685546875
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "extender_args",
+          "shape": 7,
+          "type": "WANVIDEOPROMPTEXTENDER_ARGS",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": [
+            527
+          ]
+        },
+        {
+          "name": "negative_text_embeds",
+          "type": "WANVIDEOTEXTEMBEDS",
+          "links": null
+        },
+        {
+          "name": "positive_prompt",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "aux_id": "ComfyUI-WanVideoWrapper",
+        "Node name for S&R": "WanVideoTextEncodeCached",
+        "ver": "bbf14ec9e9965c1a8582eea02b50913e79a036d0",
+        "cnr_id": "ComfyUI-WanVideoWrapper",
+        "ue_properties": {
+          "version": "7.2.2",
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "umt5-xxl-enc-bf16.safetensors",
+        "bf16",
+        "multiple rabbits in snow , all are moving around , it's snowing",
+        "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+        "disabled",
+        true,
+        "gpu"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
     }
   ],
   "links": [
@@ -2455,10 +2479,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.6934334949441342,
+      "scale": 0.6727499949325626,
       "offset": [
-        692.2378527494079,
-        715.637618069641
+        736.6026427002677,
+        332.56072540083585
       ]
     },
     "frontendVersion": "1.33.5",
