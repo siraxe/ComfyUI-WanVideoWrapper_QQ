@@ -1,4 +1,22 @@
 # ComfyUI-WanVideoWrapper_QQ
+**Version 1.2.1** - 2025-12-11
+- Some changes to spline editor + added wan move example (update kj [ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper)) [Example](examples//rabbit_control_wan_move/wan21_wan_move.json)
+
+<table>
+<tr>
+<td width="50%">
+
+https://github.com/user-attachments/assets/b7a23273-b30d-4505-a99a-bd978b69b96c
+</td>
+<td width="50%">
+
+https://github.com/user-attachments/assets/3d656d5b-82d4-4f9e-bf71-8f97f2bd84a1
+</td>
+</tr>
+</table>
+
+
+
 **Version 1.2.0** - 2025-12-01
 - Added ability to connect video to bg_image and animate over it [Example](examples/ttm_ref_vid/ttm_ref_vid_example.json)
 - [timeline hotkey/usage](git_assets/docs/power_spline_editor.md) 
