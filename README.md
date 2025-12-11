@@ -1,16 +1,17 @@
 # ComfyUI-WanVideoWrapper_QQ
 **Version 1.2.1** - 2025-12-11
-- Some changes to spline editor + added wan move example (update kj [ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper)) [Example](examples//rabbit_control_wan_move/wan21_wan_move.json)
+- Some changes to spline editor + added wan move example. Look like mix of ati and control 2.1
+(update kj [ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper)) [Example](examples//rabbit_control_wan_move/wan21_wan_move.json)
 
 <table>
 <tr>
 <td width="50%">
 
-https://github.com/user-attachments/assets/b7a23273-b30d-4505-a99a-bd978b69b96c
+https://github.com/user-attachments/assets/119824e7-e309-4f00-9cc8-1404f10d91c9
 </td>
 <td width="50%">
 
-https://github.com/user-attachments/assets/3d656d5b-82d4-4f9e-bf71-8f97f2bd84a1
+https://github.com/user-attachments/assets/881f887d-d930-43d2-b197-ac44668a36e5
 </td>
 </tr>
 </table>
