@@ -4,6 +4,7 @@ import { logoCivitai, link, pencilColored, diskColored, dotdotdot } from "./svgs
 import { LORA_INFO_SERVICE } from "./model_info_service.js";
 import { generateId, injectCss } from "./shared_utils.js";
 import { rgthree } from "../rgthree/common/rgthree.js";
+import { proxyImageUrl } from "./image_utils.js";
 
 class WanInfoDialog extends WanDialog {
     constructor(file) {
@@ -479,10 +480,7 @@ class WanInfoDialog extends WanDialog {
                         const { generatePreviewFromFirstImage } = await import('./image_utils.js');
                         // Determine item type from dialog instance or default to 'loras'
                         const itemType = this.itemType || 'loras';
-                        console.log(`[DialogInfo Debug] Refresh preview generation - itemType: ${itemType}, loraName: ${loraName}, loraPath: ${loraPath}`);
-                        console.log(`[DialogInfo Debug] this.itemType: ${this.itemType}`);
                         const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath, itemType);
-                        console.log(`[DialogInfo] Preview image generated after refresh for ${loraName} (${itemType}):`, previewResult);
 
                         // Add to success message
                         const itemTypeName = itemType === 'checkpoints' ? 'Model' : 'LoRA';
@@ -493,7 +491,6 @@ class WanInfoDialog extends WanDialog {
                             timeout: 3000,
                         });
                     } catch (previewError) {
-                        console.warn(`[DialogInfo] Failed to generate preview image for ${info.file}:`, previewError);
                         // Still show success message for the refresh itself
                         rgthree.showMessage({
                             id: "refresh-info-" + generateId(4),
@@ -512,8 +509,6 @@ class WanInfoDialog extends WanDialog {
                     });
                 }
             } catch (error) {
-                console.error("Error refreshing LoRA info:", error);
-                
                 // Show error message
                 rgthree.showMessage({
                     id: "refresh-info-error-" + generateId(4),
@@ -539,12 +534,8 @@ class WanInfoDialog extends WanDialog {
                     const { generatePreviewFromFirstImage } = await import('./image_utils.js');
                     // Determine item type from dialog instance or default to 'loras'
                     const itemType = this.itemType || 'loras';
-                    console.log(`[DialogInfo Debug] Civitai preview generation - itemType: ${itemType}, loraName: ${loraName}, loraPath: ${loraPath}`);
-                    console.log(`[DialogInfo Debug] this.itemType: ${this.itemType}`);
                     const previewResult = await generatePreviewFromFirstImage(this.modelInfo, loraName, loraPath, itemType);
-                    console.log(`[DialogInfo] Preview image generated after Civitai fetch for ${loraName} (${itemType}):`, previewResult);
                 } catch (previewError) {
-                    console.warn(`[DialogInfo] Failed to generate preview image for ${info.file}:`, previewError);
                 }
             }
         }
@@ -678,11 +669,14 @@ class WanInfoDialog extends WanDialog {
 
       </table>
 
-      <ul class="rgthree-info-images">${(_y = (_x = info.images) === null || _x === void 0 ? void 0 : _x.map((img) => `
+      <ul class="rgthree-info-images">${(_y = (_x = info.images) === null || _x === void 0 ? void 0 : _x.map((img) => {
+        // Use proxy for Civitai images to avoid CSP violations
+        const proxiedUrl = proxyImageUrl(img.url);
+        return `
         <li>
           <figure>${img.type === 'video'
-            ? `<video src="${img.url}" autoplay loop></video>`
-            : `<img src="${img.url}" />`}
+            ? `<video src="${proxiedUrl}" autoplay loop muted playsinline></video>`
+            : `<img src="${proxiedUrl}" />`}
             <figcaption><!--
               -->${imgInfoField("", img.civitaiUrl
             ? `<a href="${img.civitaiUrl}" target="_blank">civitai${link}</a> ${img.positive ? `<button class="rgthree-button" data-action="copy-positive" data-positive="${encodeURIComponent(img.positive)}" style="margin-left: 4px; padding: 1px 4px; font-size: 9px;">Copy+</button>` : ""}`
@@ -696,7 +690,8 @@ class WanInfoDialog extends WanDialog {
               -->${imgInfoField("negative", img.negative)}<!--
             --><!--${""}--></figcaption>
           </figure>
-        </li>`).join("")) !== null && _y !== void 0 ? _y : ""}</ul>
+        </li>`;
+      }).join("")) !== null && _y !== void 0 ? _y : ""}</ul>
     `;
         const div = $el("div", { html });
         if (rgthree.isDevMode()) {

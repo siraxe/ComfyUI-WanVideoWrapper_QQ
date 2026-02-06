@@ -6,109 +6,192 @@
 import { rgthreeApi } from "./rgthree_api.js";
 
 /**
+ * Convert external Civitai image URLs to proxy URLs to avoid CSP violations
+ * @param {string} url - Original image URL
+ * @returns {string} - Proxied URL if external, original URL if local
+ */
+export function proxyImageUrl(url) {
+    if (!url) return url;
+
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname.toLowerCase();
+
+        // Check if this is a Civitai image URL
+        if (hostname.includes('civitai.com') || hostname.includes('imagecache.civitai.com') || hostname.includes('image.civitai.com')) {
+            // Use the proxy endpoint
+            return `/wanvid/api/proxy/image?url=${encodeURIComponent(url)}`;
+        }
+    } catch (e) {
+        // If URL parsing fails, return original
+    }
+
+    return url;
+}
+
+/**
  * Image Utils class containing all image/video processing functionality
  */
 export class ImageUtils {
 
     /**
-     * Extract middle frame from a video URL
+     * Extract frame from a video URL
+     * First tries to use the video-frame proxy endpoint (backend extraction)
+     * Falls back to using an existing video element if provided
      * @param {string} videoUrl - URL of the video
      * @param {number} maxWidth - Maximum width for the extracted frame
+     * @param {HTMLVideoElement} videoElement - Optional existing video element to extract frame from
      * @returns {Promise<Blob>} - Blob containing the extracted frame
      */
-    static async extractFrameFromVideo(videoUrl, maxWidth = 250) {
+    static async extractFrameFromVideo(videoUrl, maxWidth = 250, videoElement = null) {
+        // If a video element is provided, extract frame from it directly
+        if (videoElement && videoElement.readyState >= 2) { // HAVE_CURRENT_DATA
+            return this.extractFrameFromVideoElement(videoElement, maxWidth);
+        }
+
+        // Use backend proxy to extract frame (server-side)
+        const proxiedUrl = proxyImageUrl(videoUrl);
+        const frameUrl = `/wanvid/api/proxy/video-frame?url=${encodeURIComponent(videoUrl)}&time=50`;
+
+        try {
+            const response = await fetch(frameUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const blob = await response.blob();
+
+            // Scale the extracted frame if needed
+            if (maxWidth) {
+                return this.scaleImageBlob(blob, maxWidth);
+            }
+            return blob;
+
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    /**
+     * Extract frame from an existing video element using canvas
+     * @param {HTMLVideoElement} videoElement - The video element
+     * @param {number} maxWidth - Maximum width for the extracted frame
+     * @returns {Promise<Blob>} - Extracted frame blob
+     */
+    static extractFrameFromVideoElement(videoElement, maxWidth = 250) {
         return new Promise((resolve, reject) => {
-            const video = document.createElement('video');
-            video.crossOrigin = 'anonymous';
-            video.src = videoUrl;
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
 
-            video.addEventListener('loadeddata', () => {
-                // Seek to the middle frame instead of the first frame
-                video.currentTime = video.duration / 2;
-            });
+                // Calculate dimensions maintaining aspect ratio
+                const aspectRatio = videoElement.videoWidth / videoElement.videoHeight;
+                const width = Math.min(maxWidth, videoElement.videoWidth);
+                const height = width / aspectRatio;
 
-            video.addEventListener('seeked', () => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
+                canvas.width = width;
+                canvas.height = height;
 
-                    // Calculate dimensions maintaining aspect ratio
-                    const aspectRatio = video.videoWidth / video.videoHeight;
-                    const width = Math.min(maxWidth, video.videoWidth);
-                    const height = width / aspectRatio;
+                // Draw the current video frame to canvas
+                ctx.drawImage(videoElement, 0, 0, width, height);
 
-                    canvas.width = width;
-                    canvas.height = height;
+                // Convert to blob as JPEG
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        resolve(blob);
+                    } else {
+                        reject(new Error('Failed to convert canvas to blob'));
+                    }
+                }, 'image/jpeg', 0.9);
 
-                    // Draw the video frame to canvas
-                    ctx.drawImage(video, 0, 0, width, height);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
 
-                    // Convert to blob as JPEG
-                    canvas.toBlob((blob) => {
-                        if (blob) {
-                            resolve(blob);
-                        } else {
-                            reject(new Error('Failed to convert canvas to blob'));
-                        }
-                    }, 'image/jpeg', 0.9);
+    /**
+     * Scale an image blob to a maximum width
+     * @param {Blob} blob - Image blob
+     * @param {number} maxWidth - Maximum width
+     * @returns {Promise<Blob>} - Scaled image blob
+     */
+    static async scaleImageBlob(blob, maxWidth = 250) {
+        const bitmap = await createImageBitmap(blob);
 
-                } catch (error) {
-                    reject(error);
+        // Calculate dimensions maintaining aspect ratio
+        const aspectRatio = bitmap.width / bitmap.height;
+        const width = Math.min(maxWidth, bitmap.width);
+        const height = width / aspectRatio;
+
+        // Draw to canvas and convert to JPEG blob
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0, width, height);
+        bitmap.close();
+
+        // Convert to blob as JPEG
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((result) => {
+                if (result) {
+                    resolve(result);
+                } else {
+                    reject(new Error('Failed to convert canvas to blob'));
                 }
-            });
-
-            video.addEventListener('error', () => {
-                reject(new Error(`Failed to load video: ${videoUrl}`));
-            });
+            }, 'image/jpeg', 0.9);
         });
     }
 
     /**
      * Scale an image maintaining aspect ratio
+     * Uses fetch to bypass CSP restrictions
      * @param {string} imageUrl - URL of the image
      * @param {number} maxHeight - Maximum height for the scaled image
      * @returns {Promise<Blob>} - Blob containing the scaled image
      */
     static async scaleImage(imageUrl, maxHeight = 250) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.src = imageUrl;
+        // Use proxy for external Civitai images to avoid CSP violations
+        const urlToFetch = proxyImageUrl(imageUrl);
 
-            img.addEventListener('load', () => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
+        try {
+            // Fetch as blob (bypasses CSP img-src restriction)
+            const response = await fetch(urlToFetch);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const blob = await response.blob();
 
-                    // Calculate dimensions maintaining aspect ratio
-                    const aspectRatio = img.width / img.height;
-                    const height = Math.min(maxHeight, img.height);
-                    const width = height * aspectRatio;
+            // Create bitmap from blob to get dimensions
+            const bitmap = await createImageBitmap(blob);
 
-                    canvas.width = width;
-                    canvas.height = height;
+            // Calculate dimensions maintaining aspect ratio
+            const aspectRatio = bitmap.width / bitmap.height;
+            const height = Math.min(maxHeight, bitmap.height);
+            const width = height * aspectRatio;
 
-                    // Draw and scale the image
-                    ctx.drawImage(img, 0, 0, width, height);
+            // Draw to canvas and convert to JPEG blob
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
 
-                    // Convert to blob as JPEG
-                    canvas.toBlob((blob) => {
-                        if (blob) {
-                            resolve(blob);
-                        } else {
-                            reject(new Error('Failed to convert canvas to blob'));
-                        }
-                    }, 'image/jpeg', 0.9);
-
-                } catch (error) {
-                    reject(error);
-                }
+            // Convert to blob as JPEG
+            return new Promise((resolve, reject) => {
+                canvas.toBlob((result) => {
+                    if (result) {
+                        resolve(result);
+                    } else {
+                        reject(new Error('Failed to convert canvas to blob'));
+                    }
+                }, 'image/jpeg', 0.9);
             });
 
-            img.addEventListener('error', () => {
-                reject(new Error(`Failed to load image: ${imageUrl}`));
-            });
-        });
+        } catch (error) {
+            throw error;
+        }
     }
 
     /**
@@ -185,7 +268,6 @@ export class ImageUtils {
 
             return await response.json();
         } catch (error) {
-            console.error('Failed to save preview image:', error);
             throw error;
         }
     }
@@ -200,9 +282,6 @@ export class ImageUtils {
      */
     static async generateAndSavePreview(mediaInfo, loraName, loraPath = '', type = 'loras') {
         try {
-            const frameInfo = mediaInfo.type === 'video' ? 'middle frame' : 'image';
-            console.log(`[ImageUtils] Generating preview for ${loraName} (${type}) from ${mediaInfo.type} (${frameInfo})`);
-
             // Validate inputs
             if (!mediaInfo || !mediaInfo.url) {
                 throw new Error('Invalid media info: missing URL');
@@ -214,8 +293,6 @@ export class ImageUtils {
             // Process the media (extract frame from video or scale image)
             const imageBlob = await this.processMediaForPreview(mediaInfo);
 
-            console.log(`[ImageUtils] Media processed, blob size: ${imageBlob.size} bytes`);
-
             if (imageBlob.size === 0) {
                 throw new Error('Generated image blob is empty');
             }
@@ -223,11 +300,9 @@ export class ImageUtils {
             // Save through backend API
             const result = await this.savePreviewImage(loraName, imageBlob, loraPath, '', type);
 
-            console.log(`[ImageUtils] Preview saved successfully for ${loraName} (${type}):`, result);
             return result;
 
         } catch (error) {
-            console.error(`[ImageUtils] Failed to generate preview for ${loraName} (${type}):`, error);
             throw error;
         }
     }
@@ -247,8 +322,6 @@ export class ImageUtils {
                 throw new Error('No images available in info data');
             }
 
-            console.log(`[ImageUtils] Generating up to ${maxImages} previews for ${loraName}`);
-
             const results = [];
             const imagesToProcess = Math.min(maxImages, info.images.length);
 
@@ -257,11 +330,8 @@ export class ImageUtils {
                 const suffix = `_${String(i + 1).padStart(2, '0')}`; // _01, _02, _03
 
                 try {
-                    console.log(`[ImageUtils] Processing preview ${suffix} for ${loraName}`);
-
                     // Validate media info
                     if (!mediaInfo || !mediaInfo.url) {
-                        console.warn(`[ImageUtils] Skipping ${suffix}: invalid media info`);
                         continue;
                     }
 
@@ -269,7 +339,6 @@ export class ImageUtils {
                     const imageBlob = await this.processMediaForPreview(mediaInfo);
 
                     if (imageBlob.size === 0) {
-                        console.warn(`[ImageUtils] Skipping ${suffix}: empty blob generated`);
                         continue;
                     }
 
@@ -278,10 +347,7 @@ export class ImageUtils {
                     result.suffix = suffix;
                     results.push(result);
 
-                    console.log(`[ImageUtils] Preview ${suffix} saved successfully:`, result);
-
                 } catch (error) {
-                    console.error(`[ImageUtils] Failed to generate preview ${suffix} for ${loraName}:`, error);
                     // Continue processing other images even if one fails
                 }
             }
@@ -290,11 +356,9 @@ export class ImageUtils {
                 throw new Error('Failed to generate any preview images');
             }
 
-            console.log(`[ImageUtils] Successfully generated ${results.length} previews for ${loraName}`);
             return results;
 
         } catch (error) {
-            console.error(`[ImageUtils] Failed to generate multiple previews for ${loraName}:`, error);
             throw error;
         }
     }
@@ -324,16 +388,7 @@ export async function generatePreviewFromFirstImage(info, loraName, loraPath = '
  * @returns {Promise<Object>} - Result of the operation
  */
 export async function testPreviewGeneration(info, loraName, loraPath = '') {
-    console.log(`[ImageUtils] Manual test: Starting preview generation for ${loraName}`);
-
-    try {
-        const result = await generatePreviewFromFirstImage(info, loraName, loraPath);
-        console.log(`[ImageUtils] Manual test: Preview generation successful`, result);
-        return result;
-    } catch (error) {
-        console.error(`[ImageUtils] Manual test: Preview generation failed`, error);
-        throw error;
-    }
+    return generatePreviewFromFirstImage(info, loraName, loraPath);
 }
 
 /**
@@ -343,32 +398,26 @@ export async function testPreviewGeneration(info, loraName, loraPath = '') {
  */
 export function validateImageInfo(info) {
     if (!info) {
-        console.error('[ImageUtils] Invalid info: null or undefined');
         return false;
     }
 
     if (!info.images || !Array.isArray(info.images)) {
-        console.error('[ImageUtils] Invalid info: images array missing or not an array');
         return false;
     }
 
     if (info.images.length === 0) {
-        console.warn('[ImageUtils] Warning: No images in info array');
         return false;
     }
 
     const firstImage = info.images[0];
     if (!firstImage || !firstImage.url) {
-        console.error('[ImageUtils] Invalid first image: missing URL');
         return false;
     }
 
     if (!firstImage.type || !['image', 'video'].includes(firstImage.type)) {
-        console.error('[ImageUtils] Invalid first image: missing or invalid type');
         return false;
     }
 
-    console.log(`[ImageUtils] Image info validation passed: ${firstImage.type} - ${firstImage.url}`);
     return true;
 }
 

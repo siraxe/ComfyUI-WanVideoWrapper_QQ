@@ -29,6 +29,8 @@ from .nodes.wan_first_middle_last import *
 from .nodes.vace_utils import *
 from .nodes.cache_samples import *
 
+from .nodes.ltxv_nodes import *
+
 # Import API endpoints to register routes
 from . import api
 from .utility.rgthree_api import routes_model_info
@@ -51,19 +53,22 @@ for name, obj in inspect.getmembers(current_module):
         module_name = getattr(obj, '__module__', '')
         # Check if the class is defined in one of the modules within the .nodes package or ATI package
         if module_name.startswith(__name__ + '.nodes') or module_name.startswith(__name__ + '.ATI'):
-             # --- ADDED CHECK: Exclude classes with "Math" in the name ---
-             if "Math" in obj.__name__:
-                 continue # Skip this class
-             # --- END ADDED CHECK ---
-                 
-             # Basic check for ComfyUI node structure (customize if needed)
-             is_comfy_node = hasattr(obj, 'INPUT_TYPES') and hasattr(obj, 'FUNCTION') and hasattr(obj, 'CATEGORY')
-             if is_comfy_node:
-                 class_name = obj.__name__
-                 # Use explicit Node.DISPLAY_NAME if available, otherwise generate one
-                 display_name = getattr(obj, 'DISPLAY_NAME', None) or to_display_name(class_name)
-                 NODE_CONFIG[class_name] = {"class": obj, "name": display_name}
+            # --- ADDED CHECK: Exclude classes with "Math" in the name ---
+            if "Math" in obj.__name__:
+                continue # Skip this class
+            # --- END ADDED CHECK ---
 
+            # Basic check for ComfyUI node structure (customize if needed)
+            # Support both old-style (INPUT_TYPES/FUNCTION/CATEGORY) and new-style (define_schema/execute) nodes
+            is_old_style = hasattr(obj, 'INPUT_TYPES') and hasattr(obj, 'FUNCTION') and hasattr(obj, 'CATEGORY')
+            is_new_style = hasattr(obj, 'define_schema') and hasattr(obj, 'execute')
+            is_comfy_node = is_old_style or is_new_style
+            if is_comfy_node:
+                class_name = obj.__name__
+                # Use explicit Node.DISPLAY_NAME if available, otherwise generate one
+                display_name = getattr(obj, 'DISPLAY_NAME', None) or to_display_name(class_name)
+                NODE_CONFIG[class_name] = {"class": obj, "name": display_name}
+                
 def generate_node_mappings(node_config):
     node_class_mappings = {}
     node_display_name_mappings = {}

@@ -198,17 +198,19 @@ function showModelInfoDialog(modelName) {
         return;
     }
 
-    console.log(`[PowerModelLoaderV2] Opening info dialog for model: ${modelName}`);
-
     // Create a model-specific info dialog by extending WanLoraInfoDialog
     class WanModelInfoDialog extends WanLoraInfoDialog {
+        constructor(file) {
+            super(file);
+            // Set itemType to 'checkpoints' for correct preview generation
+            this.itemType = 'checkpoints';
+        }
+
         async getModelInfo(file) {
-            console.log(`[PowerModelLoaderV2] Fetching info for model: ${file}`);
             try {
                 const info = await CHECKPOINT_INFO_SERVICE.getInfo(file, false, false);
                 return info;
             } catch (error) {
-                console.error(`[PowerModelLoaderV2] Error fetching model info:`, error);
                 // Fallback to basic info
                 return {
                     file: file,
@@ -225,7 +227,6 @@ function showModelInfoDialog(modelName) {
                 const info = await CHECKPOINT_INFO_SERVICE.refreshInfo(file);
                 return info;
             } catch (error) {
-                console.error(`[PowerModelLoaderV2] Error refreshing model info from Civitai:`, error);
                 // Return existing info on error instead of failing
                 return this.modelInfo || {
                     file: file,
@@ -255,13 +256,13 @@ function showModelInExplorer(modelName) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            console.log('Explorer opened successfully for model:', modelName);
+            // Explorer opened successfully
         } else {
-            console.error('Failed to open Explorer for model:', data.error || 'Unknown error');
+            // Failed to open explorer
         }
     })
     .catch(error => {
-        console.error('Error opening Explorer for model:', error);
+        // Error opening explorer
     });
 }
 
@@ -283,7 +284,7 @@ function showModelPicker(event, callback, node = null) {
                     if (uiState.eyeRefreshState !== undefined) eyeRefreshState = uiState.eyeRefreshState;
                     if (uiState.selectedFolder !== undefined) selectedFolder = uiState.selectedFolder;
                 } catch (e) {
-                    console.warn("[PowerModelLoaderV2] Failed to parse UI state from widget:", e);
+                    // Failed to parse UI state from widget
                 }
             }
         }
@@ -324,7 +325,7 @@ function showModelPicker(event, callback, node = null) {
                     // Re-render the list to show updated blue dots
                     dialog.renderList();
                 } catch (error) {
-                    console.error('[PowerModelLoaderV2] Error refreshing model list:', error);
+                    // Error refreshing model list
                 }
             }
         });
@@ -516,7 +517,7 @@ app.registerExtension({
                     });
 
                 }).catch(error => {
-                    console.error('[PowerModelLoaderV2] Error refreshing model list:', error);
+                    // Error refreshing model list
                 });
             };
         }

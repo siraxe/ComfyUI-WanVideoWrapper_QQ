@@ -358,7 +358,47 @@ def _get_model_civitai_data(file: str, model_type, default=None, refresh=False):
   if file_data is None or refresh is True:
     try:
       response = requests.get(api_url, timeout=5000)
+
+      # Check HTTP status code first
+      if response.status_code == 404:
+        print(f"[Civitai API] Model not found on Civitai for {file} (hash: {file_hash})")
+        # Cache the 404 to avoid repeated requests
+        save_userdata_json(
+          json_file_path, {
+            'url': api_url,
+            'timestamp': datetime.now().timestamp(),
+            'response': {'error': 'Model not found on Civitai', '_sha256': file_hash, '_civitai_api': api_url}
+          }
+        )
+        return default
+      elif response.status_code == 429:
+        print(f"[Civitai API] Rate limited while fetching {file}. Please try again later.")
+        return default
+      elif response.status_code >= 400:
+        print(f"[Civitai API] HTTP {response.status_code} error while fetching {file}")
+        return default
+
       data = response.json()
+
+      # Check if Civitai returned an error response (e.g., model not found)
+      if isinstance(data, dict) and 'error' in data:
+        error_msg = data.get('error', 'Unknown error')
+        print(f"[Civitai API] API returned error for {file}: {error_msg}")
+        # Cache the error response to avoid repeated failed requests
+        save_userdata_json(
+          json_file_path, {
+            'url': api_url,
+            'timestamp': datetime.now().timestamp(),
+            'response': {'error': error_msg, '_sha256': file_hash, '_civitai_api': api_url}
+          }
+        )
+        return default
+
+      # Check if the response contains expected data
+      if isinstance(data, dict) and 'id' not in data and 'images' not in data and 'modelId' not in data:
+        print(f"[Civitai API] Unexpected response format for {file}: {str(data)[:200]}")
+        return default
+
       save_userdata_json(
         json_file_path, {
           'url': api_url,
@@ -367,8 +407,14 @@ def _get_model_civitai_data(file: str, model_type, default=None, refresh=False):
         }
       )
       file_data = read_userdata_json(json_file_path)
-    except requests.exceptions.RequestException as e:  # This is the correct syntax
-      print(e)
+    except requests.exceptions.Timeout as e:
+      print(f"[Civitai API] Timeout while fetching {file}: {e}")
+    except requests.exceptions.ConnectionError as e:
+      print(f"[Civitai API] Connection error while fetching {file}: {e}")
+    except requests.exceptions.RequestException as e:
+      print(f"[Civitai API] Request failed for {file}: {e}")
+    except Exception as e:
+      print(f"[Civitai API] Unexpected error for {file}: {e}")
   response = file_data['response'] if file_data is not None and 'response' in file_data else None
   if response is not None:
     response['_sha256'] = file_hash

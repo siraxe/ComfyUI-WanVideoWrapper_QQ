@@ -750,6 +750,8 @@ class WanScaleAB:
                 "A1scale": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 2.0, "step": 0.1}),
                 "scaling_method": (["area","lanczos","bilinear", "bicubic" ,"nearest" ], {"default": "area"}),
                 "match_to": (["A_crop", "A_stretch", "B_crop", "B_stretch",], {"default": "A_crop"}),
+                "divisible_by": ("INT", {"default": 16, "min": 0, "max": 128, "step": 16}),
+                "direct_scale": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "image_B": ("IMAGE",),
@@ -761,23 +763,29 @@ class WanScaleAB:
     FUNCTION = "scale_images"
     CATEGORY = "WanVideoWrapper_QQ/image"
     
-    def scale_images(self, image_A, A2size, A1scale, scaling_method, match_to, image_B=None):
+    def scale_images(self, image_A, A2size, A1scale, scaling_method, match_to, divisible_by, direct_scale, image_B=None):
         # If B_stretch is selected and image_B is present, use modular approach
         if image_B is not None and match_to == "B_stretch":
             # Step 1: Calculate image_B2 and image_B1 dimensions using image_A's methods
-            b_s1, b_s2 = self._calculate_s1_s2(image_B, A2size)
-            
+            b_s1, b_s2 = self._calculate_s1_s2(image_B, A2size, divisible_by)
+
             # Get image_B dimensions for aspect ratio
             _, b_h, b_w, _ = image_B.shape
-            
+
             # Calculate image_B1 dimensions as scaled version of B2
             # Special case: when A1scale=1.0, B1 should match B2 dimensions exactly
             if abs(A1scale - 1.0) < 1e-6:
                 b_target_h = b_s1
                 b_target_w = b_s2
             else:
-                b_target_h = self._round_up_to_multiple(b_s1 * A1scale, 16)
-                b_target_w = self._round_up_to_multiple(b_s2 * A1scale, 16)
+                if direct_scale:
+                    # When direct_scale is True, just multiply by A1scale without ensuring divisibility
+                    b_target_h = int(b_s1 * A1scale)
+                    b_target_w = int(b_s2 * A1scale)
+                else:
+                    # When direct_scale is False, ensure divisibility by divisible_by
+                    b_target_h = self._round_up_to_multiple(b_s1 * A1scale, divisible_by)
+                    b_target_w = self._round_up_to_multiple(b_s2 * A1scale, divisible_by)
             
             # Step 2: Now reverse the process - use these dimensions for image_A
             # Calculate image_A2 and image_A1 using image_B's calculated dimensions
@@ -790,7 +798,7 @@ class WanScaleAB:
         elif image_B is not None and match_to == "B_crop":
             # B_crop should work like B_stretch for dimension calculations but use cropping
             # Step 1: Calculate image_B2 and image_B1 dimensions using image_B's methods (like B_stretch)
-            b_s1, b_s2 = self._calculate_s1_s2(image_B, A2size)
+            b_s1, b_s2 = self._calculate_s1_s2(image_B, A2size, divisible_by)
 
             # Step 2: Scale and crop image_A to match image_B2's dimensions (reversed from A_crop)
             image_A2 = self._scale_and_crop_to_match(image_A, b_s1, b_s2, scaling_method)
@@ -800,8 +808,14 @@ class WanScaleAB:
                 b_target_h = b_s1
                 b_target_w = b_s2
             else:
-                b_target_h = self._round_up_to_multiple(b_s1 * A1scale, 16)
-                b_target_w = self._round_up_to_multiple(b_s2 * A1scale, 16)
+                if direct_scale:
+                    # When direct_scale is True, just multiply by A1scale without ensuring divisibility
+                    b_target_h = int(b_s1 * A1scale)
+                    b_target_w = int(b_s2 * A1scale)
+                else:
+                    # When direct_scale is False, ensure divisibility by divisible_by
+                    b_target_h = self._round_up_to_multiple(b_s1 * A1scale, divisible_by)
+                    b_target_w = self._round_up_to_multiple(b_s2 * A1scale, divisible_by)
 
             # Step 4: Scale image_B to preserve aspect ratio while fitting within target dimensions
             image_B1 = self._scale_and_crop_to_match(image_B, int(b_target_h), int(b_target_w), scaling_method)
@@ -813,7 +827,7 @@ class WanScaleAB:
         else:
             # Original logic for other match_to options (A_crop, A_stretch, etc.)
             # Calculate s1 and s2 for image_A2
-            s1, s2 = self._calculate_s1_s2(image_A, A2size)
+            s1, s2 = self._calculate_s1_s2(image_A, A2size, divisible_by)
 
             # Get original dimensions of image_A
             _, h, w, _ = image_A.shape
@@ -824,8 +838,14 @@ class WanScaleAB:
                 target_height = s1
                 target_width = s2
             else:
-                target_height = self._round_up_to_multiple(s1 * A1scale, 16)
-                target_width = self._round_up_to_multiple(s2 * A1scale, 16)
+                if direct_scale:
+                    # When direct_scale is True, just multiply by A1scale without ensuring divisibility
+                    target_height = int(s1 * A1scale)
+                    target_width = int(s2 * A1scale)
+                else:
+                    # When direct_scale is False, ensure divisibility by divisible_by
+                    target_height = self._round_up_to_multiple(s1 * A1scale, divisible_by)
+                    target_width = self._round_up_to_multiple(s2 * A1scale, divisible_by)
 
             # Scale image_A1 and image_A2
             image_A1 = self._scale_image(image_A, int(target_height), int(target_width), scaling_method)
@@ -859,18 +879,18 @@ class WanScaleAB:
         
         return (image_A1, image_A2, image_B1, image_B2)
     
-    def _calculate_s1_s2(self, image_A, A2size):
+    def _calculate_s1_s2(self, image_A, A2size, divisible_by):
         """
         Calculate s1 and s2 based on the special scaling rules.
 
-        s1: Target the largest side to be approximately A2size (rounded up to a multiple of 16),
+        s1: Target the largest side to be approximately A2size (rounded up to a multiple of divisible_by),
             regardless of how many times A2size fits into the original largest side. This ensures
             A2size is respected as the intended output size for the larger dimension.
-        s2: Proportionally scale the smallest side to match s1, then adjust to be divisible by 16 (rounding up)
+        s2: Proportionally scale the smallest side to match s1, then adjust to be divisible by divisible_by (rounding up)
         """
         # Get original dimensions
         _, h, w, _ = image_A.shape
-        
+
         # Determine which is the largest and smallest side
         if h >= w:
             largest_side = h
@@ -878,21 +898,21 @@ class WanScaleAB:
         else:
             largest_side = w
             smallest_side = h
-        
+
         # Step 1: Compute s1 so that the output's largest side is ~A2size
-        # Round A2size up to the nearest multiple of 16 to satisfy model constraints
-        s1 = self._round_up_to_multiple(A2size, 16)
+        # Round A2size up to the nearest multiple of divisible_by to satisfy model constraints
+        s1 = self._round_up_to_multiple(A2size, divisible_by)
 
         # Step 2: Find s2
         # Calculate the proportional scaling factor
         scale_factor = s1 / largest_side
-        
+
         # Apply this scaling to the smallest side
         scaled_smallest = smallest_side * scale_factor
-        
-        # Find s2 as the closest multiple of 16 (rounding up)
-        s2 = self._round_up_to_multiple(scaled_smallest, 16)
-        
+
+        # Find s2 as the closest multiple of divisible_by (rounding up)
+        s2 = self._round_up_to_multiple(scaled_smallest, divisible_by)
+
         # Determine the final dimensions based on original orientation
         if h >= w:
             # Height was the largest side

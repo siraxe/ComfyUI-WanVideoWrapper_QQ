@@ -490,6 +490,218 @@ async def api_save_lora_preview_image(request):
 
   return web.json_response(api_response)
 
+@routes.get('/wanvid/api/proxy/image')
+async def api_proxy_external_image(request):
+  """Proxy an external image through the backend to avoid CSP violations."""
+  import aiohttp
+
+  api_response = {'status': 200}
+
+  try:
+    # Get the URL from query parameter
+    url_param = get_param(request, 'url')
+
+    if not url_param:
+      api_response['status'] = '400'
+      api_response['error'] = 'Missing required parameter: url'
+      return web.json_response(api_response)
+
+    # Security: only allow images from whitelisted domains
+    allowed_domains = [
+      'image.civitai.com',
+      'civitai.com',
+      'imagecache.civitai.com'
+    ]
+
+    from urllib.parse import urlparse
+    parsed_url = urlparse(url_param)
+    if parsed_url.netloc not in allowed_domains:
+      api_response['status'] = '403'
+      api_response['error'] = f'Domain not allowed: {parsed_url.netloc}'
+      return web.json_response(api_response)
+
+    # Fetch the external image
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+      async with session.get(url_param) as response:
+        if response.status != 200:
+          api_response['status'] = str(response.status)
+          api_response['error'] = f'Failed to fetch image: HTTP {response.status}'
+          return web.json_response(api_response)
+
+        # Get content type
+        content_type = response.headers.get('Content-Type', 'image/jpeg')
+
+        # Stream the image data back
+        image_data = await response.read()
+        return web.Response(body=image_data, content_type=content_type)
+
+  except Exception as e:
+    api_response['status'] = '500'
+    api_response['error'] = f'Server error: {str(e)}'
+    return web.json_response(api_response)
+
+
+@routes.get('/wanvid/api/proxy/video-frame')
+async def api_proxy_video_frame(request):
+  """Extract a frame from an external video URL and return it as an image."""
+  import aiohttp
+  import io
+
+  api_response = {'status': 200}
+
+  try:
+    # Get the URL from query parameter
+    url_param = get_param(request, 'url')
+    time_param = get_param(request, 'time', '50')  # Default to 50% (middle)
+
+    if not url_param:
+      api_response['status'] = '400'
+      api_response['error'] = 'Missing required parameter: url'
+      return web.json_response(api_response)
+
+    # Security: only allow videos from whitelisted domains
+    allowed_domains = [
+      'image.civitai.com',
+      'civitai.com',
+      'imagecache.civitai.com'
+    ]
+
+    from urllib.parse import urlparse
+    parsed_url = urlparse(url_param)
+    if parsed_url.netloc not in allowed_domains:
+      api_response['status'] = '403'
+      api_response['error'] = f'Domain not allowed: {parsed_url.netloc}'
+      return web.json_response(api_response)
+
+    # Fetch the external video
+    timeout = aiohttp.ClientTimeout(total=60)  # Longer timeout for videos
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+      async with session.get(url_param) as response:
+        if response.status != 200:
+          api_response['status'] = str(response.status)
+          api_response['error'] = f'Failed to fetch video: HTTP {response.status}'
+          return web.json_response(api_response)
+
+        # Read video data into memory
+        video_data = await response.read()
+
+    # Extract frame using opencv or fallback method
+    try:
+      # Try using opencv-python first
+      import cv2
+      import numpy as np
+
+      # Write video data to temporary file
+      import tempfile
+      with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+        temp_file.write(video_data)
+        temp_path = temp_file.name
+
+      try:
+        # Open video file
+        cap = cv2.VideoCapture(temp_path)
+
+        if not cap.isOpened():
+          raise Exception("Failed to open video file")
+
+        # Get video properties
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+
+        # Calculate target frame position (middle by default)
+        time_pct = float(time_param) / 100.0
+        target_frame = int(frame_count * time_pct)
+
+        # Seek to target frame
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+
+        # Read the frame
+        ret, frame = cap.read()
+
+        if not ret or frame is None:
+          # Fallback to first frame
+          cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+          ret, frame = cap.read()
+
+        cap.release()
+
+        if not ret or frame is None:
+          raise Exception("Failed to extract frame from video")
+
+        # Convert frame to JPEG bytes
+        is_success, buffer = cv2.imencode(".jpg", frame)
+        if not is_success:
+          raise Exception("Failed to encode frame")
+
+        frame_bytes = buffer.tobytes()
+
+        return web.Response(body=frame_bytes, content_type='image/jpeg')
+
+      finally:
+        # Clean up temp file
+        try:
+          os.unlink(temp_path)
+        except:
+          pass
+
+    except ImportError:
+      # opencv not available, try PIL/Pillow with imageio
+      try:
+        import imageio.v3 as iio
+        import tempfile
+
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+          temp_file.write(video_data)
+          temp_path = temp_file.name
+
+        try:
+          # Read video and extract frame
+          video_frames = iio.imread(temp_path, index=None, mode='I')
+
+          if video_frames is None or len(video_frames) == 0:
+            raise Exception("No frames in video")
+
+          # Get middle frame
+          frame_idx = len(video_frames) // 2 if hasattr(video_frames, '__len__') else 0
+          frame = video_frames[frame_idx]
+
+          # Convert to PIL Image and save as JPEG
+          from PIL import Image
+          if isinstance(frame, iio.core.util.Image):
+            img = Image.fromarray(frame)
+          else:
+            img = Image.fromarray(frame)
+
+          output = io.BytesIO()
+          img.save(output, format='JPEG', quality=90)
+          frame_bytes = output.getvalue()
+
+          return web.Response(body=frame_bytes, content_type='image/jpeg')
+
+        finally:
+          try:
+            os.unlink(temp_path)
+          except:
+            pass
+
+      except ImportError:
+        api_response['status'] = '500'
+        api_response['error'] = 'No video processing library available (opencv-python or imageio required)'
+        return web.json_response(api_response)
+
+    except Exception as e:
+      api_response['status'] = '500'
+      api_response['error'] = f'Failed to extract video frame: {str(e)}'
+      return web.json_response(api_response)
+
+  except Exception as e:
+    api_response['status'] = '500'
+    api_response['error'] = f'Server error: {str(e)}'
+    return web.json_response(api_response)
+
+
 @routes.post('/wanvid/api/model/preview-json')
 async def api_save_model_preview_json(request):
   """Save JSON data for a model preview in the _power_preview/_model_preview directory."""
