@@ -29,7 +29,6 @@ from .nodes.wan_first_middle_last import *
 from .nodes.vace_utils import *
 from .nodes.cache_samples import *
 
-from .nodes.ltxv_nodes import *
 
 # Import API endpoints to register routes
 from . import api
