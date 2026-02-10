@@ -146,6 +146,7 @@ app.registerExtension({
                 this.hasClip = false; // Initialize clip connection state
                 this.properties = this.properties || {};
                 this.properties['Show Strengths'] = "Single Strength";
+                this.properties['output_both'] = false;
                 this.addNonLoraWidgets();
                 
                 
@@ -221,6 +222,12 @@ app.registerExtension({
                         }
                     }
                 }
+
+                // Sync output_both property to widget
+                const outputBothWidget = this.widgets.find(w => w.name === "output_both");
+                if (outputBothWidget && this.properties.output_both !== undefined) {
+                    outputBothWidget.value = this.properties.output_both;
+                }
             };
 
             nodeType.prototype.addNewLoraWidget = function () {
@@ -253,6 +260,12 @@ app.registerExtension({
                     { serialize: true });
                 uiStateWidget.type = "hidden";
                 // Keep serialize: true to ensure UI state is saved in workflow JSON
+
+                // Add hidden widget for output_both toggle state
+                const outputBothValue = this.properties.output_both || false;
+                const outputBothWidget = this.addWidget("boolean", "output_both", outputBothValue, () => {},
+                    { serialize: true });
+                outputBothWidget.type = "hidden";
             };
 
             nodeType.prototype.allLorasState = function() {

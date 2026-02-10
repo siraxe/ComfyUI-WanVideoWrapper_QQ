@@ -368,7 +368,8 @@ class PowerLoraLoaderV2:
 
     def __init__(self):
         self.properties = {
-            "Show Strengths": "Single Strength"  # Single Strength or Separate Model & Clip
+            "Show Strengths": "Single Strength",  # Single Strength or Separate Model & Clip
+            "output_both": False  # Apply all loras to model_low using low strength values
         }
 
     @classmethod
@@ -397,9 +398,12 @@ class PowerLoraLoaderV2:
         """Combines functionality from both v1 and v2 loaders."""
         # Get show_strengths property
         show_strengths = getattr(self, 'Show Strengths', 'Single Strength')
-        
+
         # Check if clip is actually connected (from JavaScript hasClip property)
         has_clip = getattr(self, 'hasClip', clip is not None)
+
+        # Check if output_both is enabled (from widget value or property)
+        output_both = kwargs.get('output_both', self.properties.get('output_both', False))
 
         # Initialize lists for WanVideo format
         loras_list = []
@@ -438,7 +442,6 @@ class PowerLoraLoaderV2:
                         if os.path.exists(lora_path):
                             # Extract just the filename for consistency with the rest of the code
                             lora_filename = os.path.basename(lora_name.replace('\\', '/'))
-                            print(f"[PowerLoraLoaderV2] Found LoRA at full path: '{lora_path}'")
                         else:
                             print(f"[PowerLoraLoaderV2] LoRA file '{lora_name}' not found in loras folder.")
                             continue
@@ -499,6 +502,23 @@ class PowerLoraLoaderV2:
 
                 loras_list.append(lora_entry)
 
+                # Handle output_both mode - apply all loras to model_low using low_strength
+                if output_both:
+                    if model_low is not None:
+                        low_strength = value.get('low_strength', strength_model)
+                        if low_strength is None:
+                            low_strength = 0.0
+                        try:
+                            if not has_clip:
+                                model_low, _ = LoraLoader().load_lora(model_low, None, lora_filename, low_strength, 0)
+                            else:
+                                model_low, clip = LoraLoader().load_lora(model_low, clip, lora_filename, low_strength, 0)
+                            low_loras_summary.append((low_strength, f"{lora_filename} (output_both)"))
+                        except Exception as e:
+                            print(f"[PowerLoraLoaderV2] Error applying LoRA to model_low (output_both): {e}")
+                    else:
+                        pass  # model_low is None, cannot apply OUTPUT_BOTH
+
                 # Check if JavaScript detected special mode flags
                 use_for_both = value.get('use_for_both', False)
                 low_only = value.get('low_only', False)
@@ -511,12 +531,10 @@ class PowerLoraLoaderV2:
                 # Handle different LoRA states for PowerLoraLoaderV2
                 if high_only:
                     # "High only" mode - apply to main model only (same as default but with visual indicator)
-                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for HIGH model only")
                     high_loras_summary.append((strength_model, f"{lora_filename} (high only)"))
 
                 elif low_only:
                     # "Low only" mode - apply to model_low only
-                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for LOW model only")
                     # Apply LoRA to model_low if it exists
                     if model_low is not None:
                         try:
@@ -531,7 +549,6 @@ class PowerLoraLoaderV2:
 
                 elif use_for_both:
                     # "Enable for both" mode - apply to both main and model_low
-                    print(f"[PowerLoraLoaderV2] Using LoRA '{lora_filename}' for both HIGH and LOW models")
                     high_loras_summary.append((strength_model, f"{lora_filename} (both)"))
 
                     # Apply LoRA to model_low if it exists
@@ -581,8 +598,6 @@ class PowerLoraLoaderV2:
                             else:
                                 # Clip provided, apply to model_low with clip
                                 model_low, _ = LoraLoader().load_lora(model_low, clip, low_lora_path, low_strength, strength_clip if strength_clip is not None else 0)
-
-                            print(f"[PowerLoraLoaderV2] Applied low variant LoRA '{low_variant_name}' (strength: {low_strength}) to model_low")
                         except Exception as e:
                             print(f"[PowerLoraLoaderV2] Error applying low variant LoRA '{low_variant_name}' to model_low: {e}")
 

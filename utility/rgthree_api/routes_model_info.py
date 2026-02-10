@@ -434,12 +434,10 @@ async def api_save_lora_preview_image(request):
       base_dir = folder_paths.get_folder_paths('checkpoints')[0]
       # Use _power_preview subdirectory for model previews
       power_preview_dir = os.path.join(base_dir, '_power_preview')
-      print(f"[Preview Image Debug] MODEL: Using directory {power_preview_dir}")
     else:
       # For LoRAs, use loras directory
       base_dir = folder_paths.get_folder_paths('loras')[0]
       power_preview_dir = os.path.join(base_dir, '_power_preview')
-      print(f"[Preview Image Debug] LORA: Using directory {power_preview_dir}")
 
     if lora_path:
       save_dir = os.path.join(power_preview_dir, lora_path)
@@ -448,13 +446,10 @@ async def api_save_lora_preview_image(request):
 
     # Ensure directory exists
     os.makedirs(save_dir, exist_ok=True)
-    print(f"[Preview Image Debug] Directory ensured: {save_dir}")
-    print(f"[Preview Image Debug] Directory exists check: {os.path.exists(save_dir)}")
 
     # Construct save path with optional suffix
     filename = f"{lora_name}{suffix}.jpg"
     save_path = os.path.join(save_dir, filename)
-    print(f"[Preview Image Debug] Saving image to: {save_path}")
 
     # Read image data
     image_data = image_file.file.read()

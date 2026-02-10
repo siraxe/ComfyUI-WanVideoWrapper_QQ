@@ -252,6 +252,7 @@ export class StrengthCopyWidget extends RgthreeBaseWidget {
         super("StrengthCopyWidget");
         this.value = {};
         this.hitAreas = {
+            output_both_toggle: { bounds: [0, 0] },
             high_to_low_button: { bounds: [0, 0] },
             low_to_high_button: { bounds: [0, 0] },
         };
@@ -260,19 +261,39 @@ export class StrengthCopyWidget extends RgthreeBaseWidget {
     }
 
     draw(ctx, node, w, posY, height) {
+        // Ensure property exists (off by default)
+        if (!node.properties) node.properties = {};
+        if (node.properties['output_both'] === undefined) node.properties['output_both'] = false;
+
         // Constants
         const margin = 20;
         const buttonWidth = 25;
         const buttonHeight = height;
         const buttonSpacing = 36;
         const rightOffset = 25;
+        const innerMargin = 8;
 
         // Calculated values
         const midY = posY + height * 0.5;
         const totalButtonsWidth = (buttonWidth * 2) + buttonSpacing;
-        const rightX = w - margin - totalButtonsWidth - rightOffset;
 
         ctx.save();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+
+        // Draw "Output both" toggle
+        const toggleSpacing = 15; // Extra spacing between toggle and buttons
+        let posX = w - margin - totalButtonsWidth - rightOffset - toggleSpacing;
+        const outputBothValue = node.properties['output_both'] || false;
+        // Draw label and toggle from right to left
+        const toggleBounds = drawTogglePart(ctx, [posX - height * 1.5, posY], height, outputBothValue);
+        this.hitAreas['output_both_toggle'].bounds = toggleBounds;
+        const labelText = "Use loras on both";
+        ctx.fillText(labelText, posX - height * 1.5 - ctx.measureText(labelText).width - innerMargin, midY);
+
+        // Adjust rightX for buttons (they stay in same position)
+        const rightX = w - margin - totalButtonsWidth - rightOffset;
 
         // Draw ">" button (high to low)
         const highToLowX = rightX;
@@ -288,6 +309,21 @@ export class StrengthCopyWidget extends RgthreeBaseWidget {
     }
 
     onMouseDown(event, pos, node) {
+        // Ensure property exists
+        if (!node.properties) node.properties = {};
+        if (node.properties['output_both'] === undefined) node.properties['output_both'] = false;
+
+        if (this.clickWasWithinBounds(pos, this.hitAreas.output_both_toggle.bounds)) {
+            node.properties['output_both'] = !node.properties['output_both'];
+            // Also sync to hidden widget for Python to read
+            const outputBothWidget = node.widgets.find(w => w.name === "output_both");
+            if (outputBothWidget) {
+                outputBothWidget.value = node.properties['output_both'];
+            }
+            this.cancelMouseDown();
+            node.setDirtyCanvas(true, true);
+            return true;
+        }
         if (this.clickWasWithinBounds(pos, this.hitAreas.high_to_low_button.bounds)) {
             this.highToLowPressed = true;
             node.setDirtyCanvas(true, true);
@@ -337,6 +373,15 @@ export class StrengthCopyWidget extends RgthreeBaseWidget {
                 }
             }
         }
+    }
+
+    serializeValue(node, index) {
+        // Ensure output_both property exists and is synchronized
+        if (!node.properties) node.properties = {};
+        if (node.properties['output_both'] === undefined) node.properties['output_both'] = false;
+        // Return the value to ensure it's serialized
+        node.properties['output_both'] = node.properties['output_both'] || false;
+        return {};
     }
 
     computeSize(width) {
