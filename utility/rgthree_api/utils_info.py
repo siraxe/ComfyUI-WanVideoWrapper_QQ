@@ -59,14 +59,21 @@ def get_info_file(file_path: str, model_type: str, force=False):
     # Create a mirrored folder structure in loras/_power_preview
     power_preview_dir = os.path.join(base_dir, '_power_preview')
 
-    relative_path = os.path.relpath(file_path, base_dir)
     # Get the filename without extension and change to .json
-    filename_without_ext = os.path.splitext(os.path.basename(relative_path))[0]
-    relative_dir = os.path.dirname(relative_path)
+    filename_without_ext = os.path.splitext(os.path.basename(file_path))[0]
 
-    if relative_dir:
-        info_path = os.path.join(power_preview_dir, relative_dir, f'{filename_without_ext}.json')
-    else:
+    # Handle cross-drive paths (Windows) - os.path.relpath fails across different drives
+    try:
+        relative_path = os.path.relpath(file_path, base_dir)
+        relative_dir = os.path.dirname(relative_path)
+        if relative_dir:
+            info_path = os.path.join(power_preview_dir, relative_dir, f'{filename_without_ext}.json')
+        else:
+            info_path = os.path.join(power_preview_dir, f'{filename_without_ext}.json')
+    except ValueError:
+        # Cross-drive path on Windows - use the file's own directory for _power_preview
+        file_dir = os.path.dirname(file_path)
+        power_preview_dir = os.path.join(file_dir, '_power_preview')
         info_path = os.path.join(power_preview_dir, f'{filename_without_ext}.json')
 
     # Create the directory if it doesn't exist
