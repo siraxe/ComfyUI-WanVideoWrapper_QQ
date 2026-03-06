@@ -191,15 +191,21 @@ class ModelDataManager {
             }
 
             // Convert rgthreeApi format to our expected format
-            this.caches[cacheKey] = itemsData.map(item => {
-                if (typeof item === 'string') {
-                    return { name: item, mtime: 0 };
-                }
-                return {
-                    name: item.name || item.filename || item.file || JSON.stringify(item),
-                    mtime: item.mtime || item.modified || item.modified_time || 0
-                };
-            });
+            if (!itemsData || !Array.isArray(itemsData)) {
+                this.caches[cacheKey] = [];
+            } else {
+                this.caches[cacheKey] = itemsData
+                    .filter(item => item != null)
+                    .map(item => {
+                        if (typeof item === 'string') {
+                            return { name: item, mtime: 0 };
+                        }
+                        return {
+                            name: item.name || item.filename || item.file || JSON.stringify(item),
+                            mtime: item.mtime || item.modified || item.modified_time || 0
+                        };
+                    });
+            }
 
             // Cache the data in localStorage
             localStorage.setItem(storageKey, JSON.stringify(this.caches[cacheKey]));
@@ -249,10 +255,12 @@ class ModelDataManager {
 
             if (response.ok) {
                 const data = await response.json();
-                if (data.status === 200 && data.previews) {
+                if (data.status === 200 && data.previews && Array.isArray(data.previews)) {
                     this.previewAvailabilityCaches[type].clear();
                     data.previews.forEach(preview => {
-                        this.previewAvailabilityCaches[type].add(preview.lora);
+                        if (preview && preview.lora) {
+                            this.previewAvailabilityCaches[type].add(preview.lora);
+                        }
                     });
                     return this.previewAvailabilityCaches[type];
                 }
