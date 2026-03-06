@@ -49,10 +49,6 @@ export function attachPathHelpers(editor) {
   };
 
   editor.updatePath = () => {
-    if (!editor.points || editor.points.length === 0) {
-      return;
-    }
-
     if (!editor.vis) {
       console.warn("[SplineEditor] updatePath: vis not ready");
       return;
@@ -60,7 +56,13 @@ export function attachPathHelpers(editor) {
 
     const activeWidget = editor.getActiveWidget();
     if (activeWidget) {
-      activeWidget.value.points_store = JSON.stringify(editor.normalizePoints(editor.points));
+      // Only save points if editor.points has valid data
+      // Prevent overwriting valid widget points with empty/invalid data
+      if (editor.points && editor.points.length > 0) {
+        activeWidget.value.points_store = JSON.stringify(editor.normalizePoints(editor.points));
+      } else {
+        console.warn("[SplineEditor] updatePath: skipping points_store update - editor.points is empty or invalid");
+      }
     }
 
     editor.renderPreviousSplines();

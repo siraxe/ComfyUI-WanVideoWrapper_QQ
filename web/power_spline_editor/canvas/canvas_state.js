@@ -33,10 +33,25 @@ export function attachStateHelpers(editor) {
     }
     if (editor._isBoxLayerWidget(activeWidget)) {
       let coercedPoints = Array.isArray(points) ? points.slice(0, 1) : [];
-      if (!coercedPoints.length) {
+      // Validate dimensions before creating default point to prevent (0,0) reset
+      const validWidth = typeof editor.width === 'number' && editor.width > 0 && Number.isFinite(editor.width);
+      const validHeight = typeof editor.height === 'number' && editor.height > 0 && Number.isFinite(editor.height);
+      if (!coercedPoints.length && validWidth && validHeight) {
         const defaultPoint = {
           x: editor.width * 0.5,
           y: editor.height * 0.5,
+          boxScale: 1,
+          pointScale: 1,
+          scale: 1,
+          highlighted: false,
+          rotation: 0,
+        };
+        coercedPoints = [defaultPoint];
+      } else if (!coercedPoints.length) {
+        // If dimensions are invalid, use normalized 0.5 coordinates (center)
+        const defaultPoint = {
+          x: 0.5,
+          y: 0.5,
           boxScale: 1,
           pointScale: 1,
           scale: 1,
@@ -159,6 +174,15 @@ export function attachStateHelpers(editor) {
     const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
     const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
 
+    // Validate dimensions to prevent division by zero or Infinity/NaN results
+    const validWidth = typeof mediaWidth === 'number' && mediaWidth > 0 && Number.isFinite(mediaWidth);
+    const validHeight = typeof mediaHeight === 'number' && mediaHeight > 0 && Number.isFinite(mediaHeight);
+
+    // If dimensions are invalid, assume points are already normalized and return as-is
+    if (!validWidth || !validHeight) {
+      return points.map(p => ({ ...p }));
+    }
+
     return points.map(p => {
       const { x, y } = p; // These are media space points
       const nx = x / mediaWidth;
@@ -170,6 +194,15 @@ export function attachStateHelpers(editor) {
   editor.denormalizePoints = function denormalizePoints(points) {
     const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
     const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
+
+    // Validate dimensions to prevent (0,0) reset when dimensions are invalid
+    const validWidth = typeof mediaWidth === 'number' && mediaWidth > 0 && Number.isFinite(mediaWidth);
+    const validHeight = typeof mediaHeight === 'number' && mediaHeight > 0 && Number.isFinite(mediaHeight);
+
+    // If dimensions are invalid, return points as-is (already normalized)
+    if (!validWidth || !validHeight) {
+      return points.map(p => ({ ...p }));
+    }
 
     // Assume stored points are always normalized.
     return points.map(p => {

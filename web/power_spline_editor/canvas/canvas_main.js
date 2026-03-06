@@ -200,7 +200,10 @@ export default class SplineEditor2 {
         this.interpolation = activeWidget.value.interpolation || 'linear';
         this.points = this.getActivePoints();
         // Box layers should always start with a single centered box point.
-        if (activeWidget.value?.type === 'box_layer' && (!this.points || this.points.length === 0)) {
+        // Only create default point if dimensions are valid to prevent (0,0) reset
+        const validWidth = typeof this.width === 'number' && this.width > 0 && Number.isFinite(this.width);
+        const validHeight = typeof this.height === 'number' && this.height > 0 && Number.isFinite(this.height);
+        if (activeWidget.value?.type === 'box_layer' && (!this.points || this.points.length === 0) && validWidth && validHeight) {
           const centerPoint = {
             x: this.width * 0.5,
             y: this.height * 0.5,
@@ -216,7 +219,7 @@ export default class SplineEditor2 {
       } else {
         this.points = [];
       }
-      
+
       if (this.vis) {
         this.layerRenderer.render();
       }
@@ -348,8 +351,15 @@ export default class SplineEditor2 {
       // Initialize points in media space (not canvas space)
       const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
       const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
-      const centerX = mediaWidth / 2;
-      const centerY = mediaHeight / 2;
+
+      // Validate dimensions before creating points to prevent (0,0) reset
+      const validWidth = typeof mediaWidth === 'number' && mediaWidth > 0 && Number.isFinite(mediaWidth);
+      const validHeight = typeof mediaHeight === 'number' && mediaHeight > 0 && Number.isFinite(mediaHeight);
+
+      // If dimensions are invalid, use normalized coordinates directly (center at 0.5, 0.5)
+      const centerX = validWidth ? mediaWidth / 2 : 0.5;
+      const centerY = validHeight ? mediaHeight / 2 : 0.5;
+      const useNormalizedCoords = !validWidth || !validHeight;
 
       if (initialActive && initialActive.value?.type === 'box_layer') {
         this.points = [
@@ -359,18 +369,25 @@ export default class SplineEditor2 {
         this.setActivePoints(this.points); // setActivePoints will normalize and then denormalize using correct media dimensions
       } else {
         if (reset) {
-          // Two points: center and 40px right
+          // Two points: center and 40px right (or 0.52, 0.5 if normalized)
           this.points = [
             { x: centerX, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 },
-            { x: centerX + 40, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
+            useNormalizedCoords
+              ? { x: 0.52, y: 0.5, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
+              : { x: centerX + 40, y: centerY, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
           ];
           this.ensurePointUids(this.points);
         } else {
-          // Default initial points (bottom-left, top-right)
-          this.points = [
-            { x: 0, y: mediaHeight, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }, // Use mediaHeight
-            { x: mediaWidth, y: 0, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 } // Use mediaWidth
-          ];
+          // Default initial points (bottom-left, top-right) - use normalized coords if dimensions invalid
+          this.points = useNormalizedCoords
+            ? [
+                { x: 0.3, y: 0.5, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 },
+                { x: 0.7, y: 0.5, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
+              ]
+            : [
+                { x: 0, y: mediaHeight, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 },
+                { x: mediaWidth, y: 0, highlighted: false, scale: 1.0, boxScale: 1.0, pointScale: 1.0, rotation: 0 }
+              ];
           this.ensurePointUids(this.points);
         }
         this.setActivePoints(this.points);
@@ -384,9 +401,15 @@ export default class SplineEditor2 {
       if (activeWidget.value?.type === 'box_layer' && (!this.points || this.points.length === 0)) {
         const mediaWidth = this.originalImageWidth || this.videoMetadata?.width || this.width;
         const mediaHeight = this.originalImageHeight || this.videoMetadata?.height || this.height;
+
+        // Validate dimensions before creating center point
+        const validWidth = typeof mediaWidth === 'number' && mediaWidth > 0 && Number.isFinite(mediaWidth);
+        const validHeight = typeof mediaHeight === 'number' && mediaHeight > 0 && Number.isFinite(mediaHeight);
+
+        // Use normalized coordinates if dimensions are invalid
         const centerPoint = {
-          x: mediaWidth * 0.5, // Use media width
-          y: mediaHeight * 0.5, // Use media height
+          x: validWidth ? mediaWidth * 0.5 : 0.5,
+          y: validHeight ? mediaHeight * 0.5 : 0.5,
           highlighted: false,
           scale: 1.0,
           boxScale: 1.0,
