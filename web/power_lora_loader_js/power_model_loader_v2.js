@@ -1,6 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { rgthree } from "../rgthree/common/rgthree.js";
-import { RgthreeBetterButtonWidget, RgthreeDividerWidget } from "./widgets.js";
+import { RgthreeBetterButtonWidget, RgthreeDividerWidget, RgthreeBaseWidget } from "./widgets.js";
 import { drawRoundedRectangle, drawTogglePart, drawWidgetButton, fitString, isLowQuality } from "./widgets.js";
 import { LoraPickerDialog } from "./lora_picker_dialog.js";
 import { WanLoraInfoDialog } from "./dialog_info.js";
@@ -52,17 +52,14 @@ function loadEyeRefreshState() {
 
 
 // Custom widget for model selection
-class PowerModelLoaderWidget {
+class PowerModelLoaderWidget extends RgthreeBaseWidget {
     constructor(name, showModelChooser) {
-        this.name = name;
-        this.type = "custom";
+        super(name);
         this.showModelChooser = showModelChooser;
         this.value = { on: true, model: "None" };
         this.options = {};
         this.y = 0;
         this.last_y = 0;
-        this.mouseDowned = null;
-        this.isMouseDownedAndOver = false;
         this.hitAreas = {
             model: { bounds: [0, 0], onClick: this.onModelClick },
         };
@@ -112,20 +109,6 @@ class PowerModelLoaderWidget {
         if (this.callback) {
             this.callback(this.value);
         }
-    }
-
-    mouse(event, pos, node) {
-        if (event.type === "pointerdown") {
-            // Check if click is within model area
-            if (this.clickWasWithinBounds(pos, this.hitAreas.model.bounds)) {
-                // Only handle left-clicks for model selection
-                if (event.button === 0 || event.button === 1) {
-                    this.onModelClick(event, pos, node);
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     clickWasWithinBounds(pos, bounds) {
