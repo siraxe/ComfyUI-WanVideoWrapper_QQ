@@ -8,11 +8,17 @@ from io import BytesIO
 import folder_paths
 import subprocess
 import sys
+import cv2
+import numpy as np
 
 
 import os
 import folder_paths
 from datetime import datetime
+
+# Import SAM2 masker for point-click masking
+from .nodes.sam2_masker import sam2_masker
+from .nodes.prepare_refs import convert_mask_to_contour
 
 def get_bg_folder_path():
     """Get the path to the bg folder where A.jpg and bg_image.png are stored"""
@@ -395,4 +401,134 @@ def _rename_preview_files(old_base_name, new_name, preview_folder):
         print(f"Error in _rename_preview_files: {e}")
 
     return renamed_files
+
+@PromptServer.instance.routes.post("/wanvideowrapper_qq/extract_first_frame")
+async def extract_first_frame(request):
+    """API endpoint to extract the first frame from a video file"""
+    try:
+        data = await request.json()
+        video_path = data.get("video_path")
+
+        if not video_path:
+            return web.json_response({"success": False, "error": "No video path provided"}, status=400)
+
+        print(f"[API extract_first_frame] Extracting first frame from: {video_path}")
+
+        # Try to find the video file
+        video_file_path = None
+
+        # Check if it's already an absolute path
+        if os.path.exists(video_path):
+            video_file_path = video_path
+        else:
+            # Search in input directories
+            input_folders = folder_paths.get_folder_paths("input")
+            for folder in input_folders:
+                potential_path = os.path.join(folder, video_path)
+                if os.path.exists(potential_path):
+                    video_file_path = potential_path
+                    break
+
+        if not video_file_path:
+            return web.json_response({"success": False, "error": f"Video file not found: {video_path}"}, status=404)
+
+        print(f"[API extract_first_frame] Found video at: {video_file_path}")
+
+        # Extract first frame using OpenCV
+        cap = cv2.VideoCapture(video_file_path)
+
+        if not cap.isOpened():
+            return web.json_response({"success": False, "error": "Failed to open video file"}, status=500)
+
+        # Read first frame
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            return web.json_response({"success": False, "error": "Failed to read first frame from video"}, status=500)
+
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Convert to PIL Image
+        img = Image.fromarray(frame_rgb)
+
+        # Convert to base64
+        buffered = BytesIO()
+        img.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        img_data_url = f"data:image/png;base64,{img_base64}"
+
+        print(f"[API extract_first_frame] Successfully extracted first frame")
+
+        return web.json_response({
+            "success": True,
+            "image": img_data_url
+        })
+
+    except Exception as e:
+        print(f"[API extract_first_frame] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
+
+@PromptServer.instance.routes.post("/wanvideowrapper_qq/sam2_predict")
+async def sam2_predict(request):
+    """
+    API endpoint for SAM2 point-click prediction.
+
+    Expects JSON with:
+        image: base64 encoded image (data URL format)
+        points: list of {'x': float, 'y': float, 'label': int} points
+                x, y are in pixel coordinates, label is 1 (foreground) or 0 (background)
+
+    Returns JSON with:
+        success: bool
+        path: list of {'x': float, 'y': float} normalized coordinates (0-1)
+        score: float (confidence score)
+        mask_shape: [height, width] of the predicted mask
+    """
+    try:
+        data = await request.json()
+
+        # Validate required parameters
+        if not data.get("image"):
+            return web.json_response({"success": False, "error": "Missing image parameter"}, status=400)
+
+        if not data.get("points") or len(data["points"]) == 0:
+            return web.json_response({"success": False, "error": "Missing points parameter"}, status=400)
+
+        # Decode base64 image
+        image_data = data["image"]
+        if image_data.startswith('data:image'):
+            header, encoded = image_data.split(',', 1)
+        else:
+            encoded = image_data
+
+        image_bytes = base64.b64decode(encoded)
+        img = Image.open(BytesIO(image_bytes))
+
+        # Extract points
+        points = data["points"]
+        point_coords = [[p["x"], p["y"]] for p in points]
+        point_labels = [p.get("label", 1) for p in points]  # Default to foreground
+
+        # Predict mask using SAM2
+        mask, score = sam2_masker.predict_from_points(img, point_coords, point_labels)
+
+        # Convert mask to contour path
+        path = convert_mask_to_contour(mask)
+
+        return web.json_response({
+            "success": True,
+            "path": path,
+            "score": score,
+            "mask_shape": mask.shape
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return web.json_response({"success": False, "error": str(e)}, status=500)
 

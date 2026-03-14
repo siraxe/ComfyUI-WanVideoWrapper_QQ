@@ -517,9 +517,39 @@ function exitLassoMode(node) {
 }
 
 /**
- * Handle canvas mousedown - start drawing
+ * Handle canvas mousedown - start drawing or handle SAM2 mode
  */
 function handleCanvasMouseDown(node, e) {
+  // Handle SAM2 mode if active
+  if (node._sam2Mode && e.button === 0) {
+    const coords = node.refCanvasEditor.getCanvasCoords(e);
+    const mouseX = coords.x;
+    const mouseY = coords.y;
+
+    // Ensure coordinates are within the canvas bounds
+    if (mouseX < 0 || mouseX > node.refsCanvas.width || mouseY < 0 || mouseY > node.refsCanvas.height) {
+      return; // Ignore events outside the canvas
+    }
+
+    // Check if clicking on existing point AND holding Ctrl/meta key
+    if ((e.ctrlKey || e.metaKey)) {
+      const clickedPoint = node.findSam2PointAt?.(mouseX, mouseY);
+      if (clickedPoint) {
+        // Ctrl+click on existing point - remove it and rerun prediction
+        node.removeSam2Point?.(clickedPoint.uid);
+        return;
+      }
+      // Ctrl+click on empty space - still add point (allows adding points with Ctrl held)
+    }
+
+    // Add new point (regular click, Shift+click, or Ctrl+click on empty space)
+    // All these cases add points
+    const videoSpace = node.refCanvasEditor.transformToVideoSpace(mouseX, mouseY);
+    node.addSam2Point?.(videoSpace.x, videoSpace.y);
+    return;
+  }
+
+  // Original lasso handling
   if (!node._lassoDrawingActive || !node._lassoActiveLayer) return;
 
   // Use RefCanvas to get canvas coordinates (same as PowerSplineEditor)

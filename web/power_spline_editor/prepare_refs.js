@@ -5,6 +5,7 @@ import { chainCallback, hideWidgetForGood } from './general_utils.js';
 import { getReferenceImageFromConnectedNode } from './graph_query.js';
 import { RefLayerWidget } from './layer_type_ref.js';
 import { attachLassoHelpers } from './canvas_lasso.js';
+import { attachSam2Helpers } from './canvas/canvas_sam2.js';
 import RefCanvas from './canvas_main_ref.js';
 
 // ===================================================================
@@ -17,6 +18,21 @@ function safeSetSessionItem(key, value) {
 function safeGetSessionItem(key) {
   try { return sessionStorage.getItem(key); } catch (e) { return null; }
 }
+
+// ===================================================================
+// Add SAM2 Magic Wand Button Styles
+// ===================================================================
+const sam2Style = document.createElement('style');
+sam2Style.textContent = `
+  .magic-wand-btn.active {
+    background: #4CAF50 !important;
+    color: white !important;
+  }
+  .magic-wand-btn:hover {
+    background: #555 !important;
+  }
+`;
+document.head.appendChild(sam2Style);
 
 // ===================================================================
 // Image Loading Utilities
@@ -237,6 +253,7 @@ app.registerExtension({
     nodeType.prototype.setupCanvas = function () {
       this.refCanvasEditor = new RefCanvas(this.refsCanvas, this);
       attachLassoHelpers(this);
+      attachSam2Helpers(this);
 
       this.refreshCanvas = () => {
         this.refCanvasEditor.render();
@@ -261,6 +278,11 @@ app.registerExtension({
         });
 
         this.renderLassoPreview?.();
+
+        // Render SAM2 visuals if in SAM2 mode
+        if (this._sam2Mode) {
+          this.renderSam2Visuals?.(ctx, width, height);
+        }
       };
 
       this.forceCanvasRefresh = () => {
@@ -329,6 +351,23 @@ app.registerExtension({
     };
 
     nodeType.prototype.addRefLayer = function () {
+      // Exit SAM2 mode if active before creating new layer
+      if (this._sam2Mode) {
+        this._sam2Mode = false;
+        const oldLayer = this._sam2ActiveLayer;
+        this._sam2ActiveLayer = null;
+        this._sam2Points = [];
+        this._sam2MaskPath = null;
+        this.clearSam2Visuals?.();
+
+        // Update wand button state on old layer if it exists
+        if (oldLayer && oldLayer.magicWandButton) {
+          oldLayer.magicWandButton.classList.remove('active');
+          oldLayer.magicWandButton.style.background = 'transparent';
+          oldLayer.magicWandButton.style.color = '#888';
+        }
+      }
+
       const nextNum = (this.refLayers.reduce((m, l) => {
         const n = parseInt(l.value.name.match(/ref_(\d+)/)?.[1] || 0);
         return Math.max(m, n);
@@ -357,13 +396,27 @@ app.registerExtension({
         cursor: pointer; user-select: none; transition: background 0.1s ease;
       `;
 
+      // 1. Delete button (first)
+      const delBtn = this.createIconButton('Delete', '✕', () => this.removeRefLayer(layer));
+      el.appendChild(delBtn);
+
+      // 2. Name (second)
       const name = document.createElement('span');
       name.textContent = layer.value.name;
       name.style.flex = '1';
+      name.style.marginLeft = '6px'; // Add spacing after delete button
       el.appendChild(name);
 
+      // 3. Pencil/Edit button (third)
       const editBtn = this.createIconButton('Edit', '✎', () => {
         this.selectRefLayer(layer);
+
+        // If in SAM2 mode, exit SAM2 first (bakes mask to pencil)
+        if (this._sam2Mode) {
+          this.exitSam2Mode?.();
+        }
+
+        // Then handle pencil mode
         if (this._lassoDrawingActive && this._lassoActiveLayer === layer) {
           this.exitLassoMode?.();
         } else {
@@ -371,12 +424,20 @@ app.registerExtension({
         }
       });
       el.appendChild(editBtn);
-      
+
       // Store reference to edit button for color updates
       layer.editButton = editBtn;
 
-      const delBtn = this.createIconButton('Delete', '✕', () => this.removeRefLayer(layer));
-      el.appendChild(delBtn);
+      // 4. Magic Wand button (last)
+      const magicWandBtn = this.createIconButton('Magic Wand (SAM2)', '🪄', () => {
+        this.selectRefLayer(layer);
+        this.toggleSam2Mode?.();
+      });
+      magicWandBtn.classList.add('magic-wand-btn');
+      el.appendChild(magicWandBtn);
+
+      // Store reference to magic wand button for state updates
+      layer.magicWandButton = magicWandBtn;
 
       el.onclick = (e) => {
         if (e.target.tagName === 'BUTTON') return;
@@ -444,6 +505,22 @@ app.registerExtension({
     nodeType.prototype.removeRefLayer = function (layer) {
       const idx = this.refLayers.indexOf(layer);
       if (idx === -1) return;
+
+      // Clear SAM2 mode if deleting the active SAM2 layer
+      if (this._sam2Mode && this._sam2ActiveLayer === layer) {
+        this._sam2Mode = false;
+        this._sam2ActiveLayer = null;
+        this._sam2Points = [];
+        this._sam2MaskPath = null;
+        this.clearSam2Visuals?.();
+
+        // Update wand button state if it exists
+        if (layer.magicWandButton) {
+          layer.magicWandButton.classList.remove('active');
+          layer.magicWandButton.style.background = 'transparent';
+          layer.magicWandButton.style.color = '#888';
+        }
+      }
 
       if (this.selectedRefLayer === layer) this.selectedRefLayer = null;
       this.refLayers.splice(idx, 1);

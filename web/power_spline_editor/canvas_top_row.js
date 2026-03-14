@@ -174,11 +174,10 @@ export async function handlePrepareRefsRefresh(node) {
   console.log("[handlePrepareRefsRefresh] Refresh button clicked");
 
   try {
-    // Try to get image from connected node (ImageResizeKJv2 or LoadImage)
-    const { findConnectedSourceNode, getReferenceImageFromConnectedNode } =
-      await import('./graph_query.js');
+    const { findConnectedSourceNode, getReferenceImageFromConnectedNode } = await import('./graph_query.js');
 
     let imageData = null;
+    let isVideo = false;
 
     // Check for connected source on bg_image input
     const sourceNodeObj = findConnectedSourceNode(node, 'bg_image');
@@ -186,65 +185,184 @@ export async function handlePrepareRefsRefresh(node) {
     if (sourceNodeObj?.node) {
       console.log("[handlePrepareRefsRefresh] Found connected node:", sourceNodeObj.node.type);
 
-      // Get image from connected node
-      imageData = await getReferenceImageFromConnectedNode(node, 'bg_image');
+      let sourceNode = sourceNodeObj.node;
+      let resizeParams = null;
 
-      if (imageData) {
-        console.log("[handlePrepareRefsRefresh] Successfully loaded image from connected node");
+      // Check if the connected node is ImageResizeKJv2, and if so, follow the chain to find the real source
+      if (sourceNode.type === 'ImageResizeKJv2') {
+        console.log("[handlePrepareRefsRefresh] Found ImageResizeKJv2, following chain to find video source");
 
-        // Load the image to the canvas
-        const img = await new Promise((resolve, reject) => {
-          const image = new Image();
-          image.onload = () => {
-            node.refCanvasEditor.loadBackgroundImage(image);
-            resolve(image);
-          };
-          image.onerror = reject;
-          image.src = imageData;
-        });
-
-        // Store for persistence
-        node.loadedBgImage = img;
-
-        // Save via backend
-        try {
-          await fetch('/wanvideowrapper_qq/save_prepare_refs_images', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bg_image: imageData, ref_images: [] })
-          })
-          .then(r => r.json())
-          .then(res => {
-            if (res.success && res.paths?.bg_image_path) {
-              node.properties.bg_image_path = res.paths.bg_image_path;
-              try {
-                sessionStorage.setItem(
-                  `prepare-refs-bg-${node.uuid}`,
-                  res.paths.bg_image_path
-                );
-              } catch (e) { /* ignore */ }
-            }
-          })
-          .catch(console.error);
-        } catch (e) {
-          console.warn('[handlePrepareRefsRefresh] Failed to save image to backend:', e);
+        // Extract resize parameters from ImageResizeKJv2
+        resizeParams = {};
+        if (sourceNode.widgets) {
+          for (const widget of sourceNode.widgets) {
+            resizeParams[widget.name] = widget.value;
+          }
         }
+        console.log("[handlePrepareRefsRefresh] Extracted resize params:", resizeParams);
 
-        // Refresh canvas display
-        node.forceCanvasRefresh();
-        return;
+        // Find the actual source connected to ImageResizeKJv2
+        const actualSourceObj = findConnectedSourceNode(sourceNode, 'image');
+        if (actualSourceObj?.node) {
+          sourceNode = actualSourceObj.node;
+          console.log("[handlePrepareRefsRefresh] Found actual source after ImageResizeKJv2:", sourceNode.type);
+        } else {
+          console.log("[handlePrepareRefsRefresh] No source found after ImageResizeKJv2");
+          return;
+        }
       }
+
+      // Check common video node types
+      const videoNodeTypes = ['VHS_LoadVideo', 'VHS_LoadVideoUpload', 'Load Video Path', 'VideoImporter'];
+      if (videoNodeTypes.some(type => sourceNode.type.includes(type))) {
+        isVideo = true;
+        console.log("[handlePrepareRefsRefresh] Detected video node type:", sourceNode.type);
+      }
+
+      // For video nodes, extract first frame using HTML5 video element
+      if (isVideo) {
+        console.log("[handlePrepareRefsRefresh] Handling video node - extracting first frame");
+
+        try {
+          // Get the video path from VHS node widgets
+          const videoWidget = sourceNode.widgets?.find(w => w.name === 'video' || w.name === 'videoprefix');
+
+          if (videoWidget && videoWidget.value) {
+            const videoPath = videoWidget.value;
+            console.log("[handlePrepareRefsRefresh] Found video path:", videoPath);
+
+            // Build video URL using ComfyUI's /view endpoint
+            const videoUrl = `/view?filename=${encodeURIComponent(videoPath)}&subfolder=&type=input`;
+            console.log("[handlePrepareRefsRefresh] Loading video from:", videoUrl);
+
+            // Create a temporary video element to extract the first frame
+            const videoElement = document.createElement('video');
+            videoElement.muted = true;
+            videoElement.playsInline = true;
+            videoElement.preload = 'auto';
+            videoElement.crossOrigin = 'anonymous';
+
+            // Wait for video to load first frame
+            imageData = await new Promise((resolve, reject) => {
+              const onLoaded = () => {
+                console.log("[handlePrepareRefsRefresh] Video loaded, extracting first frame");
+
+                try {
+                  // Create canvas to capture frame
+                  let canvas = document.createElement('canvas');
+                  canvas.width = videoElement.videoWidth;
+                  canvas.height = videoElement.videoHeight;
+                  const ctx = canvas.getContext('2d');
+
+                  // Draw first frame
+                  ctx.drawImage(videoElement, 0, 0);
+
+                  // Apply resize if ImageResizeKJv2 detected
+                  if (resizeParams) {
+                    console.log("[handlePrepareRefsRefresh] Applying ImageResizeKJv2 parameters");
+
+                    // Convert canvas to image for resizing
+                    const img = new Image();
+                    img.onload = async () => {
+                      try {
+                        const { applyResizeParams } = await import('./image_resize.js');
+                        const result = await applyResizeParams(img, resizeParams);
+
+                        // Update canvas with resized image
+                        canvas = result.canvas;
+
+                        // Convert to base64
+                        const dataUrl = canvas.toDataURL('image/png');
+                        resolve(dataUrl);
+                      } catch (e) {
+                        console.error("[handlePrepareRefsRefresh] Error applying resize:", e);
+                        reject(e);
+                      } finally {
+                        // Cleanup
+                        URL.revokeObjectURL(img.src);
+                      }
+                    };
+                    img.onerror = () => reject(new Error("Failed to load canvas as image"));
+
+                    // Convert canvas to blob for the image
+                    canvas.toBlob((blob) => {
+                      const url = URL.createObjectURL(blob);
+                      img.src = url;
+                    }, 'image/png');
+                  } else {
+                    // No resize, just convert canvas to base64
+                    const dataUrl = canvas.toDataURL('image/png');
+                    resolve(dataUrl);
+                  }
+                } catch (e) {
+                  console.error("[handlePrepareRefsRefresh] Error extracting frame:", e);
+                  reject(e);
+                } finally {
+                  // Cleanup
+                  videoElement.removeEventListener('loadeddata', onLoaded);
+                  videoElement.removeEventListener('error', onError);
+                  videoElement.remove();
+                }
+              };
+
+              const onError = (e) => {
+                console.error("[handlePrepareRefsRefresh] Video loading error:", e);
+                reject(new Error("Failed to load video"));
+                videoElement.removeEventListener('loadeddata', onLoaded);
+                videoElement.removeEventListener('error', onError);
+              };
+
+              videoElement.addEventListener('loadeddata', onLoaded);
+              videoElement.addEventListener('error', onError);
+
+              // Set source to start loading
+              videoElement.src = videoUrl;
+
+              // Set a timeout in case video doesn't load
+              setTimeout(() => {
+                if (videoElement.readyState < 2) {
+                  reject(new Error("Video loading timeout"));
+                }
+              }, 10000); // 10 second timeout
+            });
+
+            console.log("[handlePrepareRefsRefresh] Successfully extracted first frame from video");
+          } else {
+            console.log("[handlePrepareRefsRefresh] No video widget found in node");
+          }
+        } catch (e) {
+          console.error("[handlePrepareRefsRefresh] Error handling video:", e);
+          throw e;
+        }
+      } else {
+        // Handle image nodes
+        console.log("[handlePrepareRefsRefresh] Handling image node");
+        imageData = await getReferenceImageFromConnectedNode(sourceNode);
+      }
+    } else {
+      console.log("[handlePrepareRefsRefresh] No connected source node found");
     }
 
-    console.log("[handlePrepareRefsRefresh] No connected image node found");
+    // If we got image data, load it into the Prepare Refs canvas
+    if (imageData) {
+      console.log("[handlePrepareRefsRefresh] Loading image into Prepare Refs canvas");
 
-  } catch (e) {
-    console.error('[handlePrepareRefsRefresh] Error:', e);
-  }
+      const img = new Image();
+      img.onload = () => {
+        if (node.refCanvasEditor) {
+          node.refCanvasEditor.loadBackgroundImage(img);
+          node.refreshCanvas();
+          node.forceCanvasRefresh?.();
+        }
+      };
+      img.onerror = () => console.error("[handlePrepareRefsRefresh] Failed to load extracted image");
+      img.src = imageData;
+    } else {
+      console.log("[handlePrepareRefsRefresh] No image data obtained");
+    }
 
-  // Always force refresh at the end
-  if (node.forceCanvasRefresh) {
-    node.forceCanvasRefresh();
+  } catch (error) {
+    console.error("[handlePrepareRefsRefresh] Error during refresh:", error);
   }
 }
 

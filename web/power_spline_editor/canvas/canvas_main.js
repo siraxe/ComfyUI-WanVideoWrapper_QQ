@@ -94,7 +94,7 @@ export default class SplineEditor2 {
     // Global toggle for inactive flow animation (default OFF)
     this._inactiveFlowEnabled = false;
 
-    this._shortcutKeys = { s: 0 }; // Initialize 's' key state with a timestamp (0 means not pressed)
+    this._shortcutKeys = { s: 0, d: 0 }; // Initialize 's' and 'd' key state with a timestamp (0 means not pressed)
     this._boxPlayModeStartedAt = 0;
     this._boxRefOnlyMode = false;
     this._boxPlayStopGuardMs = 120;
@@ -157,12 +157,18 @@ export default class SplineEditor2 {
       if (key === 's') {
         this._shortcutKeys.s = performance.now(); // Store timestamp of keydown
       }
+      if (key === 'd') {
+        this._shortcutKeys.d = performance.now(); // Store timestamp of keydown
+      }
     };
     const handleShortcutKeyUp = (ev) => {
       const key = ev?.key?.toLowerCase?.();
       if (!key) return;
       if (key === 's') {
         this._shortcutKeys.s = 0; // Reset to 0 on keyup
+      }
+      if (key === 'd') {
+        this._shortcutKeys.d = 0; // Reset to 0 on keyup
       }
       if (key === ' ' && !ev.shiftKey && this._boxPlayModeActive) {
         const elapsed = performance.now() - this._boxPlayModeStartedAt;

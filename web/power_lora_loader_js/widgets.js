@@ -289,7 +289,7 @@ export class StrengthCopyWidget extends RgthreeBaseWidget {
         // Draw label and toggle from right to left
         const toggleBounds = drawTogglePart(ctx, [posX - height * 1.5, posY], height, outputBothValue);
         this.hitAreas['output_both_toggle'].bounds = toggleBounds;
-        const labelText = "Use loras on both";
+        const labelText = "Output both";
         ctx.fillText(labelText, posX - height * 1.5 - ctx.measureText(labelText).width - innerMargin, midY);
 
         // Adjust rightX for buttons (they stay in same position)

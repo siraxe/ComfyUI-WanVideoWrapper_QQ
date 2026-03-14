@@ -155,4 +155,52 @@ export default class RefCanvas {
       y: (event.clientY - rect.top) * scaleY
     };
   }
+
+  /**
+   * Denormalize a single point - converts 0-1 normalized to canvas coordinates
+   * @param {Object} point - Point with {x, y} in normalized 0-1 coordinates
+   * @returns {Object} Point with {x, y} in canvas coordinates
+   */
+  denormalizePoint(point) {
+    const result = this.denormalizePoints([point]);
+    return result[0] || point;
+  }
+
+  /**
+   * Transform canvas coordinates to video space (original image pixel coordinates)
+   * @param {number} canvasX - X coordinate in canvas space
+   * @param {number} canvasY - Y coordinate in canvas space
+   * @returns {Object} {x, y} in video space (original image pixel coordinates)
+   */
+  transformToVideoSpace(canvasX, canvasY) {
+    if (!this.originalImageWidth || !this.originalImageHeight || this.scale <= 0) {
+      // Fallback: return canvas coordinates if no transformation available
+      return { x: canvasX, y: canvasY };
+    }
+
+    // Reverse the denormalization: canvas -> original image coordinates
+    const videoX = (canvasX - this.offsetX) / this.scale;
+    const videoY = (canvasY - this.offsetY) / this.scale;
+
+    return { x: videoX, y: videoY };
+  }
+
+  /**
+   * Transform video space coordinates to canvas coordinates
+   * @param {number} videoX - X coordinate in video space (original image pixels)
+   * @param {number} videoY - Y coordinate in video space (original image pixels)
+   * @returns {Object} {x, y} in canvas coordinates
+   */
+  transformToCanvasSpace(videoX, videoY) {
+    if (!this.originalImageWidth || !this.originalImageHeight || this.scale <= 0) {
+      // Fallback: return video coordinates if no transformation available
+      return { x: videoX, y: videoY };
+    }
+
+    // Apply the denormalization: video space -> canvas coordinates
+    const canvasX = (videoX * this.scale) + this.offsetX;
+    const canvasY = (videoY * this.scale) + this.offsetY;
+
+    return { x: canvasX, y: canvasY };
+  }
 }

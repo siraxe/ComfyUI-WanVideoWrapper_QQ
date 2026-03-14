@@ -66,6 +66,9 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         this._buttonPressDurationMs = 140;
         this._playbackInterval = null;
         this._timelinePlayIcons = ['▶', '❚❚']; // fixed thick set
+        // Keyframe drag state
+        this._keyframeDragActive = false;
+        this._keyframeDragStartFrame = null;
     }
 
     _getMaxFrames(node) {
@@ -343,21 +346,36 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             : [];
         if (boxKeys.length) {
             ctx.save();
-            ctx.fillStyle = '#ff8c00';
-            ctx.strokeStyle = '#ffffff';
             const denom = sliderSteps > 1 ? (sliderSteps - 1) : 1;
             const currentFrame = sliderValue;
             for (const key of boxKeys) {
                 const keyFrame = Math.max(1, Math.min(sliderSteps, Math.round(key.frame || 1)));
                 const progress = (keyFrame - 1) / denom;
                 const keyX = timelineX + progress * timelineWidth;
-                const radius = currentFrame === keyFrame ? 5 : 4;
-                ctx.beginPath();
-                ctx.arc(keyX, timelineMidY, radius, 0, Math.PI * 2);
-                ctx.fill();
-                if (currentFrame === keyFrame) {
-                    ctx.lineWidth = 1.5;
+
+                // Highlight keyframe being dragged
+                const isDraggingKeyframe = this._keyframeDragActive && this._keyframeDragStartFrame === keyFrame;
+
+                if (isDraggingKeyframe) {
+                    ctx.fillStyle = '#2cc6ff'; // Blue for dragged keyframe
+                    ctx.strokeStyle = '#ffffff';
+                    const radius = 7; // Larger radius for dragged keyframe
+                    ctx.beginPath();
+                    ctx.arc(keyX, timelineMidY, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.lineWidth = 2;
                     ctx.stroke();
+                } else {
+                    ctx.fillStyle = '#ff8c00';
+                    ctx.strokeStyle = '#ffffff';
+                    const radius = currentFrame === keyFrame ? 5 : 4;
+                    ctx.beginPath();
+                    ctx.arc(keyX, timelineMidY, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (currentFrame === keyFrame) {
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
                 }
             }
             ctx.restore();
@@ -449,6 +467,26 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
     }
 
     onMouseUp(event, pos, node) {
+        // Finalize keyframe drag if active
+        if (this._keyframeDragActive && this._keyframeDragStartFrame !== null) {
+            const editor = node?.editor;
+            const targetFrame = this._calculateTimelinePoint(node, pos[0]);
+
+            if (targetFrame != null && editor?.moveBoxLayerKey) {
+                // Move the keyframe (this will overwrite any existing keyframe at target)
+                editor.moveBoxLayerKey(this, this._keyframeDragStartFrame, targetFrame);
+            }
+
+            // Reset drag state
+            this._keyframeDragActive = false;
+            this._keyframeDragStartFrame = null;
+
+            if (node?.editor?.clearBoxTimelinePreview) {
+                node.editor.clearBoxTimelinePreview(this);
+            }
+            node?.setDirtyCanvas?.(true, true);
+        }
+
         if (node?.editor?.clearBoxTimelinePreview) {
             node.editor.clearBoxTimelinePreview(this);
         }
@@ -661,6 +699,24 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             }
         }
 
+        // D+Click: Start dragging a keyframe
+        if (event?.button === 0 && editor?.isShortcutActive?.('d')) {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            const targetFrame = this._calculateTimelinePoint(node, pos[0]);
+            if (targetFrame != null && this._hasKeyAtFrame(node, targetFrame)) {
+                // Start dragging this keyframe
+                this._keyframeDragActive = true;
+                this._keyframeDragStartFrame = targetFrame;
+                this._timelineDragging = false;
+                this._timelinePreviewMode = false;
+                editor?.clearBoxTimelinePreview?.(this);
+                node?.setDirtyCanvas?.(true, true);
+                return true;
+            }
+            // If D+click but not on a keyframe, fall through to normal timeline behavior
+        }
+
         if (event?.button === 2) {
             const targetFrame = this._getTimelinePoint(node);
             if (this._hasKeyAtFrame(node, targetFrame) && node?.editor?.deleteBoxLayerKey) {
@@ -683,6 +739,16 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
     }
 
     onTimelineMove(event, pos, node) {
+        // Handle keyframe dragging (D+drag)
+        if (this._keyframeDragActive && this._keyframeDragStartFrame !== null) {
+            const newFrame = this._calculateTimelinePoint(node, pos[0]);
+            if (newFrame != null && newFrame !== this._keyframeDragStartFrame) {
+                // Preview: update the keyframe position temporarily
+                this._previewKeyframeMove(node, this._keyframeDragStartFrame, newFrame);
+            }
+            return true;
+        }
+
         if (!this._timelineDragging) return false;
         this._setTimelinePointFromPosition(pos[0], node, !this._timelinePreviewMode);
         return true;
@@ -988,6 +1054,26 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             this._playbackInterval = null;
             node?.setDirtyCanvas?.(true, true);
         }
+    }
+
+    _previewKeyframeMove(node, fromFrame, toFrame) {
+        // Create a temporary preview of the keyframe at the new position
+        // This updates the timeline point and shows what the move would look like
+        const editor = node?.editor;
+        if (!editor) return;
+
+        const maxFrames = this._getMaxFrames(node);
+        const toFrameClamped = Math.max(1, Math.min(maxFrames, Math.round(toFrame)));
+
+        // Update timeline point to show preview
+        this.value.box_timeline_point = toFrameClamped;
+
+        // Use the preview system to show what the box would look like at the new frame
+        if (editor?.setBoxTimelinePreview) {
+            editor.setBoxTimelinePreview(this, toFrameClamped);
+        }
+
+        node?.setDirtyCanvas?.(true, true);
     }
 
 }

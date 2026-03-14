@@ -413,4 +413,39 @@ export function attachBoxTimelineHelpers(editor) {
       };
     }
   };
+
+  editor.moveBoxLayerKey = (widget, fromFrame, toFrame) => {
+    if (!editor._isBoxLayerWidget(widget)) return false;
+    const keys = editor._ensureBoxLayerData(widget) || [];
+    const maxFrames = editor._getMaxFrames();
+    const fromFrameClamped = Math.max(1, Math.min(maxFrames, Math.round(fromFrame || 1)));
+    const toFrameClamped = Math.max(1, Math.min(maxFrames, Math.round(toFrame || 1)));
+
+    if (fromFrameClamped === toFrameClamped) return false;
+
+    const fromIdx = keys.findIndex(k => k.frame === fromFrameClamped);
+    if (fromIdx === -1) return false; // No keyframe at source frame
+
+    const keyToMove = { ...keys[fromIdx], frame: toFrameClamped };
+
+    // Remove keyframe at target frame if it exists (overwrite behavior)
+    const toIdx = keys.findIndex(k => k.frame === toFrameClamped);
+    if (toIdx >= 0) {
+      keys.splice(toIdx, 1);
+    }
+
+    // Remove from old position and add at new position
+    keys.splice(fromIdx, 1);
+    keys.push(keyToMove);
+    keys.sort((a, b) => a.frame - b.frame);
+
+    widget.value.box_keys = keys;
+    widget.value.box_timeline_point = toFrameClamped;
+    editor.applyBoxTimelineFrame(widget, toFrameClamped);
+    editor._forceRebuildNextRender = true;
+    try { editor.layerRenderer?.render(); } catch {}
+    try { editor.node?.setDirtyCanvas?.(true, true); } catch {}
+
+    return true;
+  };
 }

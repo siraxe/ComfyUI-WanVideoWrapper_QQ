@@ -132,13 +132,15 @@ def filter_layers_with_shapes(ref_layer_data: List[Dict[str, Any]]) -> List[Dict
 
         # optional: only include layers explicitly turned "on" if present
         if "on" in layer and not layer.get("on", False):
-            print(f"[PrepareRefs INFO] Layer {idx} ({layer.get('name','unknown')}) 'on' flag is False - skipping")
+            print(f"[PrepareRefs WARNING] Layer {idx} ({layer.get('name','unknown')}) 'on' flag is False - skipping")
             continue
 
         valid_layers.append(layer)
 
     if len(valid_layers) < len(ref_layer_data):
-        print(f"[PrepareRefs INFO] Filtered layers: {len(ref_layer_data)} → {len(valid_layers)} (removed {len(ref_layer_data)-len(valid_layers)} empty/invalid)")
+        # Filtered and valid layers processed
+        if len(valid_layers) < len(ref_layer_data):
+            pass  # Silently skip invalid layers
     return valid_layers
 
 
@@ -209,6 +211,51 @@ def create_image_and_mask_from_layer(base_image: torch.Tensor,
     except Exception as e:
         print(f"[PrepareRefs ERROR] create_image_and_mask_from_layer failed: {e}")
         return None, None
+
+
+def convert_mask_to_contour(mask_binary: np.ndarray) -> List[Dict[str, float]]:
+    """
+    Convert binary mask to normalized path points for compatibility with existing lasso system.
+
+    This function extracts the largest contour from a binary mask and converts it to
+    normalized coordinates (0-1 range) that can be used with the existing lasso system.
+
+    Args:
+        mask_binary: [H, W] numpy array (binary mask with values 0 or 1)
+
+    Returns:
+        List of {'x': float, 'y': float} in normalized 0-1 coordinates
+        Returns empty list if no contours found
+    """
+    try:
+        # Find contours
+        contours, _ = cv2.findContours(
+            mask_binary.astype(np.uint8),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        if not contours:
+            return []
+
+        # Get largest contour by area
+        contour = max(contours, key=cv2.contourArea)
+
+        # Simplify contour to reduce points (0.1% of contour length)
+        epsilon = 0.001 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+
+        # Convert to normalized coordinates (0-1 range)
+        h, w = mask_binary.shape
+        normalized_points = [
+            {'x': float(pt[0][0]) / w, 'y': float(pt[0][1]) / h}
+            for pt in approx
+        ]
+
+        return normalized_points
+    except Exception as e:
+        print(f"[PrepareRefs ERROR] convert_mask_to_contour failed: {e}")
+        return []
 
 
 def extract_lasso_shapes_as_images(base_image: torch.Tensor,
@@ -543,8 +590,8 @@ class PrepareRefs:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK")
-    RETURN_NAMES = ("bg_image", "ref_images", "ref_masks")
+    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK", "IMAGE")
+    RETURN_NAMES = ("bg_image", "ref_images", "ref_masks", "mat_masks")
     FUNCTION = "prepare"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """
@@ -597,6 +644,7 @@ class PrepareRefs:
             # Build empty outputs matching expected shapes
             empty_ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
             empty_ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
+            empty_mat_masks = torch.zeros((1, height, width, 3), dtype=torch.float32)
             ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
             # Persist bg preview only if original bg_image was provided
             if bg_image is not None:
@@ -605,14 +653,22 @@ class PrepareRefs:
                     ui_out["bg_image_path"] = ["bg/bg_image.png"]
                 except Exception as exc:
                     print(f"[PrepareRefs WARNING] Failed to save bg preview: {exc}")
-            return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks)}
+            return {"ui": ui_out, "result": (output_bg_image, empty_ref_images, empty_ref_masks, empty_mat_masks)}
 
         # Extract per-layer images and masks (full-size)
         # Use the actual dimensions of internal_processing_image to ensure masks match
         mask_width = internal_processing_image.shape[2] if internal_processing_image is not None else width
         mask_height = internal_processing_image.shape[1] if internal_processing_image is not None else height
-        print(f"[PrepareRefs INFO] Extracting lasso shapes at {mask_width}x{mask_height} (internal_processing_image dimensions)")
         ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, mask_width, mask_height, valid_ref_layers, export_alpha)
+
+        # Create mat_masks (full-size masks as RGB images for MatAnyone2)
+        # These are white-on-black masks at full resolution, not cropped to 768x768
+        if ref_masks is not None and ref_masks.shape[0] > 0:
+            # Convert masks [N, H, W] to RGB images [N, H, W, 3] (white on black)
+            mat_masks = ref_masks.unsqueeze(-1).repeat(1, 1, 1, 3)  # [N, H, W, 3]
+        else:
+            # Empty mat_masks if no masks
+            mat_masks = torch.zeros((1, height, width, 3), dtype=torch.float32)
 
         # Define fixed square size for all ref images
         FIXED_SQUARE_SIZE = 768
@@ -625,10 +681,12 @@ class PrepareRefs:
                 # extra_refs will be processed to 768x768, so ref_images must match for concatenation
                 ref_images = torch.zeros((0, FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE, 4 if export_alpha else 3), dtype=torch.float32)
                 ref_masks = torch.zeros((0, FIXED_SQUARE_SIZE, FIXED_SQUARE_SIZE), dtype=torch.float32)
+                mat_masks = torch.zeros((0, height, width, 3), dtype=torch.float32)
             else:
                 # No lasso layers and no extra_refs, create a single empty image
                 ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
                 ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
+                mat_masks = torch.zeros((1, height, width, 3), dtype=torch.float32)
 
         # Optionally save a combined mask preview and create masked BG preview
         if ref_masks is not None and ref_masks.shape[0] > 0 and to_bounding_box:
@@ -778,6 +836,33 @@ class PrepareRefs:
                 ref_images = torch.cat([ref_images, extra_refs_tensor], dim=0)
                 ref_masks = torch.cat([ref_masks, extra_masks_tensor], dim=0)
 
+                # Also add to mat_masks (convert extra_masks to full-size RGB)
+                extra_mat_masks = []
+                for i in range(num_extra_refs):
+                    if extra_masks is not None and i < extra_masks.shape[0]:
+                        # Get original mask and resize to full video size
+                        extra_mask = extra_masks[i]
+                        if extra_mask.ndim == 2:
+                            extra_mask_rgb = extra_mask.unsqueeze(-1).repeat(1, 1, 3)  # [H, W, 3]
+                        else:
+                            extra_mask_rgb = extra_mask.mean(dim=-1, keepdim=True).repeat(1, 1, 3)
+
+                        # Resize to video dimensions if needed
+                        if extra_mask_rgb.shape[0] != height or extra_mask_rgb.shape[1] != width:
+                            extra_mask_rgb = extra_mask_rgb.unsqueeze(0).permute(0, 3, 1, 2)  # [1, 3, H, W]
+                            extra_mask_rgb = F.interpolate(extra_mask_rgb, size=(height, width), mode='bilinear', align_corners=False)
+                            extra_mask_rgb = extra_mask_rgb.permute(0, 2, 3, 1).squeeze(0)  # [H, W, 3]
+
+                        extra_mat_masks.append(extra_mask_rgb)
+                    else:
+                        # Create empty full-size mask
+                        extra_mat_masks.append(torch.zeros((height, width, 3), dtype=torch.float32))
+
+                # Concatenate extra mat_masks
+                if extra_mat_masks:
+                    extra_mat_masks_tensor = torch.stack(extra_mat_masks, dim=0)
+                    mat_masks = torch.cat([mat_masks, extra_mat_masks_tensor], dim=0)
+
                 print(f"[PrepareRefs INFO] Added {num_extra_refs} extra refs. New ref_images shape: {ref_images.shape}")
 
         # Align batch sizes: if base batch size greater than refs, pad refs
@@ -791,6 +876,9 @@ class PrepareRefs:
 
             extra_masks = torch.zeros((extra_count, max_dim, max_dim), dtype=ref_masks.dtype, device=ref_masks.device)
             ref_masks = torch.cat([ref_masks, extra_masks], dim=0)
+
+            # Don't pad mat_masks - keep only the ref_layers, not one per video frame
+            # mat_masks should only have as many masks as there are ref_layers
 
         # Build ui_out
         ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
@@ -906,7 +994,7 @@ class PrepareRefs:
         except Exception as e:
             print(f"[PrepareRefs ERROR] failed to save ref masks: {e}")
 
-        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks)}
+        return {"ui": ui_out, "result": (output_bg_image, ref_images, ref_masks, mat_masks)}
 
     # -------------------------
     # Internal helper
@@ -928,7 +1016,8 @@ class PrepareRefs:
             original_w = bg_image.shape[2]
 
             # NEVER resize bg_image - keep original size at all costs
-            print(f"[PrepareRefs INFO] Keeping bg_image at ORIGINAL SIZE: {original_w}x{original_h} (not resizing to {final_w}x{final_h})")
+            # Keep original size
+            pass
 
             output_bg_image = bg_image
             internal_processing_image = bg_image
