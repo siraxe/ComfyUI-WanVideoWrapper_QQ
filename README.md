@@ -1,4 +1,9 @@
 # ComfyUI-WanVideoWrapper_QQ
+**Version 1.2.8** - 2026-03-14
+- Added SAM (Segment Anything Model) preparation support. Based on [MatAnyone2](https://github.com/pq-yang/MatAnyone2) [Workflow Example](examples/SAM_prep_wf.json)
+
+![img](git_assets/img/sam.png)
+
 **Version 1.2.1** - 2025-12-11
 - Some changes to spline editor + added wan move example. Look like mix of ati and control 2.1
 (update kj [ComfyUI-WanVideoWrapper](https://github.com/kijai/ComfyUI-WanVideoWrapper)) [Example](examples//rabbit_control_wan_move/wan21_wan_move.json)
