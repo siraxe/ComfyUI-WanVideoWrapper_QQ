@@ -554,11 +554,13 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
 
     onScaleDec() {
         this.value.scale = Math.max(0.01, parseFloat((this.value.scale || 1.00) - 0.01).toFixed(2));
+        this._updatePointsStoreWithCurrentScale();
         this.parent.setDirtyCanvas(true, true);
         return true;
     }
     onScaleInc() {
         this.value.scale = Math.min(8.00, parseFloat((this.value.scale || 1.00) + 0.01).toFixed(2));
+        this._updatePointsStoreWithCurrentScale();
         this.parent.setDirtyCanvas(true, true);
         return true;
     }
@@ -566,6 +568,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         const canvas = app.canvas;
         canvas.prompt('Scale', this.value.scale || 1.00, (v) => {
             this.value.scale = Math.max(0.01, Math.min(8.00, parseFloat(Number(v).toFixed(2))));
+            this._updatePointsStoreWithCurrentScale();
             this.parent.setDirtyCanvas(true, true);
         });
         return true;
@@ -574,7 +577,33 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
         if (event.deltaX) {
             this.haveMouseMovedValue = true;
             this.value.scale = Math.max(0.01, Math.min(8.00, parseFloat(((this.value.scale || 1.00) + (event.deltaX / 1000)).toFixed(2))));
+            this._updatePointsStoreWithCurrentScale();
             node.setDirtyCanvas(true, true);
+        }
+    }
+
+    _updatePointsStoreWithCurrentScale() {
+        // Update points_store with the current scale value so keyframes use the latest scale
+        try {
+            let points = [];
+            try {
+                points = JSON.parse(this.value.points_store || '[]');
+            } catch {
+                points = [];
+            }
+
+            if (points && points.length > 0) {
+                // Update all scale fields in points_store with current scale value
+                const currentScale = parseFloat(this.value.scale || 1.00);
+                points.forEach(point => {
+                    point.scale = currentScale;
+                    point.boxScale = currentScale;
+                    point.pointScale = currentScale;
+                });
+                this.value.points_store = JSON.stringify(points);
+            }
+        } catch (e) {
+            console.warn('Failed to update points_store with current scale:', e);
         }
     }
 

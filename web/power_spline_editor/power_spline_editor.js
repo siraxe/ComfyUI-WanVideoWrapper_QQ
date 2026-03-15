@@ -791,8 +791,6 @@ app.registerExtension({
         let coord_in = message['coord_in'];
         let ref_image_dims = message['ref_image_dims'];
 
-        console.log('[PowerSplineEditor onExecuted] Received message:', message);
-
         // ============================================================
         // == HANDLE VIDEO
         // ============================================================
@@ -881,6 +879,37 @@ app.registerExtension({
               this.editor.drawPreviousSpline(coord_in_str);
             }
 
+            // ✅ Update box widgets with ref_image if available
+            if (ref_image && this.editor?.refImageManager) {
+              const dataUrl = ref_image.startsWith('data:') ? ref_image : `data:image/png;base64,${ref_image}`;
+              const dims = await new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => resolve({ width: img.width, height: img.height });
+                img.onerror = () => resolve({ width: 1, height: 1 });
+                img.src = dataUrl;
+              });
+
+              const attachment = {
+                base64: ref_image.startsWith('data:') ? ref_image.split(',')[1] : ref_image,
+                type: 'image/png',
+                width: dims.width,
+                height: dims.height
+              };
+
+              // Update all box widgets with the new ref_attachment
+              const boxWidgets = this.layerManager?.getSplineWidgets?.().filter(w => w?.value?.type === 'box_layer') || [];
+              boxWidgets.forEach(widget => {
+                widget.value.ref_attachment = { entries: [attachment] };
+                // Set selection to ref_1 if it's currently no_ref
+                if (!widget.value.ref_selection || widget.value.ref_selection === 'no_ref') {
+                  widget.value.ref_selection = 'ref_1';
+                }
+              });
+
+              // Clear cache and render
+              this.editor.layerRenderer?.clearRefImageCache?.();
+            }
+
             // ✅ WAIT for video scale to be set before loading coordinates
             if (message.bg_video?.length > 0 && this.editor?.videoMetadata) {
               console.log('[PowerSplineEditor] Video detected, waiting for scale to be set...');
@@ -912,6 +941,11 @@ app.registerExtension({
               this.editor?.refreshBackgroundImage?.();
             } else if (this.editor) {
               this.editor?.vis?.render();
+            }
+
+            // ✅ Force render layer renderer to show ref images
+            if (this.editor?.layerRenderer) {
+              this.editor.layerRenderer.render();
             }
           };
 

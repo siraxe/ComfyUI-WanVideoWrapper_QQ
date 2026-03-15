@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 
 from ..utility.utility import pil2tensor, tensor2pil
-from ..config.constants import BOX_BASE_SIZE
+from ..config.constants import BOX_BASE_RADIUS
 
 
 class DrawImageOnPath:
@@ -179,25 +179,24 @@ Draws an input image along a coordinate path for each frame, returning the rende
 
     def _compute_target_size(self, base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size, editor_scale=1.0):
         if use_box_scale_size:
-            # Apply editor_scale to match what was shown in the Power Spline Editor canvas
-            # The editor displays boxes at: BOX_BASE_RADIUS * scale * editor_scale
-            # So the final size should be: BOX_BASE_SIZE * scale * editor_scale
+            # Match the editor's formula: box_radius = BOX_BASE_RADIUS * pointScale * canvasScale
+            # BOX_BASE_RADIUS = 200, so diameter = 400 * pointScale * canvasScale
+            # We map this from canvas space to video space using editor_scale
             adjusted_scale = scale_factor * editor_scale
-            target_short = BOX_BASE_SIZE * adjusted_scale
-            ratio = target_short / max(1.0, min(base_w, base_h))
-            new_w = int(round(base_w * ratio))
-            new_h = int(round(base_h * ratio))
+            box_diameter = (BOX_BASE_RADIUS * 2) * adjusted_scale
+            # Calculate the scale factor to fit the image within the box diameter
+            # This matches the editor's: scale = Math.min(boxSize / imgW, boxSize / imgH)
+            scale_w = box_diameter / max(1.0, base_w)
+            scale_h = box_diameter / max(1.0, base_h)
+            fit_scale = min(scale_w, scale_h)
+            new_w = int(round(base_w * fit_scale))
+            new_h = int(round(base_h * fit_scale))
         else:
             new_w = int(round(base_w * scale_factor))
             new_h = int(round(base_h * scale_factor))
 
-        max_size_fraction = 1.0
-        max_w = int(frame_width * max_size_fraction)
-        max_h = int(frame_height * max_size_fraction)
-        if new_w > max_w or new_h > max_h:
-            clamp_ratio = min(max_w / max(1, new_w), max_h / max(1, new_h))
-            new_w = max(1, int(new_w * clamp_ratio))
-            new_h = max(1, int(new_h * clamp_ratio))
+        # REMOVED: max_size_fraction clamp that was preventing scale variation
+        # The clamp was forcing all large images to the same size, making scale changes invisible
 
         new_w = max(1, new_w)
         new_h = max(1, new_h)
@@ -380,7 +379,6 @@ Draws an input image along a coordinate path for each frame, returning the rende
 
                     pos_x, pos_y = self._scale_point(point, frame_width, frame_height, coord_width, coord_height)
                     scale_factor = self._get_scale(point, fallback_scale)
-
                     new_w, new_h = self._compute_target_size(
                         base_w, base_h, scale_factor, frame_width, frame_height, use_box_scale_size, editor_scale
                     )

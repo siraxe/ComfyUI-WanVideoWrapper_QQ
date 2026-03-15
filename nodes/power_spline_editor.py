@@ -27,8 +27,8 @@ class PowerSplineEditor:
             }
         }
 
-    RETURN_TYPES = ("IMAGE", "STRING", "INT",)
-    RETURN_NAMES = ("bg_image", "coord_out", "frames",)
+    RETURN_TYPES = ("IMAGE", "STRING", "INT", "STRING",)
+    RETURN_NAMES = ("bg_image", "coord_out", "frames", "debug_scale",)
     FUNCTION = "splinedata"
     CATEGORY = "WanVideoWrapper_QQ"
     DESCRIPTION = """WIP"""
@@ -1038,7 +1038,28 @@ class PowerSplineEditor:
             # Create blank image tensor in BHWC format (Batch, Height, Width, Channels)
             result_image = torch.zeros((1, int(bg_h), int(bg_w), 3), dtype=torch.float32)
 
-        result = (result_image, coord_out, frames)
+        # Create debug_scale output to show keyframe scale values
+        debug_scale_list = []
+        if all_coord_paths:
+            # Extract scale values from coordinates for debugging
+            for coord_path in all_coord_paths:
+                if isinstance(coord_path, list) and len(coord_path) > 0:
+                    frame_scales = []
+                    for point in coord_path:
+                        if isinstance(point, dict):
+                            frame_num = point.get('frame', '?')
+                            scale_val = point.get('scale', point.get('boxScale', point.get('pointScale', 1.0)))
+                            frame_scales.append(f"F{frame_num}:{scale_val:.4f}")
+                    if frame_scales:
+                        # Show all frames, but limit display to first 20 frames for readability
+                        display_scales = frame_scales[:20] if len(frame_scales) > 20 else frame_scales
+                        if len(frame_scales) > 20:
+                            display_scales.append(f"... (+{len(frame_scales) - 20} more)")
+                        debug_scale_list.append(", ".join(display_scales))
+
+        debug_scale = " | ".join(debug_scale_list) if debug_scale_list else "No scale data found"
+
+        result = (result_image, coord_out, frames, debug_scale)
 
         # Add video metadata to ui_out if video was created
         if video_metadata:

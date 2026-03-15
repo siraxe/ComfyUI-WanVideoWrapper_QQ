@@ -288,10 +288,6 @@ export function attachBoxTimelineHelpers(editor) {
       const currentBoxPositionNormalized = editor._computeBoxLayerPosition(activeWidget, frame); // This is the 0-1 normalized position
       const currentBoxPositionDenorm = editor.denormalizePoints([{ x: currentBoxPositionNormalized.x, y: currentBoxPositionNormalized.y }])[0];
       const currentBoxPositionCanvas = transformVideoToCanvasSpace(editor, currentBoxPositionDenorm.x, currentBoxPositionDenorm.y);
-
-      console.log(`[DEBUG] New Key Point Creation (S+Click):`);
-      console.log(`  Clicked Canvas Location: x=${clickCanvasCoords.x.toFixed(2)}, y=${clickCanvasCoords.y.toFixed(2)}`);
-      console.log(`  Created Box Center (Canvas): x=${currentBoxPositionCanvas.x.toFixed(2)}, y=${currentBoxPositionCanvas.y.toFixed(2)}`);
     }
 
     return true;
@@ -307,6 +303,7 @@ export function attachBoxTimelineHelpers(editor) {
     if (!editor._isBoxLayerWidget(widget)) return false;
     const keys = editor._ensureBoxLayerData(widget) || [];
     const stored = editor._getBoxLayerStoredPoint(widget);
+
     const normalized = (() => {
       // Stored point (from _getBoxLayerStoredPoint) is already normalized (0-1 range).
       // Always use this. No re-normalization needed here.
@@ -319,6 +316,7 @@ export function attachBoxTimelineHelpers(editor) {
         rotation: (typeof stored?.rotation === 'number' && !Number.isNaN(stored.rotation)) ? stored.rotation : 0,
       };
     })();
+
     const targetFrame = Math.max(1, Math.min(editor._getMaxFrames(), Math.round(frame || widget.value.box_timeline_point || 1)));
     const payload = {
       frame: targetFrame,
