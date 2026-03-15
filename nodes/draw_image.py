@@ -439,9 +439,9 @@ Draws an input image along a coordinate path for each frame, returning the rende
                     rotation_deg = -math.degrees(rotation_rad)
 
                     if abs(rotation_deg) > 1e-4:
-                        ref_img = ref_img.rotate(rotation_deg, expand=True)
+                        ref_img = ref_img.rotate(rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
                         if mask_img is not None:
-                            mask_img = mask_img.rotate(rotation_deg, expand=True)
+                            mask_img = mask_img.rotate(rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
 
                     paste_x = int(round(pos_x - ref_img.width / 2))
                     paste_y = int(round(pos_y - ref_img.height / 2))
@@ -548,9 +548,9 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 rotation_deg = -math.degrees(rotation_rad)
 
                 if abs(rotation_deg) > 1e-4:
-                    ref_img = ref_img.rotate(rotation_deg, expand=True)
+                    ref_img = ref_img.rotate(rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
                     if mask_img is not None:
-                        mask_img = mask_img.rotate(rotation_deg, expand=True)
+                        mask_img = mask_img.rotate(rotation_deg, resample=Image.Resampling.BICUBIC, expand=True)
 
                 paste_x = int(round(pos_x - ref_img.width / 2))
                 paste_y = int(round(pos_y - ref_img.height / 2))
