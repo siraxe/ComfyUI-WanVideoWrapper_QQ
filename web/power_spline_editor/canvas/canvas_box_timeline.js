@@ -31,7 +31,7 @@ export function attachBoxTimelineHelpers(editor) {
           frame: Math.max(1, Math.min(editor._getMaxFrames(), Math.round(key.frame || 1))),
           x: normX,
           y: normY,
-          scale: editor.clampScaleValue ? editor.clampScaleValue(scaleVal) : Math.max(0.2, Math.min(3, scaleVal)),
+          scale: editor.clampScaleValue ? editor.clampScaleValue(scaleVal) : Math.max(0.2, Math.min(6, scaleVal)),
           rotation: rotationVal,
         };
       })

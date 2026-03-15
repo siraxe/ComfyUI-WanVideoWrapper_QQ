@@ -618,7 +618,7 @@ export function attachInteractionHandlers(editor) {
         const scaleFactor = currentXDistance / editor.scalingPointInitialDistance;
         const dampingFactor = 0.1;
         const dampedFactor = 1.0 + (scaleFactor - 1.0) * dampingFactor;
-        const newScale = Math.max(0.2, Math.min(3.0, editor.scalingPointBaseScale * dampedFactor));
+        const newScale = Math.max(0.2, Math.min(6.0, editor.scalingPointBaseScale * dampedFactor));
         point.boxScale = newScale;
         point.scale = newScale;
         // Force a full rebuild so box size updates immediately while dragging

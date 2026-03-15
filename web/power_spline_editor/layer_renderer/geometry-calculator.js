@@ -16,13 +16,13 @@
 import { BOX_BASE_RADIUS } from '../spline_utils.js';
 
 /**
- * Clamps a scale value to the valid range [0.2, 3.0]
+ * Clamps a scale value to the valid range [0.2, 6.0]
  * @param {number} value - The scale value to clamp
  * @returns {number} Clamped scale value or 1 if invalid
  */
 export function clampPointScale(value) {
     return (typeof value === 'number' && !Number.isNaN(value))
-        ? Math.max(0.2, Math.min(3.0, value))
+        ? Math.max(0.2, Math.min(6.0, value))
         : 1;
 }
 
@@ -251,7 +251,7 @@ export function sanitizeBoxKeys(widget, splineEditor) {
                 frame: Number.isFinite(frameVal) ? Math.round(frameVal) : 1,
                 x: normX,
                 y: normY,
-                scale: splineEditor.clampScaleValue?.(scaleVal) ?? Math.max(0.2, Math.min(3, scaleVal)),
+                scale: splineEditor.clampScaleValue?.(scaleVal) ?? Math.max(0.2, Math.min(6, scaleVal)),
                 rotation: rotationVal,
             };
         })

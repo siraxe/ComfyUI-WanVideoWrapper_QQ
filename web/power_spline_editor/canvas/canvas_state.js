@@ -123,7 +123,7 @@ export function attachStateHelpers(editor) {
 
   editor.clampScaleValue = (value) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return 1;
-    return Math.max(0.2, Math.min(3.0, value));
+    return Math.max(0.2, Math.min(6.0, value));
   };
 
   editor.ensurePointScaleFields = (points) => {
