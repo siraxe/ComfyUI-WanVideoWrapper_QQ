@@ -201,6 +201,47 @@ class MatAnyone2:
 
         self._load_processor(device)
 
+        # Clear processor memory to prevent dimension conflicts from previous runs
+        self.processor.clear_memory()
+
+        # Force all frames to exact same dimensions to prevent padding mismatches
+        target_h, target_w = video.shape[1], video.shape[2]
+        video = torch.nn.functional.interpolate(
+            video.permute(0, 3, 1, 2),  # [B, C, H, W]
+            size=(target_h, target_w),
+            mode='bilinear',
+            align_corners=False
+        ).permute(0, 2, 3, 1)  # [B, H, W, C]
+
+        # Resize mask to match video dimensions if needed
+        if mask.dim() == 4:  # [B, H, W, C]
+            mask_h, mask_w = mask.shape[1], mask.shape[2]
+        elif mask.dim() == 3:  # [H, W, C]
+            mask_h, mask_w = mask.shape[0], mask.shape[1]
+        else:
+            mask_h, mask_w = mask.shape[-2], mask.shape[-1]
+
+        if mask_h != target_h or mask_w != target_w:
+            # Reshape mask for interpolation: [H, W, C] -> [1, C, H, W]
+            if mask.dim() == 3:
+                mask_to_resize = mask.permute(2, 0, 1).unsqueeze(0)  # [1, C, H, W]
+            else:  # [B, H, W, C] -> [B, C, H, W]
+                mask_to_resize = mask.permute(0, 3, 1, 2)
+
+            # Resize to match video
+            mask_resized = torch.nn.functional.interpolate(
+                mask_to_resize,
+                size=(target_h, target_w),
+                mode='bilinear',
+                align_corners=False
+            )
+
+            # Restore original shape
+            if mask.dim() == 3:
+                mask = mask_resized.squeeze(0).permute(1, 2, 0)  # [H, W, C]
+            else:
+                mask = mask_resized.permute(0, 2, 3, 1)  # [B, H, W, C]
+
         mask_input = self._process_input_mask(mask)
 
         outputs = []
