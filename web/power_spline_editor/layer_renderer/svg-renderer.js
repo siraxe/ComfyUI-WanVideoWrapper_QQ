@@ -15,6 +15,7 @@
 
 import { transformVideoToCanvasSpace } from '../spline_utils.js';
 import * as GeomCalc from './geometry-calculator.js';
+import { topSliderPosToHScale } from '../config/scale-config.js';
 
 /**
  * Gets or creates an SVG group element by ID
@@ -450,13 +451,43 @@ export function updateActiveDotPositions(state, points, splineEditor, layerInfo)
 
     // Update attached box images
     if (state.renderedGroups.activeBoxImages) {
-        const images = Array.from(state.renderedGroups.activeBoxImages.children);
-        if (validPoints.length > 0 && images.length > 0) {
+        const vScaleGroups = Array.from(state.renderedGroups.activeBoxImages.children);
+        if (validPoints.length > 0 && vScaleGroups.length > 0) {
             const point = validPoints[0];
+            const transformedPoint = transformVideoToCanvasSpace(splineEditor, point.x, point.y);
             const rotationDeg = GeomCalc.getBoxRotationValue(point) * (180 / Math.PI);
-            images.forEach((imgEl) => {
-                const transformedPoint = transformVideoToCanvasSpace(splineEditor, point.x, point.y);
-                imgEl.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
+
+            // Get scales from sliders
+            const hScale = topSliderPosToHScale(point.topSliderPos ?? 1.0);  // Range: -1.0 to 1.0
+            const vScale = point.rightSliderPos ?? 1.0;
+
+            // Get box radius for bottom edge calculation
+            const boxRadius = GeomCalc.getScaledBoxRadius(point, splineEditor);
+
+            vScaleGroups.forEach((vScaleGroup) => {
+                // vScaleGroup is a <g class="ref-scale-v-group"> containing an <hScaleGroup>
+                const hScaleGroup = vScaleGroup.querySelector('.ref-scale-h-group');
+                const image = hScaleGroup?.querySelector('image');
+
+                if (image) {
+                    // Update inner image transform (position + rotation only)
+                    image.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
+                }
+
+                if (hScaleGroup) {
+                    // Update inner group transform (horizontal scale in rotated coordinate system)
+                    hScaleGroup.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg}) scale(${hScale}, 1) rotate(${-rotationDeg}) translate(${-transformedPoint.x},${-transformedPoint.y})`);
+                }
+
+                // Update outer group transform (vertical scale from bottom edge in rotated coordinate system)
+                const bottomLocalX = 0;
+                const bottomLocalY = boxRadius;
+                const cosR = Math.cos(rotationDeg * Math.PI / 180);
+                const sinR = Math.sin(rotationDeg * Math.PI / 180);
+                const bottomWorldX = transformedPoint.x + (bottomLocalX * cosR - bottomLocalY * sinR);
+                const bottomWorldY = transformedPoint.y + (bottomLocalX * sinR + bottomLocalY * cosR);
+
+                vScaleGroup.setAttribute('transform', `translate(${bottomWorldX},${bottomWorldY}) rotate(${rotationDeg}) scale(1, ${vScale}) rotate(${-rotationDeg}) translate(${-bottomWorldX},${-bottomWorldY})`);
             });
         }
     }

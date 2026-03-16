@@ -335,7 +335,9 @@ class PowerSplineEditor:
                 scale = float(entry.get('scale', 1.0))
                 # Support both new 'boxR' and legacy 'boxRotation'/'rotation' fields
                 boxR = float(entry.get('boxR', entry.get('boxRotation', entry.get('rotation', 0.0))))
-                normalized.append({'frame': frame, 'x': x, 'y': y, 'scale': scale, 'boxR': boxR})
+                h_scale = float(entry.get('h_scale', 1.0))
+                v_scale = float(entry.get('v_scale', 1.0))
+                normalized.append({'frame': frame, 'x': x, 'y': y, 'scale': scale, 'boxR': boxR, 'h_scale': h_scale, 'v_scale': v_scale})
             except (TypeError, ValueError):
                 continue
         normalized.sort(key=lambda k: k['frame'])
@@ -349,22 +351,29 @@ class PowerSplineEditor:
             coords_field = self._decode_point_list(spline_data.get('coordinates', []))
             first = coords_field[0] if coords_field else {'x': 0.5, 'y': 0.5, 'scale': 1.0}
         try:
+            # Get h_scale and v_scale from topSliderPos and rightSliderPos
+            # h_scale: -1.0 to 1.0 (negative = flip), v_scale: 0.0 to 1.0
+            top_slider_pos = float(first.get('topSliderPos', 1.0))
+            h_scale = (top_slider_pos * 2) - 1  # Convert 0-1 to -1-1 range
+            v_scale = float(first.get('rightSliderPos', 1.0))
             return {
                 'frame': 1,
                 'x': float(first.get('x', 0.5)),
                 'y': float(first.get('y', 0.5)),
                 'scale': float(first.get('scale', first.get('boxScale', 1.0))),
                 'boxR': float(first.get('boxR', first.get('boxRotation', first.get('rotation', 0.0))) or 0.0),
+                'h_scale': h_scale,
+                'v_scale': v_scale,
             }
         except (TypeError, ValueError):
-            return {'frame': 1, 'x': 0.5, 'y': 0.5, 'scale': 1.0, 'boxR': 0}
+            return {'frame': 1, 'x': 0.5, 'y': 0.5, 'scale': 1.0, 'boxR': 0, 'h_scale': 1.0, 'v_scale': 1.0}
 
     def _sample_box_path(self, spline_data, target_frames):
         keys = self._normalize_box_keys(spline_data)
         if not keys:
             keys = [self._fallback_box_point(spline_data)]
         timeline_frames = int(spline_data.get('box_timeline_frames') or BOX_TIMELINE_MAX_POINTS)
-        timeline_frames = max(1, timeline_frames)
+        timeline_frames = max(1, min(timeline_frames, target_frames))
 
         def sample_at(frame_value):
             frame_value = max(1.0, min(float(frame_value), float(timeline_frames)))
@@ -378,16 +387,31 @@ class PowerSplineEditor:
                 if cur_key['frame'] <= frame_value <= next_key['frame']:
                     span = next_key['frame'] - cur_key['frame']
                     t = 0.0 if span <= 0 else (frame_value - cur_key['frame']) / span
-                    # Interpolate rotation without wrapping - this allows unlimited rotation
+                    # Interpolate rotation with proper direction handling
                     cur_rot = cur_key.get('boxR', 0.0)
                     next_rot = next_key.get('boxR', 0.0)
+                    # Handle angle wrapping to maintain rotation direction
+                    rot_diff = next_rot - cur_rot
+                    if rot_diff > math.pi:
+                        next_rot -= 2 * math.pi
+                    elif rot_diff < -math.pi:
+                        next_rot += 2 * math.pi
                     interpolated_rot = cur_rot + (next_rot - cur_rot) * t
+                    # Interpolate h_scale and v_scale
+                    cur_h_scale = cur_key.get('h_scale', 1.0)
+                    next_h_scale = next_key.get('h_scale', 1.0)
+                    interpolated_h_scale = cur_h_scale + (next_h_scale - cur_h_scale) * t
+                    cur_v_scale = cur_key.get('v_scale', 1.0)
+                    next_v_scale = next_key.get('v_scale', 1.0)
+                    interpolated_v_scale = cur_v_scale + (next_v_scale - cur_v_scale) * t
                     return {
                         'frame': frame_value,
                         'x': cur_key['x'] * (1 - t) + next_key['x'] * t,
                         'y': cur_key['y'] * (1 - t) + next_key['y'] * t,
                         'scale': cur_key['scale'] * (1 - t) + next_key['scale'] * t,
                         'boxR': interpolated_rot,
+                        'h_scale': interpolated_h_scale,
+                        'v_scale': interpolated_v_scale,
                     }
             return keys[-1]
 
@@ -403,6 +427,8 @@ class PowerSplineEditor:
                 'pointScale': round(snap['scale'], 4),
                 'frame': 1,
                 'boxR': round(snap.get('boxR', 0.0), 4),
+                'h_scale': round(snap.get('h_scale', 1.0), 4),
+                'v_scale': round(snap.get('v_scale', 1.0), 4),
             })
             return samples
 
@@ -418,6 +444,8 @@ class PowerSplineEditor:
                 'pointScale': round(snap['scale'], 4),
                 'frame': round(timeline_frame),
                 'boxR': round(snap.get('boxR', 0.0), 4),
+                'h_scale': round(snap.get('h_scale', 1.0), 4),
+                'v_scale': round(snap.get('v_scale', 1.0), 4),
             })
         return samples
 

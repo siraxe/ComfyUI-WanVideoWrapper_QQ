@@ -2,6 +2,7 @@ import { BOX_TIMELINE_MAX_POINTS } from './canvas_constants.js';
 import { syncVideoToFrame, hasBackgroundVideo } from './canvas_video_background.js';
 import { applyBoxTimelineFrame } from './canvas_scrub.js';
 import { transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js'; // Added transformVideoToCanvasSpace
+import { topSliderPosToHScale, hScaleToTopSliderPos, rightSliderPosToVScale, vScaleToRightSliderPos, clampHScale, clampVScale } from '../config/scale-config.js';
 
 export function attachBoxTimelineHelpers(editor) {
   // Helper to get max frames dynamically
@@ -49,6 +50,8 @@ export function attachBoxTimelineHelpers(editor) {
         const normY = Math.abs(rawY) >= 10 ? rawY / height : rawY;
         const scaleVal = (typeof key.scale === 'number' && !Number.isNaN(key.scale)) ? key.scale : 1;
         const rotationVal = (typeof key.rotation === 'number' && !Number.isNaN(key.rotation)) ? key.rotation : 0;
+        const hScaleVal = (typeof key.h_scale === 'number' && !Number.isNaN(key.h_scale)) ? key.h_scale : 1;
+        const vScaleVal = (typeof key.v_scale === 'number' && !Number.isNaN(key.v_scale)) ? key.v_scale : 1;
         // Don't clamp keyframe frames - allow them to extend beyond default max
         return {
           frame: Math.max(1, Math.round(key.frame || 1)),
@@ -56,6 +59,8 @@ export function attachBoxTimelineHelpers(editor) {
           y: normY,
           scale: editor.clampScaleValue ? editor.clampScaleValue(scaleVal) : Math.max(0.2, Math.min(6, scaleVal)),
           rotation: rotationVal,
+          h_scale: clampHScale(hScaleVal), // Clamp to [-1.0, 1.0]
+          v_scale: clampVScale(vScaleVal), // Clamp to [0.0, 1.0]
         };
       })
       .filter(Boolean)
@@ -68,7 +73,7 @@ export function attachBoxTimelineHelpers(editor) {
   };
 
   editor._getBoxLayerStoredPoint = (widget) => {
-    if (!widget) return { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
+    if (!widget) return { x: 0.5, y: 0.5, scale: 1, rotation: 0, h_scale: 1, v_scale: 1 };
     let stored = [];
     try {
       stored = JSON.parse(widget.value.points_store || '[]');
@@ -83,7 +88,12 @@ export function attachBoxTimelineHelpers(editor) {
       }
       return 0;
     })();
-    return {
+    // Get topSliderPos and convert to h_scale (-1.0 to 1.0)
+    const topSliderPos = typeof point.topSliderPos === 'number' && !Number.isNaN(point.topSliderPos) ? point.topSliderPos : 1.0;
+    const h_scale = topSliderPosToHScale(topSliderPos);
+    // Get v_scale (0.0 to 1.0, same as slider)
+    const v_scale = typeof point.rightSliderPos === 'number' && !Number.isNaN(point.rightSliderPos) ? point.rightSliderPos : 1.0;
+    const result = {
       x: typeof point.x === 'number' ? point.x : 0.5,
       y: typeof point.y === 'number' ? point.y : 0.5,
       scale: editor.clampScaleValue(
@@ -92,7 +102,10 @@ export function attachBoxTimelineHelpers(editor) {
           : (typeof point.scale === 'number' ? point.scale : 1)
       ),
       rotation,
+      h_scale: clampHScale(h_scale), // Clamp to [-1.0, 1.0]
+      v_scale: clampVScale(v_scale), // Clamp to [0.0, 1.0]
     };
+    return result;
   };
 
   editor._basisInterpolate = (p0, p1, p2, p3, t) => {
@@ -109,6 +122,8 @@ export function attachBoxTimelineHelpers(editor) {
       y: b0 * p0.y + b1 * p1.y + b2 * p2.y + b3 * p3.y,
       scale: b0 * p0.scale + b1 * p1.scale + b2 * p2.scale + b3 * p3.scale,
       rotation: b0 * p0.rotation + b1 * p1.rotation + b2 * p2.rotation + b3 * p3.rotation,
+      h_scale: b0 * (p0.h_scale ?? 1) + b1 * (p1.h_scale ?? 1) + b2 * (p2.h_scale ?? 1) + b3 * (p3.h_scale ?? 1),
+      v_scale: b0 * (p0.v_scale ?? 1) + b1 * (p1.v_scale ?? 1) + b2 * (p2.v_scale ?? 1) + b3 * (p3.v_scale ?? 1),
     };
   };
 
@@ -126,10 +141,24 @@ export function attachBoxTimelineHelpers(editor) {
       return (typeof rot === 'number' && !Number.isNaN(rot)) ? rot : 0;
     };
     if (clampedFrame <= first.frame) {
-      return { x: first.x, y: first.y, scale: first.scale ?? 1, rotation: resolveRotation(first) };
+      return {
+        x: first.x,
+        y: first.y,
+        scale: first.scale ?? 1,
+        rotation: resolveRotation(first),
+        h_scale: first.h_scale ?? 1,
+        v_scale: first.v_scale ?? 1
+      };
     }
     if (clampedFrame >= last.frame) {
-      return { x: last.x, y: last.y, scale: last.scale ?? 1, rotation: resolveRotation(last) };
+      return {
+        x: last.x,
+        y: last.y,
+        scale: last.scale ?? 1,
+        rotation: resolveRotation(last),
+        h_scale: last.h_scale ?? 1,
+        v_scale: last.v_scale ?? 1
+      };
     }
     for (let i = 0; i < sorted.length - 1; i++) {
       const current = sorted[i];
@@ -150,6 +179,8 @@ export function attachBoxTimelineHelpers(editor) {
                 y: point?.y ?? 0.5,
                 scale: point?.scale ?? 1,
                 rotation: resolveRotation(point),
+                h_scale: point?.h_scale ?? 1,
+                v_scale: point?.v_scale ?? 1,
               });
 
               const cp0 = makePoint(prev);
@@ -161,7 +192,14 @@ export function attachBoxTimelineHelpers(editor) {
             }
           }
         }
-        return { x: current.x, y: current.y, scale: current.scale ?? 1, rotation: resolveRotation(current) };
+        return {
+          x: current.x,
+          y: current.y,
+          scale: current.scale ?? 1,
+          rotation: resolveRotation(current),
+          h_scale: current.h_scale ?? 1,
+          v_scale: current.v_scale ?? 1
+        };
       }
 
       if (clampedFrame > current.frame && clampedFrame < next.frame) {
@@ -178,6 +216,8 @@ export function attachBoxTimelineHelpers(editor) {
             y: current.y + (next.y - current.y) * t,
             scale: (current.scale ?? 1) + ((next.scale ?? 1) - (current.scale ?? 1)) * t,
             rotation,
+            h_scale: (current.h_scale ?? 1) + ((next.h_scale ?? 1) - (current.h_scale ?? 1)) * t,
+            v_scale: (current.v_scale ?? 1) + ((next.v_scale ?? 1) - (current.v_scale ?? 1)) * t,
           };
         }
 
@@ -191,6 +231,8 @@ export function attachBoxTimelineHelpers(editor) {
           y: point?.y ?? 0.5,
           scale: point?.scale ?? 1,
           rotation: resolveRotation(point),
+          h_scale: point?.h_scale ?? 1,
+          v_scale: point?.v_scale ?? 1,
         });
 
         const cp0 = makePoint(p0);
@@ -207,10 +249,19 @@ export function attachBoxTimelineHelpers(editor) {
           y: current.y + (next.y - current.y) * t,
           scale: (current.scale ?? 1) + ((next.scale ?? 1) - (current.scale ?? 1)) * t,
           rotation,
+          h_scale: (current.h_scale ?? 1) + ((next.h_scale ?? 1) - (current.h_scale ?? 1)) * t,
+          v_scale: (current.v_scale ?? 1) + ((next.v_scale ?? 1) - (current.v_scale ?? 1)) * t,
         };
       }
     }
-    return { x: last.x, y: last.y, scale: last.scale ?? 1, rotation: resolveRotation(last) };
+    return {
+      x: last.x,
+      y: last.y,
+      scale: last.scale ?? 1,
+      rotation: resolveRotation(last),
+      h_scale: last.h_scale ?? 1,
+      v_scale: last.v_scale ?? 1
+    };
   };
 
   editor._applyBoxLayerPoint = (widget, normalizedPoint) => {
@@ -223,6 +274,11 @@ export function attachBoxTimelineHelpers(editor) {
     const rotation = (typeof point.rotation === 'number' && !Number.isNaN(point.rotation))
       ? point.rotation
       : (typeof point.boxRotation === 'number' && !Number.isNaN(point.boxRotation) ? point.boxRotation : 0);
+    // Convert h_scale (-1.0 to 1.0) to topSliderPos (0.0 to 1.0)
+    const hScale = typeof point.h_scale === 'number' ? point.h_scale : 1.0;
+    const topSliderPos = hScaleToTopSliderPos(hScale);
+    // v_scale is directly 0.0-1.0
+    const rightSliderPos = typeof point.v_scale === 'number' ? point.v_scale : 1.0;
     const payload = [{
       x: clampedX,
       y: clampedY,
@@ -232,6 +288,8 @@ export function attachBoxTimelineHelpers(editor) {
       scale,
       rotation,
       boxRotation: rotation,
+      topSliderPos,
+      rightSliderPos,
     }];
     widget.value.points_store = JSON.stringify(payload);
     if (activeWidget === widget) {
@@ -334,11 +392,14 @@ export function attachBoxTimelineHelpers(editor) {
       // Always use this. No re-normalization needed here.
       const rawX = (typeof stored?.x === 'number' && !Number.isNaN(stored.x)) ? stored.x : 0.5;
       const rawY = (typeof stored?.y === 'number' && !Number.isNaN(stored.y)) ? stored.y : 0.5;
+      const h_scale_val = (typeof stored?.h_scale === 'number' && !Number.isNaN(stored.h_scale)) ? stored.h_scale : 1;
       return {
         x: rawX, // Use rawX directly, as it's already normalized
         y: rawY, // Use rawY directly, as it's already normalized
         scale: editor.clampScaleValue(stored?.scale ?? 1),
         rotation: (typeof stored?.rotation === 'number' && !Number.isNaN(stored.rotation)) ? stored.rotation : 0,
+        h_scale: h_scale_val,
+        v_scale: (typeof stored?.v_scale === 'number' && !Number.isNaN(stored.v_scale)) ? stored.v_scale : 1,
       };
     })();
 
@@ -349,7 +410,10 @@ export function attachBoxTimelineHelpers(editor) {
       y: normalized.y,
       scale: normalized.scale ?? 1,
       rotation: (typeof normalized.rotation === 'number' && !Number.isNaN(normalized.rotation)) ? normalized.rotation : 0,
+      h_scale: normalized.h_scale ?? 1,
+      v_scale: normalized.v_scale ?? 1,
     };
+
     const existingIndex = keys.findIndex(k => k.frame === targetFrame);
     if (existingIndex >= 0) {
       keys[existingIndex] = payload;
@@ -389,6 +453,46 @@ export function attachBoxTimelineHelpers(editor) {
     widget.value.box_keys = [];
     editor.applyBoxTimelineFrame(widget, widget.value.box_timeline_point || 1);
     return true;
+  };
+
+  editor._updatePointsStoreWithCurrentSliderPositions = () => {
+    // Updates points_store with the current slider positions from the active point
+    // This ensures that when keyframes are created, they use the latest slider values
+    const activeWidget = editor.getActiveWidget?.();
+    if (!activeWidget || !editor._isBoxLayerWidget(activeWidget)) {
+      return;
+    }
+    if (!Array.isArray(editor.points) || editor.points.length === 0) {
+      return;
+    }
+
+    const point = editor.points[0];
+    if (!point) return;
+
+    try {
+      let storedPoints = [];
+      try {
+        storedPoints = JSON.parse(activeWidget.value.points_store || '[]');
+      } catch {
+        storedPoints = [];
+      }
+
+      if (storedPoints && storedPoints.length > 0) {
+        // Update slider positions in the stored point
+        const storedPoint = storedPoints[0];
+
+        if (typeof point.topSliderPos === 'number' && !Number.isNaN(point.topSliderPos)) {
+          storedPoint.topSliderPos = point.topSliderPos;
+        }
+        if (typeof point.rightSliderPos === 'number' && !Number.isNaN(point.rightSliderPos)) {
+          storedPoint.rightSliderPos = point.rightSliderPos;
+        }
+
+        activeWidget.value.points_store = JSON.stringify(storedPoints);
+      }
+    } catch (e) {
+      console.warn('[_updatePointsStoreWithCurrentSliderPositions] Failed to update points_store:', e);
+    }
   };
 
   editor.setBoxTimelinePreview = (widget, frame) => {

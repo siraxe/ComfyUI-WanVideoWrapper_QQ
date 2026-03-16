@@ -13,7 +13,9 @@
  */
 
 import { BOX_BASE_RADIUS, POINT_BASE_RADIUS, transformVideoToCanvasSpace } from '../spline_utils.js';
+import { topSliderPosToHScale, hScaleToTopSliderPos, rightSliderPosToVScale, vScaleToRightSliderPos } from '../config/scale-config.js';
 import { BOX_TIMELINE_MAX_POINTS } from '../canvas/canvas_constants.js';
+import { computeBoxTopControllerGeometry, computeBoxRightControllerGeometry } from './geometry-calculator.js';
 
 /**
  * Draws the active layer with lines, dots, and box-specific visualizations
@@ -180,6 +182,18 @@ export function drawCurrentBoxVisualization(context, widget) {
             return pts.length > 0 ? pts[0] : null;
         }, styles);
 
+        // Draw top side controller (dotted line + triangle)
+        drawBoxTopController(context, () => {
+            const pts = getFreshBoxPoints();
+            return pts.length > 0 ? pts[0] : null;
+        }, styles);
+
+        // Draw right side controller (dotted line + square)
+        drawBoxRightController(context, () => {
+            const pts = getFreshBoxPoints();
+            return pts.length > 0 ? pts[0] : null;
+        }, styles);
+
         drawCurrentBoxCenterDot(context, () => {
             const pts = getFreshBoxPoints();
             return pts.length > 0 ? pts[0] : null;
@@ -204,6 +218,27 @@ export function drawCurrentBoxVisualization(context, widget) {
         const renderH = imgH * scale;
         const rotationDeg = context._getBoxRotationValue(point) * (180 / Math.PI);
 
+        // Get horizontal scale from top slider: find any point with topSliderPos, default to 1.0 (normal)
+        const pointWithTopSlider = freshPoints.find(p => p.topSliderPos !== undefined);
+        const topSliderPos = pointWithTopSlider?.topSliderPos ?? 1.0;
+        const hScale = topSliderPosToHScale(topSliderPos);  // Range: -1.0 to 1.0
+
+        // Get vertical scale from right slider: find any point with rightSliderPos, default to 1.0 (full)
+        const pointWithRightSlider = freshPoints.find(p => p.rightSliderPos !== undefined);
+        const rightSliderPos = pointWithRightSlider?.rightSliderPos ?? 1.0;
+        const vScale = rightSliderPos; // 0 to 1, where 1 is full height, 0 is squashed to nothing
+
+        // Create outer wrapper group for vertical scale from bottom edge
+        const vScaleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        vScaleGroup.setAttribute('class', 'ref-scale-v-group');
+        vScaleGroup.setAttribute('data-widget-name', widget?.value?.name || 'unknown');
+
+        // Create inner wrapper group for horizontal scale from center
+        const hScaleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        hScaleGroup.setAttribute('class', 'ref-scale-h-group');
+        hScaleGroup.setAttribute('data-widget-name', widget?.value?.name || 'unknown');
+        vScaleGroup.appendChild(hScaleGroup);
+
         const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         // Use cached URL to prevent blinking during timeline scrub
         const imageHref = context._getRefImageUrl(widget, attachment);
@@ -221,13 +256,37 @@ export function drawCurrentBoxVisualization(context, widget) {
         image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         const transformedPoint = transformVideoToCanvasSpace(context.splineEditor, point.x, point.y);
 
+        // Inner transform: position and rotation (no scale)
         image.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
         image.style.pointerEvents = 'none';
         image.style.opacity = '0.9';
         // Store cache bust version to track if image needs updating
         image.dataset.cacheBustVersion = context._cacheBustCounter;
 
-        context._pendingShapes.activeBoxImages.push(image);
+        // Add image to horizontal scale group
+        hScaleGroup.appendChild(image);
+
+        // Inner group transform: horizontal scale in the box's rotated coordinate system
+        // hScale can be negative for flip: -1.0 = flipped + 100%, 0.5 = normal + 50%, -0.5 = flipped + 50%
+        hScaleGroup.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg}) scale(${hScale}, 1) rotate(${-rotationDeg}) translate(${-transformedPoint.x},${-transformedPoint.y})`);
+
+        // Outer group transform: vertical scale from bottom edge in rotated coordinate system
+        // To scale from bottom, we translate to bottom edge (which is at +boxRadius in local Y after rotation),
+        // scale vertically, then translate back. The offset compensates to keep bottom edge fixed.
+        // When vScale is 1: offset is 0. When vScale is 0: offset is boxRadius * 1 (maximum shift).
+        const yOffset = boxRadius * (1 - vScale);
+        // Calculate the bottom edge position in rotated space: it's at (0, +boxRadius) in local coords
+        const bottomLocalX = 0;
+        const bottomLocalY = boxRadius;
+        // Rotate the bottom edge point
+        const cosR = Math.cos(rotationDeg * Math.PI / 180);
+        const sinR = Math.sin(rotationDeg * Math.PI / 180);
+        const bottomWorldX = transformedPoint.x + (bottomLocalX * cosR - bottomLocalY * sinR);
+        const bottomWorldY = transformedPoint.y + (bottomLocalX * sinR + bottomLocalY * cosR);
+
+        vScaleGroup.setAttribute('transform', `translate(${bottomWorldX},${bottomWorldY}) rotate(${rotationDeg}) scale(1, ${vScale}) rotate(${-rotationDeg}) translate(${-bottomWorldX},${-bottomWorldY})`);
+
+        context._pendingShapes.activeBoxImages.push(vScaleGroup);
     }
 }
 
@@ -276,6 +335,140 @@ export function drawCurrentBoxRotationHandle(context, pointGetter, styles = {}) 
             const idx = context.splineEditor.resolvePointIndex?.(d.point) ?? context.splineEditor.points.indexOf(d.point);
             if (idx >= 0 && context.splineEditor.startBoxRotationDrag) {
                 context.splineEditor.startBoxRotationDrag(idx, pv.event);
+            }
+        });
+}
+
+/**
+ * Draws the top side controller (dotted line + circle) for the active box
+ *
+ * @param {Object} context - The LayerRenderer instance (this)
+ * @param {Function} pointGetter - Function that returns the current point
+ * @param {Object} styles - Style configuration object
+ */
+export function drawBoxTopController(context, pointGetter, styles = {}) {
+    // 1. Draw 5 dashed line segments
+    const numSegments = 5;
+    for (let i = 0; i < numSegments; i++) {
+        context.activeLayerPanel.add(pv.Line)
+            .data(() => {
+                const activeWidget = context.node.layerManager.getActiveWidget();
+                if (context._getLayerType(activeWidget) !== 'box') return [];
+
+                const point = pointGetter();
+                const sliderPos = point?.topSliderPos ?? 1.0;  // Default = h_scale = 1.0 (normal)
+                const geom = computeBoxTopControllerGeometry(point, context.splineEditor, sliderPos);
+                if (!geom) return [];
+
+                // Use 1/9 for each unit (5 dashes + 4 gaps = 9 units)
+                // Positions: 0-1/9, 2/9-3/9, 4/9-5/9, 6/9-7/9, 8/9-9/9
+                const tStart = (i * 2) / 9;
+                const tEnd = (i * 2 + 1) / 9;
+
+                const startX = geom.start.x + (geom.end.x - geom.start.x) * tStart;
+                const startY = geom.start.y + (geom.end.y - geom.start.y) * tStart;
+                const endX = geom.start.x + (geom.end.x - geom.start.x) * tEnd;
+                const endY = geom.start.y + (geom.end.y - geom.start.y) * tEnd;
+
+                return [{ x: startX, y: startY }, { x: endX, y: endY }];
+            })
+            .left(d => transformVideoToCanvasSpace(context.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(context.splineEditor, d.x, d.y).y)
+            .strokeStyle(styles.pointStroke || '#064f1c')
+            .lineWidth(1);
+    }
+
+    // 2. Draw handle tip (Triangle shape)
+    context.activeLayerPanel.add(pv.Dot)
+        .data(() => {
+            // Only render if current layer is still a box layer
+            const activeWidget = context.node.layerManager.getActiveWidget();
+            if (context._getLayerType(activeWidget) !== 'box') return [];
+
+            const point = pointGetter();
+            const sliderPos = point?.topSliderPos ?? 0.5;
+            const geom = computeBoxTopControllerGeometry(point, context.splineEditor, sliderPos);
+            return geom ? [{ point, tip: geom.tip }] : [];
+        })
+        .left(d => transformVideoToCanvasSpace(context.splineEditor, d.tip.x, d.tip.y).x)
+        .top(d => transformVideoToCanvasSpace(context.splineEditor, d.tip.x, d.tip.y).y)
+        .shape('triangle')
+        .radius(6)
+        .fillStyle(styles.pointFill || 'rgba(45, 242, 109, 0.9)')
+        .strokeStyle(styles.pointStroke || '#064f1c')
+        .lineWidth(1.5)
+        .cursor('grab')
+        .event("mousedown", (d) => {
+            const idx = context.splineEditor.resolvePointIndex?.(d.point) ?? context.splineEditor.points.indexOf(d.point);
+            if (idx >= 0 && context.splineEditor.startBoxTopSliderDrag) {
+                context.splineEditor.startBoxTopSliderDrag(idx, pv.event);
+            }
+        });
+}
+
+/**
+ * Draws the right side controller (5 vertical line segments + icon) for the active box
+ *
+ * @param {Object} context - The LayerRenderer instance (this)
+ * @param {Function} pointGetter - Function that returns the current point
+ * @param {Object} styles - Style configuration object
+ */
+export function drawBoxRightController(context, pointGetter, styles = {}) {
+    // 1. Draw 5 vertical line segments (dashed)
+    const numSegments = 5;
+    for (let i = 0; i < numSegments; i++) {
+        context.activeLayerPanel.add(pv.Line)
+            .data(() => {
+                const activeWidget = context.node.layerManager.getActiveWidget();
+                if (context._getLayerType(activeWidget) !== 'box') return [];
+
+                const point = pointGetter();
+                // Using rightSliderPos (0 = bottom, 1 = top)
+                const sliderPos = point?.rightSliderPos ?? 1;
+                const geom = computeBoxRightControllerGeometry(point, context.splineEditor, sliderPos);
+                if (!geom) return [];
+
+                // Use 1/9 for each unit (5 dashes + 4 gaps = 9 units)
+                // Positions: 0-1/9, 2/9-3/9, 4/9-5/9, 6/9-7/9, 8/9-9/9
+                const tStart = (i * 2) / 9;
+                const tEnd = (i * 2 + 1) / 9;
+
+                const startX = geom.start.x + (geom.end.x - geom.start.x) * tStart;
+                const startY = geom.start.y + (geom.end.y - geom.start.y) * tStart;
+                const endX = geom.start.x + (geom.end.x - geom.start.x) * tEnd;
+                const endY = geom.start.y + (geom.end.y - geom.start.y) * tEnd;
+
+                return [{ x: startX, y: startY }, { x: endX, y: endY }];
+            })
+            .left(d => transformVideoToCanvasSpace(context.splineEditor, d.x, d.y).x)
+            .top(d => transformVideoToCanvasSpace(context.splineEditor, d.x, d.y).y)
+            .strokeStyle(styles.pointStroke || '#064f1c')
+            .lineWidth(1);
+    }
+
+    // 2. Draw handle tip (Square shape for right controller)
+    context.activeLayerPanel.add(pv.Dot)
+        .data(() => {
+            const activeWidget = context.node.layerManager.getActiveWidget();
+            if (context._getLayerType(activeWidget) !== 'box') return [];
+
+            const point = pointGetter();
+            const sliderPos = point?.rightSliderPos ?? 1;
+            const geom = computeBoxRightControllerGeometry(point, context.splineEditor, sliderPos);
+            return geom ? [{ point, tip: geom.tip }] : [];
+        })
+        .left(d => transformVideoToCanvasSpace(context.splineEditor, d.tip.x, d.tip.y).x)
+        .top(d => transformVideoToCanvasSpace(context.splineEditor, d.tip.x, d.tip.y).y)
+        .shape('square')
+        .radius(5)
+        .fillStyle(styles.pointFill || 'rgba(45, 242, 109, 0.9)')
+        .strokeStyle(styles.pointStroke || '#064f1c')
+        .lineWidth(1.5)
+        .cursor('grab')
+        .event("mousedown", (d) => {
+            const idx = context.splineEditor.resolvePointIndex?.(d.point) ?? context.splineEditor.points.indexOf(d.point);
+            if (idx >= 0 && context.splineEditor.startBoxRightSliderDrag) {
+                context.splineEditor.startBoxRightSliderDrag(idx, pv.event);
             }
         });
 }
@@ -389,6 +582,25 @@ export function queueBoxManipulator(context, widget) {
         const renderH = imgH * scale;
         const rotationDeg = context._getBoxRotationValue(point) * (180 / Math.PI);
 
+        // Get horizontal scale from top slider: default to 1.0 (normal, no flip) for play mode
+        const topSliderPos = point?.topSliderPos ?? 1.0;
+        const hScale = topSliderPosToHScale(topSliderPos);  // Range: -1.0 to 1.0
+
+        // Get vertical scale from right slider: default to 1.0 (full height)
+        const rightSliderPos = point?.rightSliderPos ?? 1.0;
+        const vScale = rightSliderPos;
+
+        // Create outer wrapper group for vertical scale from bottom edge
+        const vScaleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        vScaleGroup.setAttribute('class', 'ref-scale-v-group');
+        vScaleGroup.setAttribute('data-widget-name', widget?.value?.name || 'unknown');
+
+        // Create inner wrapper group for horizontal scale from center
+        const hScaleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        hScaleGroup.setAttribute('class', 'ref-scale-h-group');
+        hScaleGroup.setAttribute('data-widget-name', widget?.value?.name || 'unknown');
+        vScaleGroup.appendChild(hScaleGroup);
+
         const image = document.createElementNS('http://www.w3.org/2000/svg', 'image');
         // Use cached URL to prevent blinking during timeline scrub
         const imageHref = context._getRefImageUrl(widget, attachment);
@@ -406,13 +618,31 @@ export function queueBoxManipulator(context, widget) {
         image.setAttribute('preserveAspectRatio', 'xMidYMid meet');
         const transformedPoint = transformVideoToCanvasSpace(context.splineEditor, point.x, point.y);
 
+        // Inner transform: position and rotation (no scale)
         image.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg})`);
         image.style.pointerEvents = 'none';
         image.style.opacity = '0.9';
         // Store cache bust version to track if image needs updating
         image.dataset.cacheBustVersion = context._cacheBustCounter;
 
-        context._pendingShapes.activeBoxImages.push(image);
+        // Add image to horizontal scale group
+        hScaleGroup.appendChild(image);
+
+        // Inner group transform: horizontal scale in the box's rotated coordinate system
+        // hScale can be negative for flip: -1.0 = flipped + 100%, 0.5 = normal + 50%, -0.5 = flipped + 50%
+        hScaleGroup.setAttribute('transform', `translate(${transformedPoint.x},${transformedPoint.y}) rotate(${rotationDeg}) scale(${hScale}, 1) rotate(${-rotationDeg}) translate(${-transformedPoint.x},${-transformedPoint.y})`);
+
+        // Outer group transform: vertical scale from bottom edge in rotated coordinate system
+        const bottomLocalX = 0;
+        const bottomLocalY = radius;
+        const cosR = Math.cos(rotationDeg * Math.PI / 180);
+        const sinR = Math.sin(rotationDeg * Math.PI / 180);
+        const bottomWorldX = transformedPoint.x + (bottomLocalX * cosR - bottomLocalY * sinR);
+        const bottomWorldY = transformedPoint.y + (bottomLocalX * sinR + bottomLocalY * cosR);
+
+        vScaleGroup.setAttribute('transform', `translate(${bottomWorldX},${bottomWorldY}) rotate(${rotationDeg}) scale(1, ${vScale}) rotate(${-rotationDeg}) translate(${-bottomWorldX},${-bottomWorldY})`);
+
+        context._pendingShapes.activeBoxImages.push(vScaleGroup);
     }
 }
 

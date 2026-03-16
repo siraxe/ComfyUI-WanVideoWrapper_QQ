@@ -45,6 +45,8 @@ export function attachStateHelpers(editor) {
           scale: 1,
           highlighted: false,
           rotation: 0,
+          topSliderPos: 1.0,  // Middle of -1 to 1 range = h_scale = 1.0 (normal)
+          rightSliderPos: 1.0,  // Top of 0 to 1 range = v_scale = 1.0 (full)
         };
         coercedPoints = [defaultPoint];
       } else if (!coercedPoints.length) {
@@ -57,6 +59,8 @@ export function attachStateHelpers(editor) {
           scale: 1,
           highlighted: false,
           rotation: 0,
+          topSliderPos: 1.0,  // Middle of -1 to 1 range = h_scale = 1.0 (normal)
+          rightSliderPos: 1.0,  // Top of 0 to 1 range = v_scale = 1.0 (full)
         };
         coercedPoints = [defaultPoint];
       }
@@ -150,6 +154,14 @@ export function attachStateHelpers(editor) {
         : ((typeof point.rotation === 'number' && !Number.isNaN(point.rotation)) ? point.rotation : 0);
       point.boxRotation = rotationRaw;
       point.rotation = rotationRaw;
+
+      // Ensure slider positions have defaults (for box layers)
+      if (typeof point.topSliderPos !== 'number' || Number.isNaN(point.topSliderPos)) {
+        point.topSliderPos = 1.0;  // Middle position = h_scale = 1.0 (normal)
+      }
+      if (typeof point.rightSliderPos !== 'number' || Number.isNaN(point.rightSliderPos)) {
+        point.rightSliderPos = 1.0;  // Top position = v_scale = 1.0 (full height)
+      }
     }
   };
 

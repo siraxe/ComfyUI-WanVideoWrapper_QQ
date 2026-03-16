@@ -1,5 +1,6 @@
 import { app } from '../../../../scripts/app.js';
 import { BOX_BASE_RADIUS, transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js';
+import { topSliderPosToHScale, hScaleToTopSliderPos, rightSliderPosToVScale, vScaleToRightSliderPos } from '../config/scale-config.js';
 
 export function attachInteractionHandlers(editor) {
   editor.isRotatingBoxHandle = false;
@@ -222,6 +223,221 @@ export function attachInteractionHandlers(editor) {
     editor._updateBoxRotationFromCoords(initialCoords);
   };
 
+  editor.startBoxTopSliderDrag = (pointRef, rawEvent) => {
+    const index = typeof pointRef === 'number' ? pointRef : editor.resolvePointIndex(pointRef);
+    if (!Array.isArray(editor.points) || index < 0 || !editor.points[index]) {
+      return;
+    }
+    rawEvent?.preventDefault?.();
+    rawEvent?.stopPropagation?.();
+    editor.isDragging = true;
+    editor.isDraggingBoxTopSlider = true;
+    editor.boxTopSliderIndex = index;
+
+    // Force full rebuild so the ref image group structure is created
+    editor._forceRebuildNextRender = true;
+
+    const point = editor.points[index];
+    const rotation = point.rotation || point.boxRotation || 0;
+    let radius = editor.getBoxPointRadius ? editor.getBoxPointRadius(point) : 50;
+
+    // Account for canvas scale (same as geometry calculator does)
+    const canvasScale = (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0)
+      ? editor.scale
+      : 1;
+    if (canvasScale > 0) {
+      radius /= canvasScale;
+    }
+
+    // Store initial state for calculating slider position
+    editor._topSliderDragState = {
+      boxX: point.x,
+      boxY: point.y,
+      radius,
+      rotation,
+    };
+
+    const usePointer = typeof PointerEvent !== 'undefined';
+    const move = (evt) => {
+      evt?.preventDefault?.();
+      const coords = editor._getPointerCoords(evt);
+      editor._updateBoxTopSliderFromCoords(coords);
+    };
+    const end = (evt) => {
+      cleanup();
+      editor.isDraggingBoxTopSlider = false;
+      editor.boxTopSliderIndex = -1;
+      editor._topSliderDragState = undefined;
+      editor.dragEndHandler(evt);
+    };
+    const cleanup = () => {
+      if (usePointer) {
+        document.removeEventListener('pointermove', move, true);
+        document.removeEventListener('pointerup', end, true);
+        document.removeEventListener('pointercancel', end, true);
+      } else {
+        document.removeEventListener('mousemove', move, true);
+        document.removeEventListener('mouseup', end, true);
+      }
+    };
+    if (usePointer) {
+      document.addEventListener('pointermove', move, true);
+      document.addEventListener('pointerup', end, true);
+      document.addEventListener('pointercancel', end, true);
+    } else {
+      document.addEventListener('mousemove', move, true);
+      document.addEventListener('mouseup', end, true);
+    }
+    // Initial update
+    const initialCoords = editor._getPointerCoords(rawEvent);
+    editor._updateBoxTopSliderFromCoords(initialCoords);
+  };
+
+  editor._updateBoxTopSliderFromCoords = (coords) => {
+    const state = editor._topSliderDragState;
+    if (!state || editor.boxTopSliderIndex < 0) return;
+
+    const point = editor.points[editor.boxTopSliderIndex];
+    if (!point) return;
+
+    // Use videoSpace coords (already transformed by _getPointerCoords)
+    const mouseX = coords.videoSpaceX ?? 0;
+    const mouseY = coords.videoSpaceY ?? 0;
+
+    // Transform mouse to box-local space (undo rotation)
+    const dx = mouseX - state.boxX;
+    const dy = mouseY - state.boxY;
+    const cos = Math.cos(-state.rotation);
+    const sin = Math.sin(-state.rotation);
+    const localX = dx * cos - dy * sin;
+    const localY = dx * sin + dy * cos;
+
+    // Calculate slider position (0 to 1) based on local X position
+    // Line goes from -radius to +radius
+    let sliderPos = (localX + state.radius) / (2 * state.radius);
+    sliderPos = Math.max(0, Math.min(1, sliderPos)); // Clamp to [0, 1]
+
+    // Store the slider position on the point
+    point.topSliderPos = sliderPos;
+
+    // Update points_store so keyframes use the latest slider position
+    editor._updatePointsStoreWithCurrentSliderPositions?.();
+
+    editor.layerRenderer?.render();
+    // Also update ref image scale directly (since full rebuild doesn't happen during drag)
+    editor.layerRenderer?.updateActiveBoxRefScale?.();
+    // Reset force rebuild after first render
+    editor._forceRebuildNextRender = false;
+  };
+
+  // Right side slider drag handlers (vertical)
+  editor.startBoxRightSliderDrag = (pointRef, rawEvent) => {
+    const index = typeof pointRef === 'number' ? pointRef : editor.resolvePointIndex(pointRef);
+    if (!Array.isArray(editor.points) || index < 0 || !editor.points[index]) {
+      return;
+    }
+    rawEvent?.preventDefault?.();
+    rawEvent?.stopPropagation?.();
+    editor.isDragging = true;
+    editor.isDraggingBoxRightSlider = true;
+    editor.boxRightSliderIndex = index;
+
+    // Force full rebuild so the ref image group structure is created
+    editor._forceRebuildNextRender = true;
+
+    const point = editor.points[index];
+    const rotation = point.rotation || point.boxRotation || 0;
+    let radius = editor.getBoxPointRadius ? editor.getBoxPointRadius(point) : 50;
+
+    // Account for canvas scale (same as geometry calculator does)
+    const canvasScale = (editor.originalImageWidth && editor.originalImageHeight && editor.scale > 0)
+      ? editor.scale
+      : 1;
+    if (canvasScale > 0) {
+      radius /= canvasScale;
+    }
+
+    // Store initial state for calculating slider position
+    editor._rightSliderDragState = {
+      boxX: point.x,
+      boxY: point.y,
+      radius,
+      rotation,
+    };
+
+    const usePointer = typeof PointerEvent !== 'undefined';
+    const move = (evt) => {
+      evt?.preventDefault?.();
+      const coords = editor._getPointerCoords(evt);
+      editor._updateBoxRightSliderFromCoords(coords);
+    };
+    const end = (evt) => {
+      cleanup();
+      editor.isDraggingBoxRightSlider = false;
+      editor.boxRightSliderIndex = -1;
+      editor._rightSliderDragState = undefined;
+      editor.dragEndHandler(evt);
+    };
+    const cleanup = () => {
+      if (usePointer) {
+        document.removeEventListener('pointermove', move, true);
+        document.removeEventListener('pointerup', end, true);
+        document.removeEventListener('pointercancel', end, true);
+      } else {
+        document.removeEventListener('mousemove', move, true);
+        document.removeEventListener('mouseup', end, true);
+      }
+    };
+    if (usePointer) {
+      document.addEventListener('pointermove', move, true);
+      document.addEventListener('pointerup', end, true);
+      document.addEventListener('pointercancel', end, true);
+    } else {
+      document.addEventListener('mousemove', move, true);
+      document.addEventListener('mouseup', end, true);
+    }
+    // Initial update
+    const initialCoords = editor._getPointerCoords(rawEvent);
+    editor._updateBoxRightSliderFromCoords(initialCoords);
+  };
+
+  editor._updateBoxRightSliderFromCoords = (coords) => {
+    const state = editor._rightSliderDragState;
+    if (!state || editor.boxRightSliderIndex < 0) return;
+
+    const point = editor.points[editor.boxRightSliderIndex];
+    if (!point) return;
+
+    // Use videoSpace coords (already transformed by _getPointerCoords)
+    const mouseX = coords.videoSpaceX ?? 0;
+    const mouseY = coords.videoSpaceY ?? 0;
+
+    // Transform mouse to box-local space (undo rotation)
+    const dx = mouseX - state.boxX;
+    const dy = mouseY - state.boxY;
+    const cos = Math.cos(-state.rotation);
+    const sin = Math.sin(-state.rotation);
+    const localX = dx * cos - dy * sin;
+    const localY = dx * sin + dy * cos;
+
+    // Calculate slider position (0 to 1) based on local Y position
+    // Line goes from +radius (bottom, pos=0) to -radius (top, pos=1)
+    let sliderPos = (state.radius - localY) / (2 * state.radius);
+    sliderPos = Math.max(0, Math.min(1, sliderPos)); // Clamp to [0, 1]
+
+    // Store the slider position on the point
+    point.rightSliderPos = sliderPos;
+
+    // Update points_store so keyframes use the latest slider position
+    editor._updatePointsStoreWithCurrentSliderPositions?.();
+
+    editor.layerRenderer?.render();
+    // Also update ref image scale directly (since full rebuild doesn't happen during drag)
+    editor.layerRenderer?.updateActiveBoxRefScale?.();
+    // Reset force rebuild after first render
+    editor._forceRebuildNextRender = false;
+  };
+
   editor.updateBoxCursor = (coords) => {
     const canvasEl = editor.vis?.canvas?.();
     if (!canvasEl) return;
@@ -378,7 +594,14 @@ export function attachInteractionHandlers(editor) {
       const keys = widget.value.box_keys || [];
 
       // Convert box_keys to temporary points array for manipulation
-      const keyframeNormPoints = keys.map(k => ({ x: k.x, y: k.y, scale: k.scale, rotation: k.rotation }));
+      const keyframeNormPoints = keys.map(k => ({
+        x: k.x,
+        y: k.y,
+        scale: k.scale,
+        rotation: k.rotation,
+        topSliderPos: typeof k.h_scale === 'number' ? hScaleToTopSliderPos(k.h_scale) : 1.0,
+        rightSliderPos: typeof k.v_scale === 'number' ? k.v_scale : 1.0,
+      }));
       const keyframeDenormPoints = editor.denormalizePoints ? editor.denormalizePoints(keyframeNormPoints) : keyframeNormPoints;
 
       // Store as temporary points for manipulation
@@ -696,6 +919,15 @@ export function attachInteractionHandlers(editor) {
       }
       if (normalizedPoints[i].rotation !== undefined) {
         keys[i].rotation = normalizedPoints[i].rotation;
+      }
+      // Save h_scale and v_scale from slider positions
+      if (normalizedPoints[i].topSliderPos !== undefined) {
+        // Convert topSliderPos (0-1) to h_scale (-1 to 1)
+        keys[i].h_scale = topSliderPosToHScale(normalizedPoints[i].topSliderPos);
+      }
+      if (normalizedPoints[i].rightSliderPos !== undefined) {
+        // v_scale is directly 0-1
+        keys[i].v_scale = normalizedPoints[i].rightSliderPos;
       }
     }
 

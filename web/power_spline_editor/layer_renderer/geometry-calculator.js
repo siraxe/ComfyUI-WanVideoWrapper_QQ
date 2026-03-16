@@ -112,6 +112,86 @@ export function computeBoxHandleGeometry(point, splineEditor) {
 }
 
 /**
+ * Computes the geometry for a top side controller (dotted line + circle)
+ * @param {Object} point - The box point
+ * @param {Object} splineEditor - The spline editor instance
+ * @param {number} sliderPos - Optional slider position (0=left, 1=right), defaults to 1
+ * @returns {Object|null} Object with {start, end, tip} coordinates, or null if invalid
+ */
+export function computeBoxTopControllerGeometry(point, splineEditor, sliderPos = 1) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+
+    const rotation = getBoxRotationValue(point);
+    let radius = getScaledBoxRadius(point, splineEditor);
+    if (!Number.isFinite(radius)) return null;
+
+    const canvasScale = getCanvasScale(splineEditor);
+    if (canvasScale > 0) {
+        radius /= canvasScale;
+    }
+
+    // Distance above the box (noticeable gap)
+    const gapAbove = 12 / (canvasScale || 1);
+    const topY = -radius - gapAbove;
+
+    const rotatePoint = (px, py) => ({
+        x: point.x + px * Math.cos(rotation) - py * Math.sin(rotation),
+        y: point.y + px * Math.sin(rotation) + py * Math.cos(rotation),
+    });
+
+    // Clamp slider position to [0, 1]
+    const clampedPos = Math.max(0, Math.min(1, sliderPos));
+    // Slider x position: -radius at pos=0, +radius at pos=1
+    const sliderX = -radius + (clampedPos * 2 * radius);
+
+    return {
+        start: rotatePoint(-radius, topY),
+        end: rotatePoint(radius, topY),
+        tip: rotatePoint(sliderX, topY),  // Circle at slider position
+    };
+}
+
+/**
+ * Computes the geometry for a right side controller (vertical line + icon)
+ * @param {Object} point - The box point
+ * @param {Object} splineEditor - The spline editor instance
+ * @param {number} sliderPos - Optional slider position (0=bottom, 1=top), defaults to 1
+ * @returns {Object|null} Object with {start, end, tip} coordinates, or null if invalid
+ */
+export function computeBoxRightControllerGeometry(point, splineEditor, sliderPos = 1) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+
+    const rotation = getBoxRotationValue(point);
+    let radius = getScaledBoxRadius(point, splineEditor);
+    if (!Number.isFinite(radius)) return null;
+
+    const canvasScale = getCanvasScale(splineEditor);
+    if (canvasScale > 0) {
+        radius /= canvasScale;
+    }
+
+    // Distance to the right of the box
+    const gapRight = 12 / (canvasScale || 1);
+    const rightX = radius + gapRight;
+
+    const rotatePoint = (px, py) => ({
+        x: point.x + px * Math.cos(rotation) - py * Math.sin(rotation),
+        y: point.y + px * Math.sin(rotation) + py * Math.cos(rotation),
+    });
+
+    // Clamp slider position to [0, 1]
+    const clampedPos = Math.max(0, Math.min(1, sliderPos));
+    // Slider y position: +radius at pos=0 (bottom), -radius at pos=1 (top)
+    const sliderY = radius - (clampedPos * 2 * radius);
+
+    return {
+        start: rotatePoint(rightX, radius),
+        end: rotatePoint(rightX, -radius),
+        tip: rotatePoint(rightX, sliderY),  // Icon at slider position
+    };
+}
+
+/**
  * Gets the selected reference attachment from a widget
  * @param {Object} widget - The widget object
  * @returns {Object|null} The selected attachment or null
@@ -246,6 +326,8 @@ export function sanitizeBoxKeys(widget, splineEditor) {
 
             const scaleVal = (typeof key.scale === 'number' && !Number.isNaN(key.scale)) ? key.scale : 1;
             const rotationVal = (typeof key.rotation === 'number' && !Number.isNaN(key.rotation)) ? key.rotation : 0;
+            const hScaleVal = (typeof key.h_scale === 'number' && !Number.isNaN(key.h_scale)) ? key.h_scale : 1;
+            const vScaleVal = (typeof key.v_scale === 'number' && !Number.isNaN(key.v_scale)) ? key.v_scale : 1;
 
             return {
                 frame: Number.isFinite(frameVal) ? Math.round(frameVal) : 1,
@@ -253,6 +335,8 @@ export function sanitizeBoxKeys(widget, splineEditor) {
                 y: normY,
                 scale: splineEditor.clampScaleValue?.(scaleVal) ?? Math.max(0.2, Math.min(6, scaleVal)),
                 rotation: rotationVal,
+                h_scale: Math.max(-1, Math.min(1, hScaleVal)), // Clamp to [-1, 1]
+                v_scale: Math.max(0, Math.min(1, vScaleVal)), // Clamp to [0, 1]
             };
         })
         .filter(Boolean)

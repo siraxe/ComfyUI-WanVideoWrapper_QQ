@@ -13,6 +13,7 @@
 
 import { BOX_BASE_RADIUS, POINT_BASE_RADIUS, transformVideoToCanvasSpace } from './spline_utils.js';
 import { BOX_TIMELINE_MAX_POINTS } from './canvas/canvas_constants.js';
+import { topSliderPosToHScale } from './config/scale-config.js';
 
 // Import all modules
 import * as GeometryCalc from './layer_renderer/geometry-calculator.js';
@@ -170,6 +171,10 @@ export class LayerRenderer {
         return GeometryCalc.computeBoxHandleGeometry(point, this.splineEditor);
     }
 
+    _computeBoxTopControllerGeometry(point) {
+        return GeometryCalc.computeBoxTopControllerGeometry(point, this.splineEditor);
+    }
+
     _getSelectedRefAttachment(widget) {
         return GeometryCalc.getSelectedRefAttachment(widget);
     }
@@ -253,6 +258,69 @@ export class LayerRenderer {
         };
         AnimationSys.updateActiveHanddrawDash(state, svg, this.splineEditor, this.node);
         this._lastDashUpdateMs = state.lastDashUpdateMs;
+    }
+
+    updateActiveBoxRefScale() {
+        const canvas = this.vis?.canvas?.();
+        if (!canvas) return;
+        const svg = canvas.tagName === 'svg' ? canvas : canvas.querySelector('svg');
+        if (!svg) return;
+
+        const activeWidget = this.node.layerManager.getActiveWidget();
+        if (!activeWidget) return;
+
+        const widgetName = activeWidget?.value?.name;
+
+        // Find the vertical scale groups for this widget
+        const vScaleGroups = Array.from(svg.querySelectorAll('.ref-scale-v-group'));
+        for (const vScaleGroup of vScaleGroups) {
+            if (vScaleGroup.getAttribute('data-widget-name') === widgetName) {
+                // Get current transform position from the inner image
+                const image = vScaleGroup.querySelector('image');
+                if (!image) continue;
+
+                const currentTransform = image.getAttribute('transform') || '';
+                const translateMatch = currentTransform.match(/translate\(([^,]+),([^)]+)\)/);
+                if (!translateMatch) continue;
+
+                const posX = parseFloat(translateMatch[1]);
+                const posY = parseFloat(translateMatch[2]);
+                const rotateMatch = currentTransform.match(/rotate\(([^)]+)\)/);
+                const rotationDeg = rotateMatch ? parseFloat(rotateMatch[1]) : 0;
+
+                // Get slider positions from active point
+                const freshPoints = (this.splineEditor.points || []).filter(p => p && Number.isFinite(p.x));
+                const point = freshPoints[0];
+                if (!point) continue;
+
+                const hScale = topSliderPosToHScale(point.topSliderPos ?? 1.0);  // Range: -1.0 to 1.0
+                const vScale = point.rightSliderPos ?? 1.0;
+
+                // Get box radius for bottom edge calculation
+                const boxRadius = this.getScaledBoxRadius(point);
+
+                // Find and update the inner hScaleGroup
+                const hScaleGroup = vScaleGroup.querySelector('.ref-scale-h-group');
+                if (hScaleGroup) {
+                    hScaleGroup.setAttribute('transform',
+                        `translate(${posX},${posY}) rotate(${rotationDeg}) scale(${hScale}, 1) rotate(${-rotationDeg}) translate(${-posX},${-posY})`
+                    );
+                }
+
+                // Calculate bottom edge position for vertical scale from bottom
+                const bottomLocalX = 0;
+                const bottomLocalY = boxRadius;
+                const cosR = Math.cos(rotationDeg * Math.PI / 180);
+                const sinR = Math.sin(rotationDeg * Math.PI / 180);
+                const bottomWorldX = posX + (bottomLocalX * cosR - bottomLocalY * sinR);
+                const bottomWorldY = posY + (bottomLocalX * sinR + bottomLocalY * cosR);
+
+                // Update the outer vScaleGroup transform
+                vScaleGroup.setAttribute('transform',
+                    `translate(${bottomWorldX},${bottomWorldY}) rotate(${rotationDeg}) scale(1, ${vScale}) rotate(${-rotationDeg}) translate(${-bottomWorldX},${-bottomWorldY})`
+                );
+            }
+        }
     }
 
     // === SVG RENDERING METHODS (delegated to svg-renderer) ===
