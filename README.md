@@ -1,4 +1,10 @@
 # ComfyUI-WanVideoWrapper_QQ
+**Version 1.3.0** - 2026-03-16
+- **Scaling Animation Update**: Enhanced box path scaling with independent h_scale (horizontal) and v_scale (vertical) controls, plus improved rotation handling that maintains visual direction during flips. Both CPU and GPU modes now support proper continuous rotation through angle wrapping and flip compensation.
+
+![img](git_assets/scale_ctrl.mp4)
+
+
 **Version 1.2.8** - 2026-03-14
 - Added SAM (Segment Anything Model) preparation support. Based on [MatAnyone2](https://github.com/pq-yang/MatAnyone2) [Workflow Example](examples/SAM_prep_wf.json)
 
