@@ -3,7 +3,7 @@ import { initializeDrivenConfig, initializeEasingConfig, initializeScaleConfig, 
 import { showCustomEasingMenu, showCustomDrivenToggleMenu, showInterpolationMenu, showRefSelectionMenu } from './context_menu.js';
 import { app } from '../../../scripts/app.js';
 
-const BOX_TIMELINE_MAX_POINTS = 50;
+const BOX_TIMELINE_MAX_POINTS = 250;
 
 export class BoxLayerWidget extends RgthreeBaseWidget {
     constructor(name) {
@@ -1064,7 +1064,7 @@ export class BoxLayerWidget extends RgthreeBaseWidget {
             this.stopBoxPlayback(node);
         }
         const editor = node?.editor;
-        const fps = 16;
+        const fps = 25;
         const intervalMs = Math.max(10, Math.round(1000 / fps));
         const advanceFrame = () => {
             const max = this._getMaxFrames(node);

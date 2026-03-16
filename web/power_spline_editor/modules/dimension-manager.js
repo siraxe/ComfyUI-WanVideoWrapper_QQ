@@ -406,6 +406,65 @@ export function createDimensionManager(node) {
           );
         }
       } catch {}
+    },
+
+    /**
+     * Restore max frames from session storage or properties
+     */
+    restoreMaxFrames() {
+      try {
+        // First check node properties
+        if (node.properties?.box_max_frames) {
+          const savedFrames = Number(node.properties.box_max_frames);
+          if (!Number.isNaN(savedFrames) && savedFrames > 0 && node.editor) {
+            node.editor._maxFrames = savedFrames;
+            console.log(`[DimensionManager] Restored max frames from properties: ${savedFrames}`);
+            return savedFrames;
+          }
+        }
+
+        // Then check session storage
+        if (node.uuid) {
+          const sessionValue = sessionStorage.getItem(`spline-editor-maxframes-${node.uuid}`);
+          if (sessionValue) {
+            const savedFrames = Number(sessionValue);
+            if (!Number.isNaN(savedFrames) && savedFrames > 0 && node.editor) {
+              node.editor._maxFrames = savedFrames;
+              // Also update properties for persistence
+              node.properties = node.properties || {};
+              node.properties.box_max_frames = savedFrames;
+              console.log(`[DimensionManager] Restored max frames from session: ${savedFrames}`);
+              return savedFrames;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[DimensionManager] Error restoring max frames:', error);
+      }
+      return null;
+    },
+
+    /**
+     * Initialize max frames from the frames input/property
+     * This sets the initial max frames based on what's connected to the frames input
+     */
+    initializeMaxFramesFromInput() {
+      try {
+        const targetFrames = this._getTargetFrames();
+        if (targetFrames && node.editor) {
+          node.editor._maxFrames = targetFrames;
+          node.properties = node.properties || {};
+          node.properties.box_max_frames = targetFrames;
+          if (node.uuid) {
+            safeSetSessionItem(`spline-editor-maxframes-${node.uuid}`, String(targetFrames));
+          }
+          console.log(`[DimensionManager] Initialized max frames from input: ${targetFrames}`);
+          return targetFrames;
+        }
+      } catch (error) {
+        console.warn('[DimensionManager] Error initializing max frames:', error);
+      }
+      return null;
     }
   };
 }

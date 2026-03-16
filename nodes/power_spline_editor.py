@@ -416,7 +416,7 @@ class PowerSplineEditor:
                 'scale': round(snap['scale'], 4),
                 'boxScale': round(snap['scale'], 4),
                 'pointScale': round(snap['scale'], 4),
-                'frame': idx + 1,
+                'frame': round(timeline_frame),
                 'boxR': round(snap.get('boxR', 0.0), 4),
             })
         return samples

@@ -4,9 +4,31 @@ import { applyBoxTimelineFrame } from './canvas_scrub.js';
 import { transformMouseToVideoSpace, transformVideoToCanvasSpace } from '../spline_utils.js'; // Added transformVideoToCanvasSpace
 
 export function attachBoxTimelineHelpers(editor) {
-  // Helper to get max frames dynamically (can be overridden by editor._maxFrames)
+  // Helper to get max frames dynamically
+  // Returns the highest of: explicitly set _maxFrames, highest keyframe across all box widgets, or default
   editor._getMaxFrames = () => {
-    return editor._maxFrames || BOX_TIMELINE_MAX_POINTS;
+    if (editor._maxFrames) {
+      return editor._maxFrames;
+    }
+    // Dynamically calculate based on existing keyframes in all box layer widgets
+    const layerManager = editor.node?.layerManager;
+    if (layerManager) {
+      const widgets = layerManager.getSplineWidgets();
+      let maxKeyframeFrame = 0;
+      for (const widget of widgets) {
+        if (editor._isBoxLayerWidget(widget) && Array.isArray(widget.value.box_keys)) {
+          for (const key of widget.value.box_keys) {
+            if (key && typeof key.frame === 'number') {
+              maxKeyframeFrame = Math.max(maxKeyframeFrame, key.frame);
+            }
+          }
+        }
+      }
+      if (maxKeyframeFrame > 0) {
+        return Math.max(BOX_TIMELINE_MAX_POINTS, maxKeyframeFrame);
+      }
+    }
+    return BOX_TIMELINE_MAX_POINTS;
   };
 
   editor._isBoxLayerWidget = (widget) => widget?.value?.type === 'box_layer';
@@ -27,8 +49,9 @@ export function attachBoxTimelineHelpers(editor) {
         const normY = Math.abs(rawY) >= 10 ? rawY / height : rawY;
         const scaleVal = (typeof key.scale === 'number' && !Number.isNaN(key.scale)) ? key.scale : 1;
         const rotationVal = (typeof key.rotation === 'number' && !Number.isNaN(key.rotation)) ? key.rotation : 0;
+        // Don't clamp keyframe frames - allow them to extend beyond default max
         return {
-          frame: Math.max(1, Math.min(editor._getMaxFrames(), Math.round(key.frame || 1))),
+          frame: Math.max(1, Math.round(key.frame || 1)),
           x: normX,
           y: normY,
           scale: editor.clampScaleValue ? editor.clampScaleValue(scaleVal) : Math.max(0.2, Math.min(6, scaleVal)),
@@ -38,7 +61,9 @@ export function attachBoxTimelineHelpers(editor) {
       .filter(Boolean)
       .sort((a, b) => (a.frame || 0) - (b.frame || 0));
     const current = Number(widget.value.box_timeline_point) || 1;
-    widget.value.box_timeline_point = Math.max(1, Math.min(editor._getMaxFrames(), Math.round(current)));
+    // Clamp current timeline point but allow it to extend if keyframes go further
+    const maxFrames = editor._getMaxFrames();
+    widget.value.box_timeline_point = Math.max(1, Math.min(maxFrames, Math.round(current)));
     return widget.value.box_keys;
   };
 

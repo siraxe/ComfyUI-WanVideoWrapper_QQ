@@ -224,7 +224,7 @@ export function attachPathHelpers(editor) {
       if (isBoxLayer) {
         const normalizedKeys = Array.isArray(widget.value.box_keys)
           ? widget.value.box_keys.map(k => ({
-            frame: Math.max(1, Math.min(editor._getMaxFrames(), Math.round(k.frame || 1))),
+            frame: Math.max(1, Math.round(k.frame || 1)),
             x: typeof k.x === 'number' ? k.x : 0.5,
             y: typeof k.y === 'number' ? k.y : 0.5,
             scale: editor.clampScaleValue(k.scale ?? 1),

@@ -751,6 +751,15 @@ app.registerExtension({
             this.editor = new SplineEditor2(this);
           }
 
+          // Restore max frames from session storage or properties
+          if (this.dimensionManager) {
+            const restoredFrames = this.dimensionManager.restoreMaxFrames();
+            // If no saved frames, initialize from frames input
+            if (!restoredFrames) {
+              this.dimensionManager.initializeMaxFramesFromInput();
+            }
+          }
+
           // Restore video background
           if (this.videoData && !this.imgData && this.editor) {
             console.log('[PowerSplineEditor onConfigure] Restoring video background');
@@ -869,6 +878,15 @@ app.registerExtension({
           // Initialize editor if needed
           if (!this.editor) {
             this.editor = new SplineEditor2(this, false);
+          }
+
+          // Restore max frames from session storage or properties
+          if (this.dimensionManager) {
+            const restoredFrames = this.dimensionManager.restoreMaxFrames();
+            // If no saved frames, initialize from frames input
+            if (!restoredFrames) {
+              this.dimensionManager.initializeMaxFramesFromInput();
+            }
           }
 
           const finishEditorSetup = async () => {

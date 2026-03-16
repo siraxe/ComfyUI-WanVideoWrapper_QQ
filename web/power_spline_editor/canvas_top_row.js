@@ -424,6 +424,15 @@ export async function handleCanvasRefresh(node) {
           if (!node.editor) {
             const SplineEditor2 = (await import('./canvas/canvas_main.js')).default;
             node.editor = new SplineEditor2(node);
+
+            // Restore max frames from session storage or properties
+            if (node.dimensionManager) {
+              const restoredFrames = node.dimensionManager.restoreMaxFrames();
+              // If no saved frames, initialize from frames input
+              if (!restoredFrames) {
+                node.dimensionManager.initializeMaxFramesFromInput();
+              }
+            }
           }
 
           // Refresh the background image to trigger canvas render
@@ -570,10 +579,13 @@ export class TopRowWidget extends RgthreeBaseWidget {
 
     // Draw Refresh Frames button
     if (this.visibility.refreshFramesButton) {
+      // Get current max frames for display
+      const currentMaxFrames = node.editor?._getMaxFrames?.() ?? node.properties?.box_max_frames ?? '?';
+      const framesLabel = `🕞 ${currentMaxFrames}`;
       drawWidgetButton(
         ctx,
         { size: [refreshFramesWidth, height], pos: [posX, posY] },
-        "🕞 Frames",
+        framesLabel,
         this.framesButtonMouseDown
       );
     }

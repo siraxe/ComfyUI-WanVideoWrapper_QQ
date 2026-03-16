@@ -14,7 +14,6 @@ from ..config.constants import BOX_BASE_RADIUS
 # Supersampling factor for smooth scaling
 SUPERSAMPLE = 4
 
-
 class DrawImageOnPath:
     RETURN_TYPES = ("IMAGE", "MASK",)
     RETURN_NAMES = ("image", "mask",)
@@ -249,6 +248,80 @@ Draws an input image along a coordinate path for each frame, returning the rende
             padded.append(dict(last))
         return padded
 
+    def _get_interpolated_point(self, coords, target_frame):
+        """
+        Get interpolated coordinates for a target frame using the 'frame' property.
+        This matches the Power Spline Editor's box timeline interpolation logic.
+        """
+        if not coords:
+            return None
+
+        # Filter out coords without a frame property
+        valid_coords = [c for c in coords if isinstance(c.get("frame"), (int, float))]
+        if not valid_coords:
+            # Fall back to first coordinate
+            return coords[0] if coords else None
+
+        # Sort by frame number
+        sorted_coords = sorted(valid_coords, key=lambda c: float(c.get("frame", 0)))
+
+        first = sorted_coords[0]
+        last = sorted_coords[-1]
+        first_frame = float(first.get("frame", 1))
+        last_frame = float(last.get("frame", 1))
+
+        # Clamp target frame to keyframe range
+        if target_frame <= first_frame:
+            return first
+        if target_frame >= last_frame:
+            return last
+
+        # Find the two keyframes that bracket our target frame
+        for i in range(len(sorted_coords) - 1):
+            curr = sorted_coords[i]
+            next_c = sorted_coords[i + 1]
+            curr_frame = float(curr.get("frame", 0))
+            next_frame = float(next_c.get("frame", 0))
+
+            if curr_frame <= target_frame <= next_frame:
+                # Exact match on current frame
+                if target_frame == curr_frame:
+                    return curr
+
+                # Interpolate between curr and next_c
+                if next_frame == curr_frame:
+                    return curr
+
+                t = (target_frame - curr_frame) / (next_frame - curr_frame)
+
+                # Interpolate all numeric properties
+                result = {}
+
+                # Copy non-numeric properties as-is from curr
+                for key, value in curr.items():
+                    if key not in ("x", "y", "scale", "pointScale", "boxScale", "rotation", "boxR", "frame"):
+                        result[key] = value
+
+                # Interpolate numeric properties
+                for prop in ("x", "y", "scale", "pointScale", "boxScale", "rotation", "boxR"):
+                    curr_val = curr.get(prop)
+                    next_val = next_c.get(prop)
+
+                    if isinstance(curr_val, (int, float)) and isinstance(next_val, (int, float)):
+                        result[prop] = curr_val + (next_val - curr_val) * t
+                    elif isinstance(curr_val, (int, float)):
+                        result[prop] = curr_val
+                    elif isinstance(next_val, (int, float)):
+                        result[prop] = next_val
+
+                # Copy frame from target
+                result["frame"] = target_frame
+
+                return result
+
+        # Shouldn't reach here, but return last as fallback
+        return last
+
     def create(self, bg_image, ref_images, coordinates, ref_masks=None, use_box_rotation=True, use_box_scale_size=True,
                fallback_scale=1.0, overlay_opacity=1.0, frames=0, add_shadows=False, mask_fill=0.0, use_gpu=True, gpu_batch=8):
         try:
@@ -376,10 +449,14 @@ Draws an input image along a coordinate path for each frame, returning the rende
 
                 # Process each layer for this frame (reversed so top layers in list draw on top)
                 for reversed_idx, layer_coords in enumerate(reversed(coords)):
-                    if frame_idx >= len(layer_coords):
+                    if not layer_coords:
                         continue
 
-                    point = layer_coords[frame_idx]
+                    # Use interpolation to get the correct point for this frame
+                    # Coordinates already have per-frame data, so use frame index directly
+                    point = self._get_interpolated_point(layer_coords, frame_idx + 1)
+                    if point is None:
+                        continue
 
                     # Get original layer index (before reversal) for ref_selections
                     layer_idx = len(coords) - 1 - reversed_idx
@@ -624,7 +701,7 @@ Draws an input image along a coordinate path for each frame, returning the rende
         return output_tensor, mask_tensor
 
     def _create_gpu(self, bg_image, ref_images, coordinates, ref_masks, use_box_rotation, use_box_scale_size,
-                    fallback_scale, overlay_opacity, frames, add_shadows, mask_fill, gpu_batch=8):
+                    fallback_scale, overlay_opacity, frames, add_shadows=False, mask_fill=0.0, gpu_batch=8):
         """GPU-accelerated rendering using torch operations with batched processing to avoid OOM."""
         device = torch.device('cuda')
 
@@ -751,13 +828,18 @@ Draws an input image along a coordinate path for each frame, returning the rende
                 bg_batch = bg_cpu[batch_start:batch_end].to(device)
 
             # Extract coordinate batch for each layer
+            # Use interpolation to get correct coordinates for each frame in the batch
             coords_batch = []
             for layer_coords in coords:
-                batch_coords = layer_coords[batch_start:batch_end]
-                # Extend if needed to match batch size
-                if len(batch_coords) < current_batch_size and layer_coords:
-                    last_coord = dict(layer_coords[-1])
-                    batch_coords = list(batch_coords) + [dict(last_coord)] * (current_batch_size - len(batch_coords))
+                batch_coords = []
+                for i in range(current_batch_size):
+                    actual_frame = batch_start + i + 1  # Frames are 1-indexed
+                    # Coordinates already have per-frame data, so use frame directly
+                    point = self._get_interpolated_point(layer_coords, actual_frame)
+                    if point is None:
+                        # Create a default point if interpolation fails
+                        point = {"x": 0.5, "y": 0.5, "scale": 1, "frame": actual_frame}
+                    batch_coords.append(point)
                 coords_batch.append(batch_coords)
 
             # Render this batch using the existing GPU method
