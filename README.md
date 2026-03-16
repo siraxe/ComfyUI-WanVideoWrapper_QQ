@@ -1,8 +1,17 @@
 # ComfyUI-WanVideoWrapper_QQ
 **Version 1.3.0** - 2026-03-16
-- **Scaling Animation Update**: Enhanced box path scaling with independent h_scale (horizontal) and v_scale (vertical) controls, plus improved rotation handling that maintains visual direction during flips. Both CPU and GPU modes now support proper continuous rotation through angle wrapping and flip compensation.
+- **Scaling Animation Update**: Enhanced box path scaling with independent h_scale (horizontal) and v_scale (vertical) controls, plus improved rotation handling that maintains visual direction during flips.
+<table>
+<tr>
+<td width="50%">
 
-![img](git_assets/scale_ctrl.mp4)
+https://github.com/user-attachments/assets/17440bfb-37ea-4052-9d1b-0d62d8e8b96c
+</td>
+<td width="50%">
+</td>
+</tr>
+</table>
+
 
 
 **Version 1.2.8** - 2026-03-14
