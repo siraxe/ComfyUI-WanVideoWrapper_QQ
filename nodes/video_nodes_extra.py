@@ -235,10 +235,116 @@ class VideoMergeABC:
 
         return image_B_with_overlay
 
+
+class VideoRGBAnalysis:
+    """
+    Analyzes video frames for RGB channel intensity and overall brightness.
+    Displays a real-time graph showing color distribution over time.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "display_mode": (["intensity", "saturation"], {"default": "intensity"}),
+            },
+        }
+
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "analyze_rgb"
+    CATEGORY = "WanVideoWrapper_QQ/video"
+
+    def analyze_rgb(self, image, display_mode):
+        """
+        Analyze RGB channels and brightness for each frame.
+
+        Args:
+            image: Video tensor [B, H, W, C] where B=frames, C=3 (RGB)
+            display_mode: "intensity" for mean channel values, "saturation" for HSV-style saturation
+
+        Returns:
+            Dictionary with UI graph data and result (original image passed through)
+        """
+        device = image.device
+        b, h, w, c = image.shape
+
+        # Handle edge cases
+        if b == 0:
+            empty_graph = {
+                "x": [],
+                "y_r": [],
+                "y_g": [],
+                "y_b": [],
+                "y_brightness": []
+            }
+            ui_data = {"rgb_analysis_graph": [empty_graph]}
+            return {"ui": ui_data}
+
+        # Calculate per-frame channel means
+        # image shape: [B, H, W, C]
+        # Mean over H and W dimensions: [B, C]
+        frame_means = torch.mean(image.float(), dim=[1, 2])  # [B, 3]
+
+        # Extract individual channels
+        red_values = frame_means[:, 0].cpu().tolist()      # R channel
+        green_values = frame_means[:, 1].cpu().tolist()    # G channel
+        blue_values = frame_means[:, 2].cpu().tolist()     # B channel
+
+        # Calculate brightness using Rec. 601 luminance formula
+        # brightness = 0.299 * R + 0.587 * G + 0.114 * B
+        frame_means_cpu = frame_means.cpu()
+        brightness_values = (0.299 * frame_means_cpu[:, 0] +
+                            0.587 * frame_means_cpu[:, 1] +
+                            0.114 * frame_means_cpu[:, 2]).tolist()
+
+        # Build graph data
+        x = list(range(b))
+
+        if display_mode == "saturation":
+            # For saturation mode, normalize by max value per frame
+            # This shows how vivid each color is relative to the brightest channel
+            red_sat = []
+            green_sat = []
+            blue_sat = []
+
+            for i in range(b):
+                r, g, b_val = red_values[i], green_values[i], blue_values[i]
+                max_val = max(r, g, b_val, 0.001)  # Avoid division by zero
+
+                red_sat.append(r / max_val)
+                green_sat.append(g / max_val)
+                blue_sat.append(b_val / max_val)
+
+            y_r = red_sat
+            y_g = green_sat
+            y_b = blue_sat
+        else:  # intensity mode (default)
+            y_r = red_values
+            y_g = green_values
+            y_b = blue_values
+
+        graph_data = {
+            "x": x,
+            "y_r": y_r,
+            "y_g": y_g,
+            "y_b": y_b,
+            "y_brightness": brightness_values,
+            "display_mode": display_mode
+        }
+
+        # Return in UI format (no output, just graph)
+        ui_data = {"rgb_analysis_graph": [graph_data]}
+        return {"ui": ui_data}
+
+
 NODE_CLASS_MAPPINGS = {
     "VideoMergeABC": VideoMergeABC,
+    "VideoRGBAnalysis": VideoRGBAnalysis,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoMergeABC": "Video Merge ABC",
+    "VideoRGBAnalysis": "Video RGB Analysis",
 }
