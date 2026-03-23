@@ -3,6 +3,7 @@ import torch.nn.functional as F # Added F
 import folder_paths
 from PIL import Image
 import numpy as np
+import cv2
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -570,7 +571,7 @@ class ImageBlur_GPU:
                     "display": "number"
                 }),
                 "mask_grow": ("FLOAT", {
-                    "default": 10.0,
+                    "default": 0.0,
                     "min": 0.0,
                     "max": 30.0,
                     "step": 0.5,
@@ -586,56 +587,78 @@ class ImageBlur_GPU:
                     "step": 0.1,
                     "display": "slider"
                 }),
-                "mask_in_blur": ("FLOAT", {
+                "char_str_mult": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 3.0,
+                    "step": 0.01,
+                    "display": "slider"
+                }),
+                "char_blur": ("FLOAT", {
                     "default": 1.0,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
                     "display": "slider"
                 }),
-                "mask_out_blur": ("FLOAT", {
+                "bg_blur": ("FLOAT", {
                     "default": 0.0,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.01,
                     "display": "slider"
                 }),
-                "mask_duplicate": ("INT", {
+                "duplicate_char": ("INT", {
                     "default": 32,
                     "min": 1,
                     "max": 32,
                     "step": 1,
                     "display": "number"
                 }),
+                "fill_cutout": ("BOOLEAN", {
+                    "default": True
+                }),
             }
         }
         # 3-layer compositing:
         # 1. Base layer (original image)
-        # 2. Mask out blur: blur whole image, mask OUT white areas (background blur)
-        # 3. Mask in blur: blur masked pixels, extends beyond mask, composite on top (foreground blur)
-        #    - mask_duplicate: controls how many times to composite blurred layer (builds intensity)
+        # 2. bg_blur: blur whole image, mask OUT white areas (background blur)
+        # 3. char_blur: blur masked pixels, extends beyond mask, composite on top (foreground blur)
+        #    - char_str_mult: multiplier for blur strength on character layer (0.0-3.0, 1.0 = same)
+        #    - duplicate_char: controls how many times to composite blurred layer (builds intensity)
+        #    - fill_cutout: when true, fills white mask areas with border pixels before background blur
 
-    RETURN_TYPES = ("IMAGE",)
+    RETURN_TYPES = ("IMAGE", "IMAGE",)
+    RETURN_NAMES = ("image", "bg_image",)
     FUNCTION = "apply_radial_zoom_blur_gpu"
     CATEGORY = "WanVideoWrapper_QQ/image" # Categorize the node
 
-    def apply_radial_zoom_blur_gpu(self, image, mode="radial", strength=50.0, directional_angle=90.0, center_x=0.5, center_y=0.5, num_samples=30, mask=None, mask_blur=0.0, mask_in_blur=1.0, mask_out_blur=0.0, mask_duplicate=1, mask_grow=0.0):
+    def apply_radial_zoom_blur_gpu(self, image, mode="radial", strength=50.0, directional_angle=90.0, center_x=0.5, center_y=0.5, num_samples=30, mask=None, mask_blur=0.0, char_str_mult=1.0, char_blur=1.0, bg_blur=0.0, duplicate_char=1, mask_grow=0.0, fill_cutout=True):
         # Process each image in the batch
         processed_images = []
+        bg_images = []
         for i, single_image in enumerate(image):
             single_mask = mask[i:i+1] if mask is not None else None
-            processed_images.append(self._apply_single_image(single_image.unsqueeze(0), mode, strength, directional_angle, center_x, center_y, num_samples, single_mask, mask_blur, mask_in_blur, mask_out_blur, mask_duplicate, mask_grow))
-        return (torch.cat(processed_images, dim=0),)
+            result, bg = self._apply_single_image(single_image.unsqueeze(0), mode, strength, directional_angle, center_x, center_y, num_samples, single_mask, mask_blur, char_str_mult, char_blur, bg_blur, duplicate_char, mask_grow, fill_cutout)
+            processed_images.append(result)
+            bg_images.append(bg)
+        return (torch.cat(processed_images, dim=0), torch.cat(bg_images, dim=0))
 
 
-    def _apply_single_image(self, image_bhwc, mode="radial", strength=50.0, directional_angle=90.0, center_x=0.5, center_y=0.5, num_samples=30, mask=None, mask_blur=0.0, mask_in_blur=1.0, mask_out_blur=0.0, mask_duplicate=1, mask_grow=0.0):
+    def _apply_single_image(self, image_bhwc, mode="radial", strength=50.0, directional_angle=90.0, center_x=0.5, center_y=0.5, num_samples=30, mask=None, mask_blur=0.0, char_str_mult=1.0, char_blur=1.0, bg_blur=0.0, duplicate_char=1, mask_grow=0.0, fill_cutout=True):
         """
         Applies the radial zoom blur with 3-layer compositing:
         1. Base layer (original image)
-        2. Mask out blur: blur whole image, mask OUT white areas (background blur)
-        3. Mask in blur: blur masked pixels with extension, composite on top (foreground blur)
-           - mask_duplicate: controls how many times to composite blurred layer (builds intensity)
+        2. bg_blur: blur whole image, mask OUT white areas (background blur)
+        3. char_blur: blur masked pixels, extends beyond mask, composite on top (foreground blur)
+           - char_str_mult: multiplier for blur strength on character layer (0.0-3.0, 1.0 = same)
+           - duplicate_char: controls how many times to composite blurred layer (builds intensity)
            - mask_grow: expands mask outward before blur (morphological dilation)
+           - fill_cutout: fills white mask areas with border pixels before background blur
+
+        Returns:
+            result: final composited image with all blur layers
+            bg_image: background image without character (filled and blurred)
         """
         # ComfyUI image tensor is [B, H, W, C], float [0, 1]
         # Move to CUDA device if available
@@ -681,30 +704,50 @@ class ImageBlur_GPU:
         # Start with base layer
         result = base_layer
 
-        # --- Layer 2: Mask Out Blur (background blur) ---
+        # Initialize bg_image (will be set in bg_blur section or defaults to base_layer)
+        bg_image = base_layer.clone()
+
+        # --- Layer 2: Background Blur (bg_blur) ---
         # Blur whole image, then mask OUT white areas (show blur in black areas)
-        if has_mask and mask_out_blur > 0.0:
-            # Blur the entire base layer with border padding (no extension)
-            blurred_out = self._apply_blur_to_image(base_layer, mode, strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
+        if has_mask and bg_blur > 0.0:
+            # If fill_cutout is enabled, fill white mask areas with border pixels first
+            if fill_cutout:
+                # Create filled version of base layer (white areas filled with background)
+                base_layer_filled = self._inpaint_masked_areas(base_layer, mask_tensor)
+            else:
+                base_layer_filled = base_layer
+
+            # Blur the entire (possibly filled) base layer with border padding (no extension)
+            blurred_out = self._apply_blur_to_image(base_layer_filled, mode, strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
+
+            # Store the background image (filled and blurred, without character)
+            bg_image = blurred_out.clone()
 
             # Composite using inverted mask (white areas keep original, black areas show blur)
-            # alpha_out = (1 - mask) * mask_out_blur
-            alpha_out = (1.0 - mask_tensor) * mask_out_blur  # [1, H, W]
+            # alpha_out = (1 - mask) * bg_blur
+            alpha_out = (1.0 - mask_tensor) * bg_blur  # [1, H, W]
             alpha_out = alpha_out.unsqueeze(-1)  # [1, H, W, 1]
 
             # Blend: result = base * (1 - alpha_out) + blurred * alpha_out
             result = base_layer * (1.0 - alpha_out) + blurred_out * alpha_out
             result = torch.clamp(result, 0.0, 1.0)
+        elif has_mask and fill_cutout:
+            # Even if bg_blur is 0, if fill_cutout is enabled, provide filled background
+            base_layer_filled = self._inpaint_masked_areas(base_layer, mask_tensor)
+            bg_image = base_layer_filled.clone()
 
-        # --- Layer 3: Mask In Blur (foreground blur) ---
+        # --- Layer 3: Character Blur (char_blur) ---
         # Blur masked region with proper alpha handling to avoid black outlines
-        if has_mask and mask_in_blur > 0.0:
+        if has_mask and char_blur > 0.0:
+            # Apply strength multiplier for character layer
+            char_strength = strength * char_str_mult
+
             # For directional blur, extend image borders where mask touches to prevent gaps
             if mode == "directional":
                 # Calculate padding amount based on blur strength and direction
                 # More strength = more extension needed
                 max_dist = torch.sqrt(torch.tensor((w - 1.0)**2 + (h - 1.0)**2, device=device, dtype=base_layer.dtype))
-                blur_extent = max_dist * (strength / 100.0) / self.RADIAL_DIRECTIONAL_DAMPENING
+                blur_extent = max_dist * (char_strength / 100.0) / self.RADIAL_DIRECTIONAL_DAMPENING
                 pad_size = int(blur_extent.item()) + 10  # Add buffer
 
                 # Extend image and mask where mask touches borders
@@ -714,13 +757,13 @@ class ImageBlur_GPU:
 
                 # Blur the extended image with border padding
                 blurred_full_extended = self._apply_blur_to_image(
-                    base_layer_extended, mode, strength, directional_angle,
+                    base_layer_extended, mode, char_strength, directional_angle,
                     center_x, center_y, num_samples, padding_mode='border'
                 )
 
                 # Blur the extended alpha channel
                 blurred_alpha_extended = self._apply_blur_to_alpha_with_padding(
-                    mask_tensor_extended, mode, strength, directional_angle,
+                    mask_tensor_extended, mode, char_strength, directional_angle,
                     center_x, center_y, num_samples, padding_mode='border'
                 )
 
@@ -729,14 +772,14 @@ class ImageBlur_GPU:
                 blurred_alpha = blurred_alpha_extended[pad_size:pad_size+h, pad_size:pad_size+w]
             else:
                 # For radial and gaussian blur, use standard approach
-                blurred_full = self._apply_blur_to_image(base_layer, mode, strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
+                blurred_full = self._apply_blur_to_image(base_layer, mode, char_strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
 
                 # Blur the alpha channel with border padding for smooth edges
-                blurred_alpha = self._apply_blur_to_alpha_with_padding(mask_tensor, mode, strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
+                blurred_alpha = self._apply_blur_to_alpha_with_padding(mask_tensor, mode, char_strength, directional_angle, center_x, center_y, num_samples, padding_mode='border')
 
             # Composite using blurred alpha for smooth blending
             # The blurred alpha allows the blur to extend beyond the original mask boundaries
-            alpha_in = blurred_alpha * mask_in_blur  # [H, W] or [1, H, W]
+            alpha_in = blurred_alpha * char_blur  # [H, W] or [1, H, W]
 
             # Ensure proper shape for broadcasting
             if alpha_in.dim() == 2:  # [H, W]
@@ -744,20 +787,22 @@ class ImageBlur_GPU:
             elif alpha_in.dim() == 3:  # [1, H, W]
                 alpha_in = alpha_in.unsqueeze(-1)  # [1, H, W, 1]
 
-            # Proper alpha compositing: blend result with blurred image using blurred alpha
-            # Use the original mask to ensure we only blend where there's content
-            mask_broadcast = mask_tensor.unsqueeze(-1) if mask_tensor.dim() == 3 else mask_tensor.unsqueeze(0).unsqueeze(-1)
-
-            # Apply the blur multiple times if mask_duplicate > 1
+            # Apply the blur multiple times if duplicate_char > 1
             # This builds up intensity when blurred pixels have low opacity
-            for dup_iteration in range(mask_duplicate):
-                # Blend: result = current * (1 - alpha_in) + blurred_full * alpha_in
-                # Only apply where original mask exists to avoid bleeding into empty areas
-                blend_alpha = alpha_in * mask_broadcast
-                result = result * (1.0 - blend_alpha) + blurred_full * blend_alpha
+            # Use blurred alpha directly to allow blur to extend beyond mask boundaries
+            if duplicate_char > 1:
+                for dup_iteration in range(duplicate_char):
+                    # In-place operations to save memory
+                    # result = result * (1 - alpha) + blurred * alpha
+                    inv_blend = 1.0 - alpha_in
+                    result.mul_(inv_blend).add_(blurred_full * alpha_in)
+                    result.clamp_(0.0, 1.0)
+            else:
+                # Single iteration - normal operations
+                result = result * (1.0 - alpha_in) + blurred_full * alpha_in
                 result = torch.clamp(result, 0.0, 1.0)
 
-        return result.cpu()
+        return result.cpu(), bg_image.cpu()
 
     def _extend_borders_for_mask(self, image_bhwc, mask_tensor, pad_size, mode, directional_angle):
         """
@@ -1270,7 +1315,7 @@ class ImageBlur_GPU:
         """
         Apply morphological dilation to grow/expand the mask outward.
         mask_tensor: [1, H, W] or [H, W]
-        grow_amount: float, controls how many pixels to grow (0-20)
+        grow_amount: float, controls how many pixels to grow (0-30)
         """
         device = mask_tensor.device
 
@@ -1320,6 +1365,61 @@ class ImageBlur_GPU:
             return grown_mask.squeeze(1)  # [1, H, W]
         else:
             return grown_mask  # [1, 1, H, W]
+
+    def _inpaint_masked_areas(self, image_bhwc, mask_tensor):
+        """
+        Fill masked (white) areas of the image using inpainting from border pixels.
+        Similar to VideoInpaint approach - uses OpenCV inpainting to fill white areas.
+
+        Args:
+            image_bhwc: [1, H, W, C] image tensor
+            mask_tensor: [1, H, W] mask tensor (white = areas to fill)
+
+        Returns:
+            filled_image: [1, H, W, C] image tensor with white areas filled
+        """
+        try:
+            # Convert to numpy for OpenCV
+            image_np = image_bhwc[0].mul(255).byte().cpu().numpy()  # [H, W, C] uint8
+            mask_np = mask_tensor[0].cpu().numpy()  # [H, W]
+
+            # Ensure RGB format
+            if image_np.shape[-1] != 3:
+                # If not RGB, use first 3 channels
+                if image_np.shape[-1] >= 3:
+                    image_np = image_np[..., :3]
+                else:
+                    # Grayscale, convert to RGB
+                    image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+
+            # Prepare mask (white areas = areas to inpaint)
+            # Mask threshold: consider pixels > 0.01 as "to be filled"
+            mask_binary = (mask_np > 0.01).astype(np.uint8) * 255
+
+            # Check if mask has any active areas
+            if not np.any(mask_binary > 0):
+                return image_bhwc
+
+            # Convert to BGR for OpenCV
+            image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+
+            # Apply inpainting using Telea algorithm
+            # inpaintRadius = 3 (same as VideoInpaint)
+            inpainted_bgr = cv2.inpaint(image_bgr, mask_binary, 3, cv2.INPAINT_TELEA)
+
+            # Convert back to RGB
+            inpainted_rgb = cv2.cvtColor(inpainted_bgr, cv2.COLOR_BGR2RGB)
+
+            # Convert back to tensor
+            inpainted_tensor = torch.from_numpy(inpainted_rgb).float().div(255.0).to(image_bhwc.device)
+            inpainted_tensor = inpainted_tensor.unsqueeze(0)  # [1, H, W, C]
+
+            return inpainted_tensor
+
+        except Exception as e:
+            print(f"[ImageBlur_GPU WARNING] inpaint_masked_areas failed: {e}")
+            # Fallback: return original image
+            return image_bhwc
 
     def _blur_mask(self, mask_tensor, blur_strength):
         """
