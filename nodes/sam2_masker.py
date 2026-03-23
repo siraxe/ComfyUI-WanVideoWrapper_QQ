@@ -35,7 +35,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
-from utility.sam.sam2_image_predictor import SAM2ImagePredictor
+from ..utility.sam.sam2_image_predictor import SAM2ImagePredictor
 
 
 class SAM2Masker:
