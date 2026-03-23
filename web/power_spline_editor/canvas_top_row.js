@@ -337,7 +337,7 @@ export async function handlePrepareRefsRefresh(node) {
       } else {
         // Handle image nodes
         console.log("[handlePrepareRefsRefresh] Handling image node");
-        imageData = await getReferenceImageFromConnectedNode(sourceNode);
+        imageData = await getReferenceImageFromConnectedNode(node, 'bg_image');
       }
     } else {
       console.log("[handlePrepareRefsRefresh] No connected source node found");
