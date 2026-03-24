@@ -153,6 +153,7 @@ def create_mask_from_additive_paths(additive_paths: List[List[Dict[str, float]]]
     Build a feathered mask (numpy float32 HxW) from an array of additive paths.
     Each path is a list of {'x': float, 'y': float} where coordinates are normalized 0..1.
     """
+    print(f"[create_mask_from_additive_paths] Creating mask at resolution: {width}x{height}")
     mask_img = Image.new("L", (width, height), 0)
     draw = ImageDraw.Draw(mask_img)
 
@@ -162,8 +163,9 @@ def create_mask_from_additive_paths(additive_paths: List[List[Dict[str, float]]]
         pts = []
         for p in path:
             if isinstance(p, dict) and "x" in p and "y" in p:
-                x = int(p["x"] * width)
-                y = int(p["y"] * height)
+                # Preserve full float precision - PIL ImageDraw.polygon accepts floats
+                x = p["x"] * width
+                y = p["y"] * height
                 pts.append((x, y))
         if len(pts) >= 3:
             draw.polygon(pts, fill=255)
@@ -573,8 +575,8 @@ class PrepareRefs:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "mask_width": ("INT", {"default": 640, "min": 8, "max": 4096, "step": 8}),
-                "mask_height": ("INT", {"default": 480, "min": 8, "max": 4096, "step": 8}),
+                "mask_width": ("INT", {"default": 1280, "min": 8, "max": 8192, "step": 8}),
+                "mask_height": ("INT", {"default": 960, "min": 8, "max": 8192, "step": 8}),
                 "internal_state": ("STRING", {"default": "{}", "multiline": False}),  # Internal canvas state
                 "export_filename": ("STRING", {"default": "", "multiline": False}),    # Export path (hidden in UI)
                 "ref_layer_data": ("STRING", {"default": "[]", "multiline": False}),   # Ref layer data for persistence
@@ -645,7 +647,10 @@ class PrepareRefs:
             empty_ref_images = torch.zeros((1, height, width, 4 if export_alpha else 3), dtype=torch.float32)
             empty_ref_masks = torch.zeros((1, height, width), dtype=torch.float32)
             empty_mat_masks = torch.zeros((1, height, width, 3), dtype=torch.float32)
-            ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
+            # Send original image dimensions if available, otherwise widget dimensions
+            original_width = internal_processing_image.shape[2] if internal_processing_image is not None else width
+            original_height = internal_processing_image.shape[1] if internal_processing_image is not None else height
+            ui_out = {"bg_image_dims": [{"width": float(original_width), "height": float(original_height)}]}
             # Persist bg preview only if original bg_image was provided
             if bg_image is not None:
                 try:
@@ -659,6 +664,7 @@ class PrepareRefs:
         # Use the actual dimensions of internal_processing_image to ensure masks match
         mask_width = internal_processing_image.shape[2] if internal_processing_image is not None else width
         mask_height = internal_processing_image.shape[1] if internal_processing_image is not None else height
+        print(f"[PrepareRefs] Creating masks at full resolution: {mask_width}x{mask_height}")
         ref_images, ref_masks = extract_lasso_shapes_as_images(internal_processing_image, mask_width, mask_height, valid_ref_layers, export_alpha)
 
         # Create mat_masks (full-size masks as RGB images for MatAnyone2)
@@ -880,8 +886,11 @@ class PrepareRefs:
             # Don't pad mat_masks - keep only the ref_layers, not one per video frame
             # mat_masks should only have as many masks as there are ref_layers
 
-        # Build ui_out
-        ui_out = {"bg_image_dims": [{"width": float(width), "height": float(height)}]}
+        # Build ui_out - send original image dimensions for full-res mask creation
+        original_width = internal_processing_image.shape[2] if internal_processing_image is not None else width
+        original_height = internal_processing_image.shape[1] if internal_processing_image is not None else height
+        ui_out = {"bg_image_dims": [{"width": float(original_width), "height": float(original_height)}]}
+        print(f"[PrepareRefs] Sending original image dimensions to UI: {original_width}x{original_height}")
 
         # Save bg preview if bg_image provided
         if bg_image is not None:

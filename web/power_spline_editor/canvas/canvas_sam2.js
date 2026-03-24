@@ -106,11 +106,13 @@ export function attachSam2Helpers(editor) {
    * Add SAM2 point and trigger prediction
    * @param {number} x - X coordinate in video space
    * @param {number} y - Y coordinate in video space
+   * @param {boolean} isNegative - Whether this is a negative point (default: false)
    */
-  editor.addSam2Point = (x, y) => {
+  editor.addSam2Point = (x, y, isNegative = false) => {
     const point = {
       x: x,
       y: y,
+      label: isNegative ? 0 : 1,  // 0 = negative/background, 1 = positive/foreground
       uid: Date.now() + Math.random()
     };
     editor._sam2Points.push(point);
@@ -137,10 +139,14 @@ export function attachSam2Helpers(editor) {
 
     ctx.save();
 
-    // Draw red circle with white border
+    // Choose color based on label (positive=green, negative=red)
+    const isNegative = lastPoint.label === 0;
+    const pointColor = isNegative ? '#f44336' : '#4CAF50';  // Red for negative, green for positive
+
+    // Draw circle with white border
     ctx.beginPath();
     ctx.arc(canvasPos.x, canvasPos.y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = '#f44336';  // Red
+    ctx.fillStyle = pointColor;
     ctx.fill();
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 3;
@@ -240,7 +246,7 @@ export function attachSam2Helpers(editor) {
           points: editor._sam2Points.map(p => ({
             x: p.x,
             y: p.y,
-            label: 1  // All points are foreground for now
+            label: p.label  // Use actual label from point (0=negative, 1=positive)
           }))
         })
       });
@@ -337,10 +343,14 @@ export function attachSam2Helpers(editor) {
         // SAM2 points are stored in video space, need to convert to canvas space
         const canvasPos = editor.refCanvasEditor.transformToCanvasSpace?.(point.x, point.y) || point;
 
-        // Draw red circle with white border (larger for visibility)
+        // Choose color based on label (positive=green, negative=red)
+        const isNegative = point.label === 0;
+        const pointColor = isNegative ? '#f44336' : '#4CAF50';  // Red for negative, green for positive
+
+        // Draw circle with white border (larger for visibility)
         ctx.beginPath();
         ctx.arc(canvasPos.x, canvasPos.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = '#f44336';  // Red
+        ctx.fillStyle = pointColor;
         ctx.fill();
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 3;
@@ -431,5 +441,80 @@ export function attachSam2Helpers(editor) {
 
     // Mark that this layer now has lasso data for pencil mode
     editor._sam2ActiveLayer.hasLassoData = true;
+  };
+
+  /**
+   * Bake SAM2 mask to lasso format AND merge with existing shapes
+   * This is called when switching from magic wand to lasso mode
+   * It merges the SAM2 mask with existing lasso shapes if they overlap
+   */
+  editor.bakeAndMergeSam2MaskToLasso = () => {
+    if (!editor._sam2MaskPath || editor._sam2MaskPath.length === 0) {
+      return;
+    }
+
+    if (!editor._sam2ActiveLayer) {
+      return;
+    }
+
+    const layerData = editor._sam2ActiveLayer.value;
+
+    // Initialize lassoShape if needed
+    if (!layerData.lassoShape) {
+      layerData.lassoShape = {
+        additivePaths: [],
+        subtractivePaths: []
+      };
+    }
+
+    // Check if there are existing paths that need merging
+    const existingPaths = layerData.lassoShape.additivePaths || [];
+
+    if (existingPaths.length > 0 && editor.computeMergedShape) {
+      // Need to merge SAM2 mask with existing paths
+      try {
+        // Get the canvas dimensions for coordinate transformation
+        const baseW = editor.refCanvasEditor?.originalImageWidth || editor.refCanvasEditor?.width || 640;
+        const baseH = editor.refCanvasEditor?.originalImageHeight || editor.refCanvasEditor?.height || 480;
+
+        // Convert normalized SAM2 path to canvas coordinates for merging
+        const sam2PathCanvasCoords = editor._sam2MaskPath.map(p => ({
+          x: p.x * baseW,
+          y: p.y * baseH
+        }));
+
+        // Create a temporary shape object for merging
+        const tempShape = {
+          additivePaths: [...existingPaths],
+          subtractivePaths: []
+        };
+
+        // Use the node's computeMergedShape function to merge overlapping paths
+        const mergedContours = editor.computeMergedShape(
+          tempShape,
+          sam2PathCanvasCoords,
+          false // isSubtractive
+        );
+
+        // Replace with merged result
+        layerData.lassoShape.additivePaths = mergedContours;
+
+        console.log('[bakeAndMergeSam2MaskToLasso] Merged SAM2 mask with', existingPaths.length, 'existing paths');
+      } catch (error) {
+        console.error('[bakeAndMergeSam2MaskToLasso] Merge failed, appending instead:', error);
+        layerData.lassoShape.additivePaths.push(editor._sam2MaskPath);
+      }
+    } else {
+      // No existing paths or merge function not available, just add the SAM2 mask
+      layerData.lassoShape.additivePaths.push(editor._sam2MaskPath);
+    }
+
+    // Mark that this layer now has lasso data for pencil mode
+    editor._sam2ActiveLayer.hasLassoData = true;
+
+    // Update the ref data widget to persist changes
+    if (editor.updateRefDataWidget) {
+      editor.updateRefDataWidget();
+    }
   };
 }

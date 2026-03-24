@@ -134,6 +134,10 @@ app.registerExtension({
         size[1] = constrained[1];
       };
 
+      // Store original image dimensions (for full-res mask generation)
+      this.originalImageWidth = null;
+      this.originalImageHeight = null;
+
       // Top row controls
       this.addCustomWidget(new TopRowWidget('prepare_refs_top_row', {
         refreshCanvasButton: true,
@@ -590,7 +594,13 @@ app.registerExtension({
 
         const img = await new Promise((resolve, reject) => {
           const i = new Image();
-          i.onload = () => { this.refCanvasEditor.loadBackgroundImage(i); resolve(i); };
+          i.onload = () => {
+            // Store original image dimensions for full-res mask generation
+            this.originalImageWidth = i.naturalWidth || i.width;
+            this.originalImageHeight = i.naturalHeight || i.height;
+            this.refCanvasEditor.loadBackgroundImage(i);
+            resolve(i);
+          };
           i.onerror = reject;
           i.src = base64;
         });
@@ -716,6 +726,12 @@ app.registerExtension({
     // Lifecycle Callbacks
     // =================================================================
     chainCallback(nodeType.prototype, 'onExecuted', async function (message) {
+      // Store original image dimensions for full-res mask generation
+      if (message?.ui?.bg_image_dims?.[0]) {
+        this.originalImageWidth = message.ui.bg_image_dims[0].width;
+        this.originalImageHeight = message.ui.bg_image_dims[0].height;
+      }
+
       // Auto-size from incoming image if user hasn't manually adjusted
       if (!this.properties.userAdjustedDims && message?.ui?.bg_image_dims?.[0]) {
         const { width, height } = message.ui.bg_image_dims[0];
@@ -765,6 +781,10 @@ app.registerExtension({
       if (this.properties?.uuid && this.properties.uuid !== this.uuid) {
         this.uuid = this.properties.uuid;
       }
+
+      // Restore original image dimensions for full-res mask generation
+      if (this.properties?.originalImageWidth) this.originalImageWidth = this.properties.originalImageWidth;
+      if (this.properties?.originalImageHeight) this.originalImageHeight = this.properties.originalImageHeight;
 
       // Find the ref_layer_data widget
       const refDataWidget = this.widgets?.find(w => w.name === 'ref_layer_data');
@@ -857,6 +877,10 @@ app.registerExtension({
       o.properties.uuid = this.uuid; // Save UUID for session storage persistence
       if (this.properties.bg_image_path) o.properties.bg_image_path = this.properties.bg_image_path;
       if (this.properties.ref_images_paths) o.properties.ref_images_paths = this.properties.ref_images_paths;
+
+      // Save original image dimensions for full-res mask generation
+      if (this.originalImageWidth) o.properties.originalImageWidth = this.originalImageWidth;
+      if (this.originalImageHeight) o.properties.originalImageHeight = this.originalImageHeight;
 
       origSerialize?.call(this, o);
     };

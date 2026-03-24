@@ -6,10 +6,10 @@ import { app } from '../../../scripts/app.js';
 /**
  * Simplify path by removing points that are too close together
  * @param {Array<{x: number, y: number}>} points - Array of points
- * @param {number} threshold - Distance threshold (default 6px)
+ * @param {number} threshold - Distance threshold (default 2px for smoother curves)
  * @returns {Array<{x: number, y: number}>} Simplified points
  */
-function simplifyPath(points, threshold = 6) {
+function simplifyPath(points, threshold = 2) {
   if (points.length <= 2) return points;
 
   const thresholdSq = threshold * threshold;
@@ -57,8 +57,8 @@ function normalizePoints(points, w, h) {
 function denormalizePoints(points, w, h) {
   if (!w || !h) return points;
   return points.map(p => ({
-    x: Math.round(p.x * w),
-    y: Math.round(p.y * h)
+    x: p.x * w,  // Preserve full float precision
+    y: p.y * h   // Preserve full float precision
   }));
 }
 
@@ -190,8 +190,8 @@ function extractContours(imageData, w, h) {
           markRegion(x, y);
 
           if (contour.length > 3) {
-            // Simplify the contour
-            const simplified = simplifyPath(contour, 4);
+            // Simplify the contour (lower threshold at 2x for more detail)
+            const simplified = simplifyPath(contour, 2);
             contours.push(simplified);
           }
         } else {
@@ -228,6 +228,15 @@ function getPathBoundingBox(path, margin = 20) {
 }
 
 /**
+ * Check if a point is within a bounding box
+ */
+function isPointInBoundingBox(point, bbox) {
+  if (!bbox) return true; // If no bbox, process all points
+  return point.x >= bbox.minX && point.x <= bbox.maxX &&
+         point.y >= bbox.minY && point.y <= bbox.maxY;
+}
+
+/**
  * Check if a path intersects with a bounding box
  */
 function pathIntersectsBBox(path, bbox) {
@@ -245,7 +254,7 @@ function pathIntersectsBBox(path, bbox) {
 
 /**
  * Compute final merged shape from current paths and new path
- * Uses raster method with smart vertex snapping to preserve old points
+ * Uses spatial optimization to only process affected region
  */
 function computeMergedShape(currentShape, newPath, isSubtractive, node) {
   // Get canvas editor for coordinate transformations
@@ -255,20 +264,56 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
     return [];
   }
 
-  // Get dimensions from RefCanvas
-  const w = editor.originalImageWidth || editor.width;
-  const h = editor.originalImageHeight || editor.height;
+  // Get dimensions from RefCanvas - prioritize original image resolution
+  const baseW = editor.originalImageWidth || editor.width;
+  const baseH = editor.originalImageHeight || editor.height;
 
-  // Collect all old points for snapping later (denormalized to image pixel space)
+  // Use 2x resolution for better precision (supersampling)
+  const w = baseW * 2;
+  const h = baseH * 2;
+
+  // Normalize new path first, then calculate bounding box in pixel space
+  const newPathNormalized = editor.normalizePoints(newPath);
+  const newPathInPixelSpace = newPathNormalized.map(p => ({
+    x: p.x * w,
+    y: p.y * h
+  }));
+  const newDrawingBBox = getPathBoundingBox(newPathInPixelSpace, 50); // 50px margin at 2x scale
+
+  // Log for debugging
+  if (editor.originalImageWidth && editor.originalImageHeight) {
+    console.log(`[mergeNewPath] Creating mask at 2x resolution: ${w}x${h} (base: ${baseW}x${baseH})`);
+    console.log(`[mergeNewPath] Affected region: x:${newDrawingBBox.minX?.toFixed(0)}-${newDrawingBBox.maxX?.toFixed(0)}, y:${newDrawingBBox.minY?.toFixed(0)}-${newDrawingBBox.maxY?.toFixed(0)}`);
+  }
+
+  // Collect old points within affected region for snapping (spatial optimization)
   const oldPoints = [];
+  const oldPointsMap = new Map(); // Store ALL old points with IDs for preservation
+
+  let pointId = 0;
   if (currentShape.additivePaths) {
     currentShape.additivePaths.forEach(path => {
       const denormalized = editor.denormalizePoints(path);
-      oldPoints.push(...denormalized);
+      denormalized.forEach(p => {
+        const id = `old_${pointId++}`;
+        oldPointsMap.set(id, p);
+
+        // Only include in snapping if within affected region
+        if (isPointInBoundingBox(p, newDrawingBBox)) {
+          oldPoints.push({ ...p, _id: id });
+        }
+      });
     });
   }
-  // Also include new path points (already in canvas space, will be normalized correctly)
-  oldPoints.push(...newPath);
+
+  // Also include new path points (convert canvas coords to pixel space for consistency)
+  newPathInPixelSpace.forEach(p => {
+    const id = `new_${pointId++}`;
+    oldPointsMap.set(id, p);
+    oldPoints.push({ ...p, _id: id });
+  });
+
+  console.log(`[mergeNewPath] Processing ${oldPoints.length}/${oldPointsMap.size} points (spatial optimization)`);
 
   // Create off-screen canvas at image resolution
   const canvas = document.createElement('canvas');
@@ -279,14 +324,47 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
   // Disable anti-aliasing to prevent edge erosion during contour extraction
   ctx.imageSmoothingEnabled = false;
 
-  // Render current additive paths
+  // Performance optimization: If canvas is very large, limit extraction resolution
+  const maxResolution = 4096;
+  let extractW = w;
+  let extractH = h;
+  if (w > maxResolution || h > maxResolution) {
+    const scale = Math.min(maxResolution / w, maxResolution / h);
+    extractW = Math.round(w * scale);
+    extractH = Math.round(h * scale);
+    console.log(`[mergeNewPath] Downsampling for performance: ${w}x${h} -> ${extractW}x${extractH}`);
+  }
+
+  // Render current additive paths (with optimization: skip paths outside affected region)
   ctx.globalCompositeOperation = 'source-over';
+  let skippedPaths = [];
+  let renderedPaths = 0;
+
   if (currentShape.additivePaths) {
-    currentShape.additivePaths.forEach(path => {
-      // Denormalize to get actual pixel coordinates on the image
+    currentShape.additivePaths.forEach((path, index) => {
+      // Check if this path intersects with affected region
+      const pathBBox = getPathBoundingBox(
+        path.map(p => ({ x: p.x * w, y: p.y * h })),
+        0 // No margin for intersection test
+      );
+
+      // Skip rendering if path is completely outside affected region
+      if (pathBBox && pathBBox.maxX < newDrawingBBox.minX ||
+          pathBBox.minX > newDrawingBBox.maxX ||
+          pathBBox.maxY < newDrawingBBox.minY ||
+          pathBBox.minY > newDrawingBBox.maxY) {
+        // Store skipped path index for later
+        skippedPaths.push({ index, path });
+        return; // Skip this path
+      }
+
+      renderedPaths++;
+
+      // Paths are stored normalized to original image dimensions
+      // Convert to 2x pixel coordinates for supersampling
       const imageCoords = path.map(p => ({
-        x: p.x * w,
-        y: p.y * h
+        x: p.x * w,  // Already 2x (w = baseW * 2)
+        y: p.y * h   // Already 2x (h = baseH * 2)
       }));
       if (imageCoords.length < 3) return;
 
@@ -301,12 +379,10 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
     });
   }
 
-  // Normalize new path to get image pixel coordinates
-  const newPathNormalized = editor.normalizePoints(newPath);
-  const newPathImageCoords = newPathNormalized.map(p => ({
-    x: p.x * w,
-    y: p.y * h
-  }));
+  console.log(`[mergeNewPath] Rendered ${renderedPaths}/${currentShape.additivePaths?.length || 0} paths (skipped ${skippedPaths.length} outside affected region)`);
+
+  // Use the already-converted newPathInPixelSpace for rendering
+  const newPathImageCoords = newPathInPixelSpace;
 
   // Apply new path
   if (isSubtractive) {
@@ -325,14 +401,33 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
   ctx.closePath();
   ctx.fill();
 
-  // Extract contours from result
-  const imageData = ctx.getImageData(0, 0, w, h);
-  const extractedContours = extractContours(imageData, w, h);
+  // Extract contours from result (using potentially downscaled dimensions for performance)
+  const imageData = ctx.getImageData(0, 0, extractW, extractH);
+  const extractedContours = extractContours(imageData, extractW, extractH);
 
-  // SMART SNAPPING: For each extracted point, try to snap to closest old point
-  const snappedContours = extractedContours.map(contour => {
+  // Scale extracted contours back to full resolution if we downsampled
+  let finalContours = extractedContours;
+  if (extractW !== w || extractH !== h) {
+    const scaleX = w / extractW;
+    const scaleY = h / extractH;
+    finalContours = extractedContours.map(contour =>
+      contour.map(p => ({
+        x: p.x * scaleX,
+        y: p.y * scaleY
+      }))
+    );
+  }
+
+  // OPTIMIZED SNAPPING: Only snap points within affected region
+  // Points outside affected region are extracted in their original positions and don't need snapping
+  const snappedContours = finalContours.map(contour => {
     return contour.map(point => {
-      // Find closest old point within snapping distance
+      // Skip snapping if point is outside affected region (preserve as-is)
+      if (!isPointInBoundingBox(point, newDrawingBBox)) {
+        return point; // Keep extracted coordinates (should be stable outside affected region)
+      }
+
+      // Only snap points within affected region
       let closestOldPoint = null;
       let minDistance = 5; // Snap threshold in pixels
 
@@ -357,58 +452,103 @@ function computeMergedShape(currentShape, newPath, isSubtractive, node) {
     });
   });
 
-  // Normalize and return (convert image pixel coords to 0-1 range)
-  return snappedContours.map(contour => contour.map(p => ({
+  console.log(`[mergeNewPath] Snapping complete - preserved points outside affected region`);
+
+  // Normalize extracted contours (convert 2x pixel coords back to 0-1 range)
+  const normalizedExtracted = snappedContours.map(contour => contour.map(p => ({
     x: p.x / w,
     y: p.y / h
   })));
+
+  // PRESERVE SKIPPED PATHS: Include paths that were completely outside affected region
+  // These paths are returned in their original form with no transformations
+  const finalResult = [...normalizedExtracted];
+
+  for (const skipped of skippedPaths) {
+    // Add skipped path in its original normalized form
+    finalResult.push(skipped.path);
+  }
+
+  console.log(`[mergeNewPath] Final result: ${finalResult.length} contours (${normalizedExtracted.length} extracted + ${skippedPaths.length} preserved)`);
+
+  return finalResult;
 }
 
 /**
  * Render lasso shapes for a layer using boolean operations
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} shape - Shape object with additivePaths and subtractivePaths
- * @param {number} w - Canvas width
- * @param {number} h - Canvas height
+ * @param {number} w - Canvas width (display canvas, not used for rendering)
+ * @param {number} h - Canvas height (display canvas, not used for rendering)
  * @param {boolean} isActive - Whether the layer is active (on)
  * @param {Object} refCanvasEditor - RefCanvas instance with coordinate transformation methods
  */
 function renderLayerLassoShapes(ctx, shape, w, h, isActive = true, refCanvasEditor = null) {
   if (!shape || !shape.additivePaths?.length) return;
 
+  // Use original image dimensions for rendering, not canvas display dimensions
+  const baseW = refCanvasEditor?.originalImageWidth || w;
+  const baseH = refCanvasEditor?.originalImageHeight || h;
+
+  // Use 2x resolution for consistency with computeMergedShape
+  const renderW = baseW * 2;
+  const renderH = baseH * 2;
+
   // Choose colors based on active state
   const fillColor = isActive ? 'rgba(0, 255, 0, 0.3)' : 'rgba(128, 128, 128, 0.3)';
   const strokeColor = isActive ? 'rgba(0, 255, 0, 0.8)' : 'rgba(128, 128, 128, 0.8)';
 
-  // Create off-screen canvas for boolean operations
+  // Create off-screen canvas at 2x resolution for boolean operations
   const offscreen = document.createElement('canvas');
-  offscreen.width = w;
-  offscreen.height = h;
+  offscreen.width = renderW;
+  offscreen.height = renderH;
   const offCtx = offscreen.getContext('2d');
 
-  // Render all paths (already merged, may be multiple separate regions)
+  // Log for debugging
+  if (refCanvasEditor?.originalImageWidth && refCanvasEditor?.originalImageHeight) {
+    console.log(`[renderLayerLassoShapes] Rendering at 2x resolution: ${renderW}x${renderH} (base: ${baseW}x${baseH})`);
+  }
+
+  // Render all paths at 2x resolution
   offCtx.globalCompositeOperation = 'source-over';
   offCtx.fillStyle = fillColor;
   if (shape.additivePaths && shape.additivePaths.length > 0) {
     shape.additivePaths.forEach((path, idx) => {
-      // Use RefCanvas's denormalize method (handles coordinate transform automatically)
-      const canvasCoords = refCanvasEditor ? refCanvasEditor.denormalizePoints(path) : denormalizePoints(path, w, h);
-      if (canvasCoords.length < 3) return;
+      // Paths are stored normalized to original image dimensions
+      // Scale to 2x resolution for rendering
+      const imageCoords = path.map(p => ({
+        x: p.x * renderW,
+        y: p.y * renderH
+      }));
+      if (imageCoords.length < 3) return;
 
       offCtx.beginPath();
-      offCtx.moveTo(canvasCoords[0].x, canvasCoords[0].y);
-      for (let i = 1; i < canvasCoords.length; i++) {
-        offCtx.lineTo(canvasCoords[i].x, canvasCoords[i].y);
+      offCtx.moveTo(imageCoords[0].x, imageCoords[0].y);
+      for (let i = 1; i < imageCoords.length; i++) {
+        offCtx.lineTo(imageCoords[i].x, imageCoords[i].y);
       }
       offCtx.closePath();
       offCtx.fill();
     });
   }
 
-  // Draw off-screen canvas to main canvas
-  ctx.drawImage(offscreen, 0, 0);
+  // Draw off-screen canvas to main canvas at the correct position and scale
+  // The image is centered in the canvas, so we need to account for offset and scale
+  if (refCanvasEditor && refCanvasEditor.offsetX !== undefined && refCanvasEditor.scale !== undefined) {
+    // Calculate the display position and size of the image in the canvas
+    const displayX = refCanvasEditor.offsetX;
+    const displayY = refCanvasEditor.offsetY;
+    const displayW = refCanvasEditor.originalImageWidth * refCanvasEditor.scale;
+    const displayH = refCanvasEditor.originalImageHeight * refCanvasEditor.scale;
 
-  // Draw outlines for all regions
+    // Draw the 2x offscreen canvas scaled down to the image's display area
+    ctx.drawImage(offscreen, displayX, displayY, displayW, displayH);
+  } else {
+    // Fallback: draw to full canvas (no offset/scaling)
+    ctx.drawImage(offscreen, 0, 0, w, h);
+  }
+
+  // Draw outlines for all regions (use canvas coordinates for display)
   ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 2;
   if (shape.additivePaths && shape.additivePaths.length > 0) {
@@ -448,7 +588,7 @@ function renderLassoPreview(node) {
   const fillColor = isSubtractive ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)';
   const strokeColor = isSubtractive ? 'rgba(255, 0, 0, 0.6)' : 'rgba(0, 255, 0, 0.6)';
 
-  // Draw preview path with fill
+  // Draw preview path with fill - use SAME coordinates as the line
   ctx.beginPath();
   ctx.moveTo(node._lassoCurrentPath[0].x, node._lassoCurrentPath[0].y);
   for (let i = 1; i < node._lassoCurrentPath.length; i++) {
@@ -457,11 +597,11 @@ function renderLassoPreview(node) {
   // Close the path to the first point for fill
   ctx.closePath();
 
-  // Fill the shape
+  // Fill the shape FIRST (so it appears behind the line)
   ctx.fillStyle = fillColor;
   ctx.fill();
 
-  // Stroke the outline
+  // Stroke the outline on top
   ctx.strokeStyle = strokeColor;
   ctx.lineWidth = 2;
   ctx.stroke();
@@ -476,6 +616,11 @@ function enterLassoMode(node, refLayer) {
   // Exit any existing mode first
   if (node._lassoDrawingActive) {
     exitLassoMode(node);
+  }
+
+  // Auto-bake SAM2 mask if switching from magic wand mode
+  if (node._sam2Mode && node._sam2MaskPath && node._sam2ActiveLayer === refLayer) {
+    node.bakeAndMergeSam2MaskToLasso?.();
   }
 
   node._lassoDrawingActive = true;
@@ -499,6 +644,7 @@ function exitLassoMode(node) {
   node._lassoDrawingActive = false;
   node._lassoActiveLayer = null;
   node._lassoCurrentPath = [];
+  node._lassoRefreshPending = false;
 
   // Cleanup any active listeners
   if (node._lassoTeardownListeners) {
@@ -539,13 +685,15 @@ function handleCanvasMouseDown(node, e) {
         node.removeSam2Point?.(clickedPoint.uid);
         return;
       }
-      // Ctrl+click on empty space - still add point (allows adding points with Ctrl held)
+      // Ctrl+click on empty space - add negative point (background)
+      const videoSpace = node.refCanvasEditor.transformToVideoSpace(mouseX, mouseY);
+      node.addSam2Point?.(videoSpace.x, videoSpace.y, true);  // true = negative point
+      return;
     }
 
-    // Add new point (regular click, Shift+click, or Ctrl+click on empty space)
-    // All these cases add points
+    // Regular click - add positive point (foreground)
     const videoSpace = node.refCanvasEditor.transformToVideoSpace(mouseX, mouseY);
-    node.addSam2Point?.(videoSpace.x, videoSpace.y);
+    node.addSam2Point?.(videoSpace.x, videoSpace.y, false);  // false = positive point
     return;
   }
 
@@ -578,6 +726,7 @@ function handleCanvasMouseDown(node, e) {
   // Initialize drawing path in canvas coordinates (like PowerSplineEditor)
   node._lassoCurrentPath = [{ x, y }];
   node._lassoLastAddedPoint = { x, y };
+  node._lassoRefreshPending = false;
 
   // Attach document-level listeners
   const onMouseMove = (e) => handleDocumentMouseMove(node, e);
@@ -612,18 +761,24 @@ function handleDocumentMouseMove(node, e) {
     return; // Skip points outside the canvas
   }
 
-  // Check distance threshold (6px squared = 36) in canvas space
+  // Check distance threshold (2px squared = 4) for smoother drawing
   const dx = x - node._lassoLastAddedPoint.x;
   const dy = y - node._lassoLastAddedPoint.y;
   const distSq = dx * dx + dy * dy;
 
-  if (distSq >= 36) {
+  if (distSq >= 4) {
     node._lassoCurrentPath.push({ x, y });
     node._lassoLastAddedPoint = { x, y };
 
-    // Trigger canvas refresh for preview
-    if (node.refreshCanvas) {
-      node.refreshCanvas();
+    // Throttle canvas refresh using requestAnimationFrame for better performance
+    if (!node._lassoRefreshPending) {
+      node._lassoRefreshPending = true;
+      requestAnimationFrame(() => {
+        if (node.refreshCanvas) {
+          node.refreshCanvas();
+        }
+        node._lassoRefreshPending = false;
+      });
     }
   }
 
@@ -721,6 +876,9 @@ export function attachLassoHelpers(node) {
   // Attach rendering functions
   node.renderLayerLassoShapes = (ctx, shape, w, h, isActive, refCanvasEditor) => renderLayerLassoShapes(ctx, shape, w, h, isActive, refCanvasEditor);
   node.renderLassoPreview = () => renderLassoPreview(node);
+
+  // Attach merge function for use by other modules (e.g., SAM2)
+  node.computeMergedShape = (currentShape, newPath, isSubtractive) => computeMergedShape(currentShape, newPath, isSubtractive, node);
 
   // Attach canvas mousedown listener
   const canvas = node.refsCanvas;
