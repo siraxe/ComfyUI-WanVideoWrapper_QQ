@@ -141,16 +141,19 @@ class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         // Setup event handlers
         this.hitAreas.refreshButton.onClick = async () => {
             if (node.timelineWidget) {
-                // Stop current playback, reset to frame 1
+                // Stop current playback, reset to [ marker position
                 node.timelineWidget.stopPlayback();
                 node.timelineWidget.value.isPlaying = false;
-                node.timelineWidget.value.currentFrame = 1;
+                const startMarker = node.timelineWidget.startFrameMarker || 1;
+                node.timelineWidget.value.currentFrame = startMarker;
                 // Apply new FPS as playback rate
                 node.timelineWidget.applyPlaybackRate();
             }
-            if (node.videoElement) {
-                // Reset video to start
-                node.videoElement.currentTime = 0;
+            if (node.videoElement && node.timelineWidget) {
+                // Reset video to [ marker position
+                const nativeFPS = node.timelineWidget.nativeFPS || 24;
+                const startMarker = node.timelineWidget.startFrameMarker || 1;
+                node.videoElement.currentTime = (startMarker - 1) / nativeFPS;
             }
             // Restart playback at the new FPS
             if (node.timelineWidget) {
@@ -285,12 +288,15 @@ class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
                         node.widgets_values[0] = uploadedName;
                     }
 
-                    // Load the video into the display if loadVideoIntoDisplay is available
+                    // Load the video into the display directly (bypassing execute)
                     if (node.loadVideoIntoDisplay && typeof node.loadVideoIntoDisplay === 'function') {
                         node.loadVideoIntoDisplay(uploadedName);
                     }
 
                     console.log('[PowerLoadVideo] Video uploaded:', uploadedName);
+
+                    // Force canvas redraw to show the video
+                    app.graph.setDirtyCanvas(true, true);
                 } else {
                     console.error('[PowerLoadVideo] Upload failed:', resp.status, resp.statusText);
                 }
@@ -417,9 +423,9 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
     setNativeFPS(node, fps) {
         if (fps && fps > 0) {
             this.nativeFPS = fps;
-            // Recalculate total frames if we have duration
+            // Recalculate total frames if we have duration - use ceiling to avoid truncation
             if (this.videoElement && this.videoElement.duration && isFinite(this.videoElement.duration)) {
-                const totalFrames = Math.round(this.videoElement.duration * this.nativeFPS);
+                const totalFrames = Math.ceil(this.videoElement.duration * this.nativeFPS);
                 this.setTotalFrames(node, totalFrames);
             }
             // Re-apply playback rate with new native FPS
@@ -746,7 +752,8 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
     }
 
     /**
-     * Start video playback animation
+     * Start video playback using native HTML5 video element
+     * The animation loop now reads from the video's actual position instead of driving it.
      */
     startPlayback(node) {
         // Fix #3: Cancel any existing animation first for safety against memory leaks
@@ -759,32 +766,58 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
         const frameInterval = 1000 / fps;
         const nativeFPS = this.nativeFPS || 24;
 
+        // Enable loop mode and start playback
+        if (this.videoElement && this.videoElement.duration) {
+            // Use native looping for seamless playback within bounds
+            this.videoElement.loop = true;
+
+            // Start actual video playback - let the browser handle buffering naturally
+            const playPromise = this.videoElement.play();
+            if (playPromise) {
+                playPromise.catch(err => {
+                    console.warn('[PowerLoadVideo] Play promise rejected:', err);
+                    this.value.isPlaying = false;
+                    if (node._stopHoverAudio) node._stopHoverAudio();
+                });
+            }
+        }
+
+        // Animation loop reads from video position instead of driving it
         const animate = () => {
-            const now = performance.now();
+            if (!this.videoElement || !this.value.isPlaying) {
+                this.stopPlayback();
+                return;
+            }
 
-            if (now - this.lastUpdateTime >= frameInterval) {
-                // Check if we're about to loop
-                const wasAtEnd = this.value.currentFrame >= this.value.totalFrames;
+            // Read current frame from video's actual playback position
+            if (this.videoElement.duration && !isNaN(this.videoElement.currentTime)) {
+                let currentTime = this.videoElement.currentTime;
 
-                this.value.currentFrame++;
+                // Read marker positions dynamically each frame (not captured in closure)
+                const startMarker = this.startFrameMarker || 1;
+                const endMarker = this.endFrameMarker !== null && this.endFrameMarker >= 1
+                    ? this.endFrameMarker
+                    : this.value.totalFrames;
+                const startTime = (startMarker - 1) / nativeFPS;
+                const endTime = (endMarker - 1) / nativeFPS;
 
-                // Loop at end
-                if (this.value.currentFrame > this.value.totalFrames) {
-                    this.value.currentFrame = 1;
+                // Handle looping: if we've gone past endMarker, seek back to start
+                if (currentTime >= endTime) {
+                    currentTime = startTime;
+                    this.videoElement.currentTime = startTime;
+
                     // Restart hover audio on loop if still hovering and playing
-                    if (wasAtEnd && node._isHovering && node._restartHoverAudioOnLoop) {
+                    if (node._isHovering && node._restartHoverAudioOnLoop) {
                         node._restartHoverAudioOnLoop();
                     }
                 }
 
-                // Update video element time using native FPS for correct mapping
-                if (this.videoElement && this.videoElement.duration) {
-                    const newTime = (this.value.currentFrame - 1) / nativeFPS;
-                    this.videoElement.currentTime = Math.min(newTime, this.videoElement.duration);
+                // Convert time to frame number for display
+                const currentFrame = Math.floor(currentTime * nativeFPS) + 1;
+                if (this.value.currentFrame !== currentFrame) {
+                    this.value.currentFrame = currentFrame;
+                    node.setDirtyCanvas(true, true);
                 }
-
-                this.lastUpdateTime = now;
-                node.setDirtyCanvas(true, true);
             }
 
             this.animationId = requestAnimationFrame(animate);
@@ -795,9 +828,20 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
     }
 
     /**
-     * Stop video playback animation
+     * Stop video playback and pause the video element
      */
     stopPlayback() {
+        // Pause the actual video element
+        if (this.videoElement && !this.videoElement.paused) {
+            this.videoElement.pause();
+        }
+
+        // Disable native looping when stopped
+        if (this.videoElement) {
+            this.videoElement.loop = false;
+        }
+
+        // Cancel the animation loop
         if (this.animationId) {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
@@ -822,7 +866,8 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
         if (this.videoElement && this.videoElement.duration) {
             const nativeFPS = this.nativeFPS || 24;
             const newTime = (newFrame - 1) / nativeFPS;
-            this.videoElement.currentTime = Math.min(newTime, this.videoElement.duration);
+            const clampedTime = Math.min(newTime, this.videoElement.duration);
+            this.videoElement.currentTime = clampedTime;
         }
 
         node.setDirtyCanvas(true, true);
@@ -1369,8 +1414,9 @@ app.registerExtension({
                     display: block;
                 `;
                 videoElement.muted = true;
-                videoElement.preload = 'auto';
+                videoElement.preload = 'metadata'; // Changed from 'auto' - let browser manage buffering
                 videoElement.playsInline = true;
+
 
                 // Store reference on node for later access
                 this.videoElement = videoElement;
@@ -1446,16 +1492,15 @@ app.registerExtension({
                                 this.widgets_values[0] = uploadedName;
                             }
 
-                            // Directly load the video into our custom display (bypassing combo widget)
-                            // The loadVideoIntoDisplay function is defined later in onNodeCreated
-                            if (typeof loadVideoIntoDisplay === 'function') {
-                                loadVideoIntoDisplay(uploadedName);
+                            // Directly load the video into our custom display using node method
+                            if (typeof this.loadVideoIntoDisplay === 'function') {
+                                this.loadVideoIntoDisplay(uploadedName);
                             } else {
                                 console.error('[PowerLoadVideo] loadVideoIntoDisplay not available yet, will retry');
                                 // Retry after a short delay
                                 setTimeout(() => {
-                                    if (typeof loadVideoIntoDisplay === 'function') {
-                                        loadVideoIntoDisplay(uploadedName);
+                                    if (typeof this.loadVideoIntoDisplay === 'function') {
+                                        this.loadVideoIntoDisplay(uploadedName);
                                     }
                                 }, 50);
                             }
@@ -1620,8 +1665,8 @@ app.registerExtension({
                     }
                 }, 0);
 
-                // Function to load video into custom display
-                const loadVideoIntoDisplay = (videoFilename) => {
+                // Function to load video into custom display - attach to node for external access
+                this.loadVideoIntoDisplay = (videoFilename) => {
                     if (!videoFilename || String(videoElement.src).includes(videoFilename)) {
                         return;
                     }
@@ -1660,7 +1705,13 @@ app.registerExtension({
                                     this.timelineWidget.setFPS(this, detectedFPS);
 
                                     // Use accurate frame count from server
-                                    const totalFrames = meta.frame_count > 0 ? meta.frame_count : Math.round(videoElement.duration * meta.fps);
+                                    let totalFrames;
+                                    if (meta.frame_count > 0) {
+                                        totalFrames = meta.frame_count;
+                                    } else {
+                                        // Calculate from duration with ceiling to ensure we don't truncate the last frame
+                                        totalFrames = Math.ceil(videoElement.duration * meta.fps);
+                                    }
                                     this.timelineWidget.setTotalFrames(this, totalFrames);
                                     this.timelineWidget.setStartFrame(1, this);
                                     this.timelineWidget.setEndFrame(totalFrames, this);
@@ -1675,7 +1726,9 @@ app.registerExtension({
 
                         // Fallback: estimate with current FPS
                         const nativeFPS = this.timelineWidget.nativeFPS || this.timelineWidget.value.fps || 24;
-                        const totalFrames = Math.round(videoElement.duration * nativeFPS);
+                        // Use ceiling to ensure we capture the full video duration without truncation
+                        // Add small buffer (1 frame) to account for any edge case timing issues
+                        const totalFrames = Math.ceil(videoElement.duration * nativeFPS) + 1;
                         this.timelineWidget.setTotalFrames(this, totalFrames);
                         this.timelineWidget.setStartFrame(1, this);
                         this.timelineWidget.setEndFrame(totalFrames, this);
@@ -1721,7 +1774,9 @@ app.registerExtension({
                         videoFilename = this.videoFilename;
                     }
 
-                    loadVideoIntoDisplay(videoFilename);
+                    if (typeof this.loadVideoIntoDisplay === 'function') {
+                        this.loadVideoIntoDisplay(videoFilename);
+                    }
                 }.bind(this);
 
                 // Watch for drag-drop changes on the combo widget (before execute)
@@ -1731,11 +1786,13 @@ app.registerExtension({
                         // Store original callback if any
                         const originalCallback = videoWidget.callback;
                         videoWidget.callback = function(value) {
-                            loadVideoIntoDisplay(value);
+                            if (typeof this.loadVideoIntoDisplay === 'function') {
+                                this.loadVideoIntoDisplay(value);
+                            }
                             if (originalCallback) {
                                 originalCallback.apply(this, arguments);
                             }
-                        };
+                        }.bind(this);
                     }
                 }, 100);
             };
@@ -1761,7 +1818,8 @@ app.registerExtension({
 
                     // Recalculate total frames with accurate native FPS + duration
                     if (this.timelineWidget && this.videoElement && this.videoElement.duration && isFinite(this.videoElement.duration)) {
-                        const accurateFrames = Math.round(this.videoElement.duration * this.timelineWidget.nativeFPS);
+                        // Use ceiling to ensure full video playback without truncation at the end
+                        const accurateFrames = Math.ceil(this.videoElement.duration * this.timelineWidget.nativeFPS);
                         if (accurateFrames > 0) {
                             this.timelineWidget.setTotalFrames(this, accurateFrames);
                             this.timelineWidget.setStartFrame(1, this);
