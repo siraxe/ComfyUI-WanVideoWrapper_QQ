@@ -1,4 +1,8 @@
 # ComfyUI-WanVideoWrapper_QQ
+**Version 1.3.3** - 2026-03-31
+- **Power Load Video Node**: New node for loading and previewing videos directly in the canvas with integrated timeline playback.
+  - **Hotkeys**: `Shift+Spacebar` to play/pause, `Shift+Drag` on `[`/`]` markers to adjust loop boundaries
+
 **Version 1.3.0** - 2026-03-16
 - **Scaling Animation Update**: Enhanced box path scaling with independent h_scale (horizontal) and v_scale (vertical) controls, plus improved rotation handling that maintains visual direction during flips.
 
