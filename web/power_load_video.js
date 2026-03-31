@@ -173,7 +173,6 @@ class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
 
         // Upload button handlers
         this.hitAreas.uploadButton.onClick = async () => {
-            console.log("[PowerLoadVideo] Upload button clicked");
             await this.handleUploadClick(node);
         };
         this.hitAreas.uploadButton.onDown = () => {
@@ -292,8 +291,6 @@ class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
                     if (node.loadVideoIntoDisplay && typeof node.loadVideoIntoDisplay === 'function') {
                         node.loadVideoIntoDisplay(uploadedName);
                     }
-
-                    console.log('[PowerLoadVideo] Video uploaded:', uploadedName);
 
                     // Force canvas redraw to show the video
                     app.graph.setDirtyCanvas(true, true);
@@ -1669,6 +1666,20 @@ app.registerExtension({
                 this.loadVideoIntoDisplay = (videoFilename) => {
                     if (!videoFilename || String(videoElement.src).includes(videoFilename)) {
                         return;
+                    }
+
+                    // Stop playback and reset timeline when loading new video
+                    if (this.timelineWidget?.value?.isPlaying) {
+                        this.timelineWidget.stopPlayback();
+                        this.timelineWidget.value.isPlaying = false;
+                        if (this._stopHoverAudio) this._stopHoverAudio();
+                    }
+                    // Reset current frame to 1 and video time to start
+                    if (this.timelineWidget) {
+                        this.timelineWidget.value.currentFrame = 1;
+                    }
+                    if (videoElement) {
+                        videoElement.currentTime = 0;
                     }
 
                     // Preload audio for hover playback
