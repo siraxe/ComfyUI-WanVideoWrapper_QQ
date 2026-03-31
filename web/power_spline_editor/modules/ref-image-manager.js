@@ -81,7 +81,8 @@ export function createRefImageManager(node) {
         if (sourceNode) {
           isSourceNodeDirectVideoLoader =
             sourceNode.node.type === 'LoadVideo' ||
-            sourceNode.node.type === 'VHS_LoadVideo';
+            sourceNode.node.type === 'VHS_LoadVideo' ||
+            sourceNode.node.type === 'PowerLoadVideo';
 
           if (isSourceNodeDirectVideoLoader) {
             console.log('[Canvas] Detected direct LoadVideo node');
@@ -656,7 +657,8 @@ export function createRefImageManager(node) {
       // Direct video loaders
       if (
         nodeToCheck.type === 'LoadVideo' ||
-        nodeToCheck.type === 'VHS_LoadVideo'
+        nodeToCheck.type === 'VHS_LoadVideo' ||
+        nodeToCheck.type === 'PowerLoadVideo'
       ) {
         return true;
       }

@@ -7,6 +7,7 @@ from .nodes.nodes import *
 from .nodes.power_loaders import *
 from .nodes.decode_overlap import *
 
+from .nodes.power_upload import *
 from .nodes.power_spline_editor import *
 from .nodes.prepare_refs import *
 from .nodes.video_inpaint import *

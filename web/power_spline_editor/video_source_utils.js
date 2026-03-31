@@ -21,7 +21,7 @@ export function isNodeVideoOrVideoProcessing(nodeToCheck, visitedNodes = new Set
     visitedNodes.add(nodeToCheck.id);
 
     // Direct video source types
-    if (nodeToCheck.type === 'LoadVideo' || nodeToCheck.type === 'VHS_LoadVideo') {
+    if (nodeToCheck.type === 'LoadVideo' || nodeToCheck.type === 'VHS_LoadVideo' || nodeToCheck.type === 'PowerLoadVideo') {
         return true;
     }
 

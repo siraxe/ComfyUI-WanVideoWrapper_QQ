@@ -213,7 +213,7 @@ export async function handlePrepareRefsRefresh(node) {
       }
 
       // Check common video node types
-      const videoNodeTypes = ['VHS_LoadVideo', 'VHS_LoadVideoUpload', 'Load Video Path', 'VideoImporter'];
+      const videoNodeTypes = ['VHS_LoadVideo', 'VHS_LoadVideoUpload', 'Load Video Path', 'VideoImporter', 'PowerLoadVideo'];
       if (videoNodeTypes.some(type => sourceNode.type.includes(type))) {
         isVideo = true;
         console.log("[handlePrepareRefsRefresh] Detected video node type:", sourceNode.type);

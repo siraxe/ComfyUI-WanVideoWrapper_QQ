@@ -577,15 +577,377 @@ class LoraMergeLTX:
         save_file(processed_sd, str(output_path), metadata=metadata)
 
 
+class LoraApplyOnLTX:
+    """
+    Applies LoRA weights directly onto the base model checkpoint and saves as a new checkpoint.
+
+    This is different from LoraMergeLTX which creates a merged LoRA file.
+    Here we actually bake the LoRA into the model weights themselves.
+
+    Workflow:
+    1. Load base model checkpoint state dict
+    2. For each LoRA in the chain, compute delta = up @ down * strength
+    3. Apply delta directly to model weights: W_new = W_old + delta
+    4. Save modified state dict as new checkpoint
+    """
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model_with_loras": (
+                    "MODEL",
+                    {"tooltip": "The model with LoRAs applied (from LTX2LoRASelect)."},
+                ),
+                "output_prefix": (
+                    "STRING",
+                    {
+                        "default": "lora_applied_model",
+                        "tooltip": "Prefix for the output checkpoint filename.",
+                    },
+                ),
+                "output_dir": (
+                    "STRING",
+                    {
+                        "default": "checkpoints",
+                        "tooltip": "Output directory. Use 'checkpoints' to save to ComfyUI checkpoints folder.",
+                    },
+                ),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("saved_checkpoint_path",)
+    FUNCTION = "apply_lora_to_model"
+    CATEGORY = "KJNodes/ltxv"
+    OUTPUT_NODE = True
+
+    def apply_lora_to_model(self, model_with_loras, output_prefix, output_dir):
+        """
+        Apply LoRA weights directly to the base model checkpoint and save.
+
+        Process:
+        1. Get checkpoint path from model metadata
+        2. Load all LoRAs from ltx2_lora_chain
+        3. For each layer, compute: W_merged = W_base + sum(strength_i * up_i @ down_i)
+        4. Save as new safetensors checkpoint
+        """
+        # Validate input
+        if model_with_loras is None:
+            raise ValueError("No model provided")
+
+        if not hasattr(model_with_loras, "model_options"):
+            raise ValueError("Model has no model_options attribute")
+
+        lora_chain = model_with_loras.model_options.get("ltx2_lora_chain", [])
+        if not lora_chain:
+            raise ValueError(
+                "No LoRA chain found. Apply LoRAs first using LTX2LoRASelect."
+            )
+
+        checkpoint_path = model_with_loras.model_options.get("checkpoint_name", "")
+        if not checkpoint_path or not Path(checkpoint_path).exists():
+            raise ValueError(f"Checkpoint path not found: {checkpoint_path}")
+
+        print(f"\n{'=' * 60}")
+        print(f"LTX LoRA Apply On Model - Starting")
+        print(f"{'=' * 60}")
+        print(f"Base checkpoint: {checkpoint_path}")
+        print(f"LoRAs to apply: {len(lora_chain)}")
+        for i, lora_info in enumerate(lora_chain, 1):
+            lora_name = lora_info.get('lora_name', 'unknown')
+            strength_model = lora_info.get('strength_model', 0)
+            layer_strs = [
+                f"v:{lora_info.get('video', 1.0):.2f}",
+                f"a:{lora_info.get('audio', 1.0):.2f}",
+                f"v>a:{lora_info.get('video_to_audio', 1.0):.2f}",
+                f"a>v:{lora_info.get('audio_to_video', 1.0):.2f}",
+                f"o:{lora_info.get('other', 1.0):.2f}",
+            ]
+            print(f"  {i}. {lora_name} (strength: {strength_model:.2f} | {', '.join(layer_strs)})")
+        print(f"{'=' * 60}\n")
+
+        # Determine output path
+        output_path = self._get_checkpoint_output_path(output_prefix, output_dir)
+        print(f"Output path: {output_path}")
+        print()
+
+        # Get device for computation
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Using device: {device}")
+
+        # Load all LoRA data
+        lora_data_list = []
+        for lora_info in lora_chain:
+            lora_name = lora_info.get("lora_name", "")
+            if not lora_name:
+                continue
+
+            try:
+                lora_path = folder_paths.get_full_path("loras", lora_name)
+                lora_sd, _ = self._load_lora_file(lora_path)
+
+                layer_strengths = {
+                    "video": lora_info.get("video", 1.0),
+                    "video_to_audio": lora_info.get("video_to_audio", 1.0),
+                    "audio": lora_info.get("audio", 1.0),
+                    "audio_to_video": lora_info.get("audio_to_video", 1.0),
+                    "other": lora_info.get("other", 1.0),
+                }
+
+                lora_data_list.append({
+                    "sd": lora_sd,
+                    "name": lora_name,
+                    "strength_model": lora_info.get("strength_model", 1.0),
+                    "layer_strengths": layer_strengths,
+                })
+            except Exception as e:
+                print(f"Warning: Could not load LoRA '{lora_name}': {e}")
+                continue
+
+        if not lora_data_list:
+            raise ValueError("No valid LoRAs found to apply")
+
+        # Apply LoRAs directly to model weights
+        merged_checkpoint = self._apply_loras_to_checkpoint(
+            checkpoint_path, lora_data_list, device
+        )
+
+        # Save the modified checkpoint
+        self._save_checkpoint(merged_checkpoint, output_path, lora_chain)
+
+        print(f"\n{'=' * 60}")
+        print(f"LoRA application complete!")
+        print(f"Output: {output_path}")
+        print(f"{'=' * 60}\n")
+
+        return (str(output_path),)
+
+    def _load_lora_file(self, path):
+        """Load a LoRA file (safetensors or pickle)."""
+        from safetensors import safe_open as st_safe_open
+
+        path = Path(path)
+        if path.suffix == ".safetensors":
+            with st_safe_open(path, framework="pt", device="cpu") as f:
+                sd = {k: f.get_tensor(k) for k in f.keys()}
+                metadata = f.metadata()
+        else:
+            sd = torch.load(path, map_location="cpu", weights_only=True)
+            if isinstance(sd, dict) and "state_dict" in sd:
+                sd = sd["state_dict"]
+            metadata = None
+        return sd, metadata
+
+    def _get_checkpoint_output_path(self, prefix, output_dir="checkpoints"):
+        """
+        Determine the output path for the checkpoint.
+        """
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{prefix}_{timestamp}.safetensors"
+
+        # Handle special directory names
+        if output_dir.lower() == "checkpoints":
+            # Save to ComfyUI checkpoints folder
+            try:
+                checkpoint_dirs = folder_paths.get_folder_paths("checkpoints")
+                if checkpoint_dirs:
+                    target_dir = os.path.join(checkpoint_dirs[0], prefix)
+                    os.makedirs(target_dir, exist_ok=True)
+                    return os.path.join(target_dir, filename)
+            except Exception as e:
+                print(f"Warning: Could not access checkpoints directory: {e}")
+            # Fallback
+            output_base = folder_paths.get_output_directory()
+            target_dir = os.path.join(output_base, "checkpoints", prefix)
+        elif output_dir.lower() == "output":
+            output_base = folder_paths.get_output_directory()
+            target_dir = os.path.join(output_base, prefix)
+        else:
+            # Custom directory
+            output_base = folder_paths.get_output_directory()
+            target_dir = os.path.join(output_base, output_dir, prefix)
+
+        os.makedirs(target_dir, exist_ok=True)
+        return os.path.join(target_dir, filename)
+
+    def _apply_loras_to_checkpoint(self, checkpoint_path, lora_data_list, device):
+        """
+        Apply LoRA weights directly to checkpoint.
+
+        For each layer with LoRA:
+            W_new = W_old + sum_i(strength_i * up_i @ down_i)
+        """
+        from utility.ltx.core.merger import get_layer_strength
+        from utility.ltx.utils.naming import LORA_DOWN_UP_FORMATS
+        from safetensors.torch import safe_open
+
+        print("Loading checkpoint...")
+        with safe_open(checkpoint_path, framework="pt", device="cpu") as f:
+            checkpoint_keys = list(f.keys())
+            print(f"Checkpoint has {len(checkpoint_keys)} keys")
+
+            # Build block map from LoRAs - store original down/up key names for matching
+            all_blocks = {}
+            for lora_data in lora_data_list:
+                sd = lora_data["sd"]
+                strength_model = lora_data["strength_model"]
+                layer_strengths = lora_data["layer_strengths"]
+
+                for key in sd.keys():
+                    if key.endswith(".alpha"):
+                        continue
+
+                    key_parts = key.split(".")
+                    for fmt_down, fmt_up in LORA_DOWN_UP_FORMATS:
+                        if len(key_parts) >= 2 and key_parts[-2] == fmt_down:
+                            block_name = ".".join(key_parts[:-2])
+                            weight_suffix = (
+                                "." + key_parts[-1]
+                                if key_parts[-1] in ["weight", "bias"]
+                                else ""
+                            )
+                            up_key = f"{block_name}.{fmt_up}{weight_suffix}"
+
+                            if up_key in sd:
+                                if block_name not in all_blocks:
+                                    all_blocks[block_name] = []
+
+                                layer_str = get_layer_strength(block_name, layer_strengths)
+                                combined_strength = strength_model * layer_str
+
+                                all_blocks[block_name].append({
+                                    "down": sd[key],
+                                    "up": sd[up_key],
+                                    "strength": combined_strength,
+                                    "is_conv2d": len(sd[key].shape) == 4,
+                                    "down_key": key,  # Store original key for matching
+                                    "up_key": up_key,
+                                })
+                            break
+
+            print(f"Found LoRA weights for {len(all_blocks)} layers")
+
+            # Load entire checkpoint into memory and apply LoRAs
+            print("Loading full checkpoint to memory...")
+            merged_sd = {k: f.get_tensor(k) for k in checkpoint_keys}
+
+        print(f"Applying LoRAs to model weights...")
+        layers_modified = 0
+        layers_skipped = 0
+
+        # Build a map of shapes to keys for efficient matching
+        shape_to_keys = {}
+        for ckpt_key, tensor in merged_sd.items():
+            shape_key = tuple(tensor.shape)
+            if shape_key not in shape_to_keys:
+                shape_to_keys[shape_key] = []
+            shape_to_keys[shape_key].append(ckpt_key)
+
+        for block_name, blocks in all_blocks.items():
+            # Compute the expected output shape from LoRA up @ down
+            first_block = blocks[0]
+            down_shape = first_block["down"].shape
+            up_shape = first_block["up"].shape
+
+            if first_block["is_conv2d"]:
+                # For conv: delta shape is (out_channels, in_channels * kh * kw)
+                expected_out_shape = (up_shape[0], down_shape[1] * down_shape[2] * down_shape[3])
+            else:
+                # For linear: up @ down gives (up_rows, down_cols) = (out_features, in_features)
+                expected_out_shape = (up_shape[0], down_shape[1])
+
+            # Find matching model key by shape
+            matched_key = None
+            if expected_out_shape in shape_to_keys:
+                for candidate_key in shape_to_keys[expected_out_shape]:
+                    # Additional check: block_name should be related to the key
+                    # Strip common prefixes/suffixes and compare
+                    bn_clean = block_name.replace("model.", "").replace("diffusion_model.", "")
+                    ck_clean = candidate_key.replace("model.", "").replace("diffusion_model.", "")
+
+                    # Check if they share common path components
+                    bn_parts = set(bn_clean.split("."))
+                    ck_parts = set(ck_clean.split("."))
+
+                    # Need significant overlap in path components
+                    if len(bn_parts & ck_parts) >= 2:  # At least 2 matching parts
+                        matched_key = candidate_key
+                        break
+
+            if matched_key is None:
+                layers_skipped += 1
+                if layers_skipped <= 5:
+                    print(f"  Warning: No shape match for block '{block_name}' (expected shape {expected_out_shape})")
+                continue
+
+            base_weight = merged_sd[matched_key].to(device)
+            is_conv2d = first_block["is_conv2d"]
+
+            # Apply all LoRAs: W += sum(strength * up @ down)
+            for block in blocks:
+                strength = block["strength"]
+                if abs(strength) < 1e-6:
+                    continue
+
+                down = block["down"].to(device)
+                up = block["up"].to(device)
+
+                if is_conv2d:
+                    # Flatten conv for matrix multiplication
+                    up_flat = up.reshape(up.shape[0], -1)
+                    down_flat = down.reshape(down.shape[0], -1)
+                    delta = (up_flat @ down_flat) * strength
+                    delta = delta.reshape(base_weight.shape[0], base_weight.shape[1],
+                                      base_weight.shape[2], base_weight.shape[3])
+                else:
+                    delta = (up @ down) * strength
+
+                # Verify shapes match before adding
+                if delta.shape != base_weight.shape:
+                    print(f"  Shape mismatch! base: {base_weight.shape}, delta: {delta.shape}")
+                    continue
+
+                base_weight = base_weight + delta
+
+            # Store back
+            merged_sd[matched_key] = base_weight.cpu()
+            layers_modified += 1
+
+        print(f"Modified {layers_modified} layers, skipped {layers_skipped} layers")
+        return merged_sd
+
+    def _save_checkpoint(self, state_dict, output_path, lora_chain):
+        """
+        Save the modified checkpoint as safetensors.
+        """
+        # Build metadata
+        metadata = {
+            "ss_merge_source": "LTX LoRA Apply On Model",
+            "ss_applied_loras": json.dumps([l.get("lora_name", "unknown") for l in lora_chain]),
+        }
+
+        print(f"Saving checkpoint to {output_path}...")
+        save_file(state_dict, str(output_path), metadata=metadata)
+        print("Saved!")
+
+
 # Register the nodes
 NODE_CLASS_MAPPINGS = {
     "LoadModelMeta": LoadModelMeta,
     "LTX2LoRASelect": LTX2LoRASelect,
     "LoraMergeLTX": LoraMergeLTX,
+    "LoraApplyOnLTX": LoraApplyOnLTX,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadModelMeta": "Load Model Meta",
     "LTX2LoRASelect": "LTX2 LORA Select",
     "LoraMergeLTX": "Lora Merge LTX",
+    "LoraApplyOnLTX": "LoRA Apply On LTX Model",
 }

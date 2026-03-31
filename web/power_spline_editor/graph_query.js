@@ -282,11 +282,12 @@ async function extractImagesFromSourceNode(sourceNodeObj, includeDomFallback = f
                 break;
             }
 
-            case 'LoadVideo': {
-                console.log('[graph_query DEBUG] Processing LoadVideo node');
-                console.log('[graph_query DEBUG] LoadVideo widgets:', sourceNode.widgets?.map(w => ({ name: w.name, value: w.value, type: w.type })));
+            case 'LoadVideo':
+            case 'PowerLoadVideo': {
+                console.log('[graph_query DEBUG] Processing LoadVideo/PowerLoadVideo node');
+                console.log('[graph_query DEBUG] Node widgets:', sourceNode.widgets?.map(w => ({ name: w.name, value: w.value, type: w.type })));
                 
-                // LoadVideo nodes store frames in widgets
+                // LoadVideo and PowerLoadVideo nodes store frames in widgets
                 await collectFromWidgets(sourceNode.widgets, 'input');
                 console.log('[graph_query DEBUG] Collected images from widgets:', collected.length);
                 if (collected.length) break;
