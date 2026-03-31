@@ -4,11 +4,75 @@ Similar to LoadImage but for videos, with an integrated timeline UI.
 """
 
 import os
+import re
+import subprocess
 import cv2
 import numpy as np
 from PIL import Image
 import torch
 import folder_paths
+
+
+def _find_ffmpeg():
+    """Find ffmpeg executable."""
+    # Check common locations
+    candidates = []
+    for cmd in ["ffmpeg", "ffmpeg.exe"]:
+        # Check PATH
+        import shutil
+        path = shutil.which(cmd)
+        if path:
+            candidates.append(path)
+    # Check relative to ComfyUI
+    for rel in ["ffmpeg", "ffmpeg.exe", "../ffmpeg", "../ffmpeg.exe"]:
+        p = os.path.abspath(os.path.join(os.path.dirname(__file__), rel))
+        if os.path.isfile(p):
+            candidates.append(p)
+    return candidates[0] if candidates else "ffmpeg"
+
+
+def extract_audio(file_path, start_time=0, duration=0):
+    """Extract audio from a video file using ffmpeg.
+
+    Args:
+        file_path: Path to the video file.
+        start_time: Start time in seconds.
+        duration: Duration in seconds (0 = until end).
+
+    Returns:
+        dict: {"waveform": Tensor[1, C, T], "sample_rate": int} or None.
+    """
+    ffmpeg_path = _find_ffmpeg()
+    args = [ffmpeg_path, "-i", file_path]
+    if start_time > 0:
+        args += ["-ss", str(start_time)]
+    if duration > 0:
+        args += ["-t", str(duration)]
+    try:
+        res = subprocess.run(
+            args + ["-f", "f32le", "-"],
+            capture_output=True, check=True,
+        )
+        audio = torch.frombuffer(bytearray(res.stdout), dtype=torch.float32)
+        match = re.search(r', (\d+) Hz, (\w+), ', res.stderr.decode('utf-8', errors='replace'))
+    except subprocess.CalledProcessError:
+        return None
+    except Exception:
+        return None
+
+    if match:
+        sample_rate = int(match.group(1))
+        ac = {"mono": 1, "stereo": 2}.get(match.group(2), 2)
+    else:
+        sample_rate = 44100
+        ac = 2
+
+    if audio.numel() == 0:
+        return None
+
+    audio = audio.reshape((-1, ac)).transpose(0, 1).unsqueeze(0)
+    return {"waveform": audio, "sample_rate": sample_rate}
+
 
 class PowerLoadVideo:
     """
@@ -16,71 +80,50 @@ class PowerLoadVideo:
 
     Outputs:
         - IMAGE: Tensor of shape [frame_count, height, width, 3]
-        - frame_count: Number of frames loaded
+        - AUDIO: Audio waveform dict {"waveform", "sample_rate"}
+        - FLOAT: FPS value
     """
-    
+
     @classmethod
     def INPUT_TYPES(cls):
-        # Get input directory and list video files
-        input_dir = folder_paths.get_input_directory()
-
-        # Video extensions to accept
-        video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv', '.m4v', '.mpeg', '.mpg'}
-
-        files = []
-        if os.path.exists(input_dir):
-            for f in os.listdir(input_dir):
-                filepath = os.path.join(input_dir, f)
-                if os.path.isfile(filepath):
-                    ext = os.path.splitext(f)[1].lower()
-                    if ext in video_extensions:
-                        files.append(f)
-
         return {
-            "required": {
-                "video": (sorted(files), {"video_upload": True}),
-            },
+            "required": {},
             "optional": {
-                "frame_load_cap": (
-                    "INT",
-                    {
-                        "default": -1,
-                        "min": -1,
-                        "max": 9999,
-                        "step": 1,
-                        "display": "number",
-                    },
-                ),
-            }
+                "video": ([], {}),
+                "start_frame": ("INT", {"default": 1, "min": 1}),
+                "end_frame": ("INT", {"default": -1, "min": -1}),
+            },
         }
 
-    RETURN_TYPES = ("IMAGE", "INT")
+    RETURN_TYPES = ("IMAGE", "AUDIO", "FLOAT")
     FUNCTION = "load_video"
     OUTPUT_NODE = True
     CATEGORY = "Power/Video"
-    DESCRIPTION = "Load a video file via drag-and-drop. Outputs frames as IMAGE tensor and frame count."
+    DESCRIPTION = "Load a video file via drag-and-drop. Outputs frames as IMAGE tensor, audio, and FPS."
 
-    def load_video(self, video=None, frame_load_cap=-1):
+    def load_video(self, video=None, start_frame=1, end_frame=-1):
         """
-        Load video frames from uploaded video file.
+        Load video frames and audio from uploaded video file.
 
         Args:
-            video: Video filename from upload widget
-            frame_load_cap: Max frames to load (-1 for all)
+            video: Video filename
+            start_frame: First frame to load (1-based). Default 1 = first frame.
+            end_frame: Last frame to load (1-based). Default -1 = last frame.
 
         Returns:
-            tuple: (IMAGE tensor, frame_count)
+            tuple: (IMAGE tensor, AUDIO dict, fps)
         """
-        if video is None or video == "":
-            raise ValueError("No video file provided. Please drag and drop a video onto this node.")
+        video_filename = video
 
-        # Get the actual file path using ComfyUI's helper
+        if not video_filename:
+            raise ValueError("No video file provided. Please use the Upload button or drag and drop a video onto this node.")
+
+        # Get the actual file path
         try:
-            filename = folder_paths.get_annotated_filepath(video)
+            filename = folder_paths.get_annotated_filepath(video_filename)
         except Exception:
-            # Fallback: assume it's just a filename in input directory
             input_dir = folder_paths.get_input_directory()
-            filename = os.path.join(input_dir, video)
+            filename = os.path.join(input_dir, video_filename)
 
         if not os.path.exists(filename):
             raise ValueError(f"Video file not found: {filename}")
@@ -92,15 +135,15 @@ class PowerLoadVideo:
 
         # Get video properties
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        native_fps = cap.get(cv2.CAP_PROP_FPS)
+        if native_fps <= 0:
+            native_fps = 24.0
 
-        # Calculate which frames to load
-        frames_to_load = list(range(total_frames))
+        # Convert 1-based frame numbers to 0-based index range
+        first_idx = max(0, (start_frame or 1) - 1)
+        last_idx = (total_frames - 1) if (end_frame is None or end_frame <= 0) else min(end_frame - 1, total_frames - 1)
 
-        # Apply frame_load_cap
-        if frame_load_cap > 0 and len(frames_to_load) > frame_load_cap:
-            frames_to_load = frames_to_load[:frame_load_cap]
+        frames_to_load = list(range(first_idx, last_idx + 1))
 
         # Read frames
         images = []
@@ -108,7 +151,6 @@ class PowerLoadVideo:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if ret:
-                # Convert BGR to RGB
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(frame)
                 images.append(pil_image)
@@ -120,37 +162,26 @@ class PowerLoadVideo:
 
         # Convert to tensor
         image_tensor = self.pil_totensor(images)
-        frame_count = len(images)
 
-        return (image_tensor, frame_count)
+        # Extract audio (trimmed to match frame range)
+        audio = None
+        audio_start_time = first_idx / native_fps
+        audio_duration = (last_idx - first_idx + 1) / native_fps
+        audio = extract_audio(filename, audio_start_time, audio_duration)
+
+        return (image_tensor, audio, native_fps)
 
     def pil_totensor(self, images):
-        """
-        Convert list of PIL Images to PyTorch tensor.
-
-        Args:
-            images: List of PIL Image objects
-
-        Returns:
-            torch.Tensor: Tensor of shape [N, H, W, 3] with values in [0, 1]
-        """
-        # Convert each image to numpy array
+        """Convert list of PIL Images to PyTorch tensor [N, H, W, C] in [0, 1]."""
         img_list = []
         for img in images:
             np_img = np.array(img.copy(), dtype=np.float32) / 255.0
             img_list.append(np_img)
-
-        # Stack into tensor [N, H, W, C]
         stacked = np.stack(img_list, axis=0)
-
-        # Convert to torch tensor
-        tensor = torch.from_numpy(stacked)
-
-        return tensor
+        return torch.from_numpy(stacked)
 
     @classmethod
-    def IS_CHANGED(s, video):
-        """Return a hash for cache invalidation when file changes."""
+    def IS_CHANGED(s, video=None):
         if not video:
             return 0
         try:
@@ -164,10 +195,9 @@ class PowerLoadVideo:
             return 0
 
     @classmethod
-    def VALIDATE_INPUTS(s, video):
-        """Validate that the video file exists."""
+    def VALIDATE_INPUTS(s, video=None):
         if not video:
-            return True  # Let the node handle empty input
+            return True
         try:
             if not folder_paths.exists_annotated_filepath(video):
                 return "Invalid video file: {}".format(video)

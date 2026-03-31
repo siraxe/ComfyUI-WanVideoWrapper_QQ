@@ -532,3 +532,41 @@ async def sam2_predict(request):
         traceback.print_exc()
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
+
+@PromptServer.instance.routes.get("/wanvideowrapper_qq/video_metadata")
+async def get_video_metadata(request):
+    """Return FPS and frame count for a video file in the input directory."""
+    filename = request.query.get("filename")
+    if not filename:
+        return web.json_response({"success": False, "error": "Missing filename"}, status=400)
+
+    try:
+        filepath = folder_paths.get_annotated_filepath(filename)
+    except Exception:
+        input_dir = folder_paths.get_input_directory()
+        filepath = os.path.join(input_dir, filename)
+
+    if not os.path.exists(filepath):
+        return web.json_response({"success": False, "error": "File not found"}, status=404)
+
+    try:
+        cap = cv2.VideoCapture(filepath)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+
+        if fps <= 0:
+            fps = 24.0
+
+        return web.json_response({
+            "success": True,
+            "fps": fps,
+            "frame_count": frame_count,
+            "width": width,
+            "height": height,
+        })
+    except Exception as e:
+        return web.json_response({"success": False, "error": str(e)}, status=500)
+
