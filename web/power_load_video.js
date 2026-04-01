@@ -733,6 +733,7 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
      * Toggle play/pause state
      */
     togglePlay(node) {
+        if (node.isVFRDecoding) return;  // Locked during VFR frame capture
         this.value.isPlaying = !this.value.isPlaying;
 
         if (this.value.isPlaying) {
@@ -765,7 +766,7 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
 
         // Enable loop mode and start playback
         if (this.videoElement && this.videoElement.duration) {
-            // Use native looping for seamless playback within bounds
+            // CFR: Use native video playback
             this.videoElement.loop = true;
 
             // Start actual video playback - let the browser handle buffering naturally
@@ -787,7 +788,36 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
             }
 
             // Read current frame from video's actual playback position
-            if (this.videoElement.duration && !isNaN(this.videoElement.currentTime)) {
+            if (node.isVFRVideo) {
+                // VFR: Drive frames manually using elapsed time from pre-decoded array
+                const now = performance.now();
+                const elapsed = now - this.lastUpdateTime;
+
+                if (elapsed >= frameInterval) {
+                    this.lastUpdateTime = now - (elapsed % frameInterval);
+                    const startMarker = this.startFrameMarker || 1;
+                    const endMarker = this.endFrameMarker !== null && this.endFrameMarker >= 1
+                        ? this.endFrameMarker
+                        : this.value.totalFrames;
+
+                    let currentFrame = this.value.currentFrame + 1;
+
+                    // Handle looping within markers
+                    if (currentFrame > endMarker) {
+                        currentFrame = startMarker;
+                        if (node._isHovering && node._restartHoverAudioOnLoop) {
+                            node._restartHoverAudioOnLoop();
+                        }
+                    }
+
+                    this.value.currentFrame = currentFrame;
+                    if (node.updateDisplayCanvas) {
+                        node.updateDisplayCanvas(currentFrame);
+                    }
+                    node.setDirtyCanvas(true, true);
+                }
+            } else if (this.videoElement.duration && !isNaN(this.videoElement.currentTime)) {
+                // CFR: Read current frame from video's actual playback position
                 let currentTime = this.videoElement.currentTime;
 
                 // Read marker positions dynamically each frame (not captured in closure)
@@ -813,6 +843,10 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
                 const currentFrame = Math.floor(currentTime * nativeFPS) + 1;
                 if (this.value.currentFrame !== currentFrame) {
                     this.value.currentFrame = currentFrame;
+                    // Draw current frame to display canvas (video is hidden)
+                    if (node.updateDisplayCanvas) {
+                        node.updateDisplayCanvas(currentFrame);
+                    }
                     node.setDirtyCanvas(true, true);
                 }
             }
@@ -850,6 +884,7 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
      */
     seekToPosition(event, pos, node) {
         this.ensureValueInitialized();
+        if (node.isVFRDecoding) return;  // Locked during VFR frame capture
         const timelineX = this.hitAreas.timeline.bounds[0];
         const timelineWidth = this.hitAreas.timeline.bounds[2];
 
@@ -859,12 +894,19 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
         const newFrame = Math.max(1, Math.round(ratio * (this.value.totalFrames - 1)) + 1);
         this.value.currentFrame = newFrame;
 
-        // Update video element time if available
+        // For VFR videos with decoded frames, update video time but display comes from frame array
         if (this.videoElement && this.videoElement.duration) {
             const nativeFPS = this.nativeFPS || 24;
             const newTime = (newFrame - 1) / nativeFPS;
             const clampedTime = Math.min(newTime, this.videoElement.duration);
             this.videoElement.currentTime = clampedTime;
+        }
+
+        // Update display canvas for VFR videos or if node has updateDisplayCanvas method
+        if (node.updateDisplayCanvas) {
+            node.updateDisplayCanvas(this.value.currentFrame);
+        } else if (this.videoElement && !node.isVFRVideo) {
+            // For non-VFR, just ensure video is at right time
         }
 
         node.setDirtyCanvas(true, true);
@@ -877,6 +919,7 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
      */
     dragSeek(event, pos, node) {
         this.ensureValueInitialized();
+        if (node.isVFRDecoding) return;  // Locked during VFR frame capture
         // Use the current mouse position directly for real-time scrubbing
         const timelineX = this.hitAreas.timeline.bounds[0];
         const timelineWidth = this.hitAreas.timeline.bounds[2];
@@ -890,11 +933,16 @@ class PowerLoadVideoTimelineWidget extends RgthreeBaseWidget {
         if (newFrame !== this.value.currentFrame) {
             this.value.currentFrame = newFrame;
 
-            // Update video element time using native FPS
+            // For VFR videos with decoded frames, update video time but display comes from frame array
             if (this.videoElement && this.videoElement.duration) {
                 const nativeFPS = this.nativeFPS || 24;
                 const newTime = (newFrame - 1) / nativeFPS;
                 this.videoElement.currentTime = Math.min(newTime, this.videoElement.duration);
+            }
+
+            // Update display canvas for VFR videos or if node has updateDisplayCanvas method
+            if (node.updateDisplayCanvas) {
+                node.updateDisplayCanvas(this.value.currentFrame);
             }
 
             node.setDirtyCanvas(true, true);
@@ -1318,7 +1366,7 @@ app.registerExtension({
                     const nodeContainer = document.getElementById(`node-${this.id}`);
                     if (nodeContainer) {
                         // Find and hide any video/canvas elements - be more aggressive with selector
-                        const builtInElements = nodeContainer.querySelectorAll('video, canvas:not([id*="litegraph"]), .vhs-video-container');
+                        const builtInElements = nodeContainer.querySelectorAll('video:not([id*="power-load-video"]), canvas:not([id*="litegraph"]):not([id*="power-load-video"]), .vhs-video-container');
                         builtInElements.forEach(el => {
                             el.style.display = 'none';
                         });
@@ -1402,24 +1450,44 @@ app.registerExtension({
                     user-select: none;
                 `;
 
-                // Create HTML5 video element
+                // Create HTML5 video element (hidden - we use canvas for display)
                 const videoElement = document.createElement('video');
                 videoElement.id = `power-load-video-element-${this.id}`;
                 videoElement.style.cssText = `
                     max-width: 100%;
                     max-height: 100%;
-                    display: block;
+                    display: none;  // Hidden - we use canvas for rendering
                 `;
                 videoElement.muted = true;
-                videoElement.preload = 'metadata'; // Changed from 'auto' - let browser manage buffering
+                videoElement.preload = 'auto';  // Load full video data for scrubbing
                 videoElement.playsInline = true;
 
+                // Create canvas element for frame display (used for VFR and regular playback)
+                const displayCanvas = document.createElement('canvas');
+                displayCanvas.setAttribute('willReadFrequently', 'true');  // Optimize for multiple getImageData calls
+                displayCanvas.id = `power-load-video-canvas-${this.id}`;
+                displayCanvas.style.cssText = `
+                    max-width: 100%;
+                    max-height: 100%;
+                    display: block;
+                    background: #000;
+                `;
 
-                // Store reference on node for later access
+                // Store references on node for later access
                 this.videoElement = videoElement;
+                this.displayCanvas = displayCanvas;  // Canvas for displaying frames
+
+                // Redraw display canvas whenever video seek completes (handles scrubbing for CFR videos)
+                videoElement.addEventListener('seeked', () => {
+                    if (!this.isVFRVideo && this.displayCanvas) {
+                        const frame = this.timelineWidget?.value?.currentFrame || 1;
+                        this.updateDisplayCanvas(frame);
+                    }
+                });
 
                 // Append elements to container
-                videoContainer.appendChild(videoElement);
+                videoContainer.appendChild(videoElement);  // Hidden video element for decoding
+                videoContainer.appendChild(displayCanvas);  // Visible canvas for frame display
                 videoContainer.appendChild(placeholderText);
 
 
@@ -1662,11 +1730,171 @@ app.registerExtension({
                     }
                 }, 0);
 
+                /**
+                 * Decode all frames from a VFR video into an array of canvas elements.
+                 * Uses requestVideoFrameCallback to capture frames during playback,
+                 * since seek-based capture fails for VFR videos (browser stays on first frame).
+                 */
+                this.decodeVFRFrames = async (videoEl, frameCount, fps) => {
+                    // Array to hold decoded frame canvases
+                    this.vfrFrames = [];
+                    this.isVFRVideo = true;
+                    this.isVFRDecoding = true;  // Lock interaction during capture
+
+                    // Show decoding status overlay
+                    placeholderText.textContent = `VFR detected, decoding 0/${frameCount} frames...`;
+                    placeholderText.style.display = 'block';
+                    placeholderText.style.color = '#ccc';
+                    // Black out the display canvas
+                    if (this.displayCanvas) {
+                        const ctx = this.displayCanvas.getContext('2d');
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+                    }
+
+                    try {
+                        await new Promise((resolve, reject) => {
+                            // Safety timeout
+                            const safetyTimer = setTimeout(() => {
+                                console.warn(`[PowerLoadVideo] Capture timeout: got ${this.vfrFrames.length}/${frameCount} frames`);
+                                videoEl.pause();
+                                resolve();
+                            }, 30000);
+
+                            // Listen for video ending (may get fewer frames than expected)
+                            videoEl.addEventListener('ended', () => {
+                                clearTimeout(safetyTimer);
+                                resolve();
+                            }, { once: true });
+
+                            const captureFrame = (now, metadata) => {
+                                const frameCanvas = document.createElement('canvas');
+                                frameCanvas.setAttribute('willReadFrequently', 'true');  // Optimize for getImageData readbacks
+                                frameCanvas.width = videoEl.videoWidth;
+                                frameCanvas.height = videoEl.videoHeight;
+                                const frameCtx = frameCanvas.getContext('2d');
+                                frameCtx.drawImage(videoEl, 0, 0);
+                                this.vfrFrames.push(frameCanvas);
+
+                                // Update overlay text
+                                placeholderText.textContent = `VFR detected, decoding ${this.vfrFrames.length}/${frameCount} frames...`;
+
+                                if (this.vfrFrames.length >= frameCount) {
+                                    clearTimeout(safetyTimer);
+                                    videoEl.pause();
+                                    resolve();
+                                    return;
+                                }
+
+                                videoEl.requestVideoFrameCallback(captureFrame);
+                            };
+
+                            videoEl.currentTime = 0;
+                            videoEl.requestVideoFrameCallback(captureFrame);
+                            videoEl.playbackRate = 1;
+                            videoEl.play().catch(err => {
+                                clearTimeout(safetyTimer);
+                                reject(err);
+                            });
+                        });
+
+                        // Reset video state
+                        videoEl.currentTime = 0;
+                        videoEl.pause();
+
+                        // Update totalFrames to actual captured count (may differ from server metadata)
+                        const actualFrames = this.vfrFrames.length;
+                        if (this.timelineWidget && actualFrames > 0) {
+                            this.timelineWidget.setTotalFrames(this, actualFrames);
+                            this.timelineWidget.setStartFrame(1, this);
+                            this.timelineWidget.setEndFrame(actualFrames, this);
+                        }
+
+                        // Hide overlay and show first frame
+                        placeholderText.style.display = 'none';
+                        if (this.displayCanvas && actualFrames > 0) {
+                            this.updateDisplayCanvas(1);
+                        }
+
+                        this.setDirtyCanvas(true, true);
+
+                    } catch (err) {
+                        console.error('[PowerLoadVideo] Error during VFR frame capture:', err);
+                        this.isVFRVideo = false;  // Fall back to normal playback on error
+                        placeholderText.style.display = 'none';
+                    } finally {
+                        this.isVFRDecoding = false;  // Unlock interaction
+                    }
+                };
+
+                /**
+                 * Get the canvas for a specific frame (for VFR videos)
+                 */
+                this.getVFRFrameCanvas = (frameIndex) => {
+                    if (!this.isVFRVideo || !this.vfrFrames) return null;
+                    const idx = Math.max(0, Math.min(frameIndex, this.vfrFrames.length - 1));
+                    return this.vfrFrames[idx];
+                };
+
+                /**
+                 * Update the display canvas with the current frame.
+                 * For VFR videos: uses pre-decoded frame array.
+                 * For CFR videos: draws from video element.
+                 */
+                this.updateDisplayCanvas = (frameIndex) => {
+                    if (!this.displayCanvas) { console.warn('[PowerLoadVideo] updateDisplayCanvas: no displayCanvas'); return; }
+
+                    const ctx = this.displayCanvas.getContext('2d');
+                    const videoEl = this.videoElement;
+
+                    // Ensure canvas is sized correctly
+                    if (videoEl && videoEl.videoWidth > 0) {
+                        if (this.displayCanvas.width !== videoEl.videoWidth) {
+                            this.displayCanvas.width = videoEl.videoWidth;
+                            this.displayCanvas.height = videoEl.videoHeight;
+                        }
+                    }
+
+                    // For VFR videos, use pre-decoded frame
+                    if (this.isVFRVideo && this.vfrFrames && frameIndex > 0) {
+                        const idx = frameIndex - 1;  // 1-based to 0-based
+                        const frameCanvas = this.vfrFrames[idx];
+                        if (frameCanvas) {
+                            ctx.clearRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+                            ctx.drawImage(frameCanvas, 0, 0);
+                            return;
+                        } else {
+                            console.warn(`[PowerLoadVideo] updateDisplayCanvas: VFR frame ${frameIndex} (idx ${idx}) not found, total=${this.vfrFrames.length}`);
+                        }
+                    }
+
+                    // For CFR videos: draw from video element if ready
+                    if (videoEl && videoEl.readyState >= 2) {  // HAVE_CURRENT_DATA
+                        ctx.clearRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+                        ctx.drawImage(videoEl, 0, 0);
+                    }
+                };
+
+                /**
+                 * Clear VFR frame cache to free memory.
+                 * Called when switching videos or node is removed.
+                 */
+                this.clearVFRFrames = () => {
+                    if (this.vfrFrames && this.vfrFrames.length > 0) {
+                        // Clear the array to allow garbage collection
+                        this.vfrFrames = null;
+                        this.isVFRVideo = false;
+                    }
+                };
+
                 // Function to load video into custom display - attach to node for external access
                 this.loadVideoIntoDisplay = (videoFilename) => {
                     if (!videoFilename || String(videoElement.src).includes(videoFilename)) {
                         return;
                     }
+
+                    // Clear VFR frames from previous video before loading new one
+                    this.clearVFRFrames();
 
                     // Stop playback and reset timeline when loading new video
                     if (this.timelineWidget?.value?.isPlaying) {
@@ -1727,6 +1955,16 @@ app.registerExtension({
                                     this.timelineWidget.setStartFrame(1, this);
                                     this.timelineWidget.setEndFrame(totalFrames, this);
                                     this.timelineWidget.applyPlaybackRate();
+
+                                    // === VFR DETECTION ===
+                                    const durationFromFrames = meta.frame_count / meta.fps;
+                                    const durationDiff = Math.abs(durationFromFrames - videoElement.duration);
+                                    const durationDiffPercent = (durationDiff / videoElement.duration) * 100;
+
+                                    if (durationDiffPercent > 2) {
+                                        await this.decodeVFRFrames(videoElement, meta.frame_count, meta.fps);
+                                    }
+
                                     this.setDirtyCanvas(true, true);
                                     return;
                                 }
@@ -1755,6 +1993,13 @@ app.registerExtension({
 
                     videoElement.addEventListener('loadedmetadata', onMetadataLoaded, { once: true });
                     videoElement.addEventListener('error', onError, { once: true });
+
+                    // Draw first frame when video data becomes available (CFR videos only)
+                    videoElement.addEventListener('loadeddata', () => {
+                        if (!this.isVFRVideo && this.displayCanvas) {
+                            this.updateDisplayCanvas(1);
+                        }
+                    }, { once: true });
                 };
 
                 // Override execute to load video into our custom display
@@ -1880,6 +2125,11 @@ app.registerExtension({
                     this._stopHoverAudio();
                     this._stopHoverAudio = null;
                     this._loadHoverAudio = null;
+                }
+
+                // Clear VFR frame cache on node removal
+                if (this.clearVFRFrames) {
+                    this.clearVFRFrames();
                 }
 
                 // Clean up keyboard shortcut handler
