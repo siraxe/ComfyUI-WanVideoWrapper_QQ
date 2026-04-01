@@ -1,5 +1,6 @@
-# ComfyUI-WanVideoWrapper_QQ
-**Version 1.3.3** - 2026-03-31
+# ComfyUI-SA-Nodes-QQ
+**Version 1.3.4** - 2026-04-01
+- **ComfyUI-SA-Nodes-QQ**: Name change of node/repo to ComfyUI-SA-Nodes-QQ as Comfyui had warning print with kj wanwraper node pack. (Originally this was an addition node pack to build on top but now there's more nodes so it doesn't make sence as well)
 - **Power Load Video Node**: New node for loading and previewing videos directly in the canvas with integrated timeline playback.
   - **Hotkeys**: `Shift+Spacebar` to play/pause, `Shift+Drag` on `[`/`]` markers to adjust loop boundaries
 
