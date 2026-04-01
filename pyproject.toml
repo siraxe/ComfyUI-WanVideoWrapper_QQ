@@ -1,7 +1,7 @@
 [project]
-name = "wanvideowrapper_qq"
+name = "ComfyUI-SA-Nodes-QQ"
 description = "A collection of custom nodes for ComfyUI providing video manipulation, LoRA loading, path animation, and visual drawing tools for WanVideo workflows."
-version = "1.3.3"
+version = "1.3.4"
 license = {file = "LICENSE"} 
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
@@ -22,14 +22,14 @@ license = {file = "LICENSE"}
 
 
 [project.urls]
-Repository = "https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ"
+Repository = "https://github.com/siraxe/ComfyUI-SA-Nodes-QQ"
 #  Used by Comfy Registry https://registry.comfy.org
-Documentation = "https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ/wiki"
-"Bug Tracker" = "https://github.com/siraxe/ComfyUI-WanVideoWrapper_QQ/issues"
+Documentation = "https://github.com/siraxe/ComfyUI-SA-Nodes-QQ/wiki"
+"Bug Tracker" = "https://github.com/siraxe/ComfyUI-SA-Nodes-QQ/issues"
 
 [tool.comfy]
 PublisherId = "siraxe"
-DisplayName = "ComfyUI-WanVideoWrapper_QQ"
+DisplayName = "ComfyUI-SA-Nodes-QQ"
 Icon = ""
 includes = [] 
 # "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
