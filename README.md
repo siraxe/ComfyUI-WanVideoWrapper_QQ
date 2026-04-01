@@ -1,6 +1,22 @@
 # ComfyUI-SA-Nodes-QQ
 **Version 1.3.4** - 2026-04-01
-- **ComfyUI-SA-Nodes-QQ**: Name change of node/repo to ComfyUI-SA-Nodes-QQ as Comfyui had warning print with kj wanwraper node pack. (Originally this was an addition node pack to build on top but now there's more nodes so it doesn't make sence as well)
+- **ComfyUI-SA-Nodes-QQ**: Name change of node/repo to ComfyUI-SA-Nodes-QQ as Comfyui had warning print on import with kj wanwraper node pack. (Originally this was an addition node pack to build on top but now there's more nodes so it doesn't make sence as well)
+
+<table>
+<tr>
+<td width="50%">
+
+![pvl](https://github.com/user-attachments/assets/e5959278-d700-401e-86e8-da5909fead56)
+
+</td>
+<td width="50%">
+  
+<img width="703" height="650" alt="node" src="https://github.com/user-attachments/assets/b558186e-7821-443f-ace2-7fd1c1901764" />
+
+</td>
+</tr>
+</table>
+
 - **Power Load Video Node**: New node for loading and previewing videos directly in the canvas with integrated timeline playback.
   - **Hotkeys**: `Shift+Spacebar` to play/pause, `Shift+Drag` on `[`/`]` markers to adjust loop boundaries
 
