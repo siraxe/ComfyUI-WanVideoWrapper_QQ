@@ -59,6 +59,62 @@ app.registerExtension({
             e.stopPropagation();
         };
 
+        /**
+         * Extract embedded ComfyUI workflow from PNG metadata
+         */
+        const extractWorkflowFromPng = (arrayBuffer) => {
+            try {
+                const dataView = new DataView(arrayBuffer);
+
+                // Verify PNG signature
+                if (dataView.getUint32(0) !== 0x89504e47) return null;
+
+                let offset = 8;
+
+                while (offset < dataView.byteLength - 11) {
+                    const chunkLength = dataView.getUint32(offset);
+                    const chunkType = String.fromCharCode(
+                        dataView.getUint8(offset + 4),
+                        dataView.getUint8(offset + 5),
+                        dataView.getUint8(offset + 6),
+                        dataView.getUint8(offset + 7)
+                    );
+
+                    // Check for tEXt chunks (text metadata)
+                    if (chunkType === 'tEXt' && chunkLength > 0) {
+                        let keywordStart = offset + 8;
+                        let keyword = '';
+                        while (keywordStart < offset + 8 + chunkLength && dataView.getUint8(keywordStart) !== 0) {
+                            keyword += String.fromCharCode(dataView.getUint8(keywordStart));
+                            keywordStart++;
+                        }
+
+                        // Check for workflow-related keywords (ComfyUI uses 'workflow')
+                        if (keyword === 'workflow' || keyword === 'ExtraForUi') {
+                            let textStart = keywordStart + 1; // skip null terminator
+                            const textEnd = offset + 8 + chunkLength;
+                            let text = '';
+                            while (textStart < textEnd) {
+                                text += String.fromCharCode(dataView.getUint8(textStart));
+                                textStart++;
+                            }
+
+                            try {
+                                return JSON.parse(text);
+                            } catch (e) {
+                                // Failed to parse, continue searching
+                            }
+                        }
+                    }
+
+                    offset += 12 + chunkLength; // length(4) + type(4) + data + crc(4)
+                }
+            } catch (err) {
+                // Silently fail - not a valid PNG or no workflow found
+            }
+            return null;
+        };
+
         const handleDrop = async (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -68,6 +124,39 @@ app.registerExtension({
 
             const file = e.dataTransfer?.files[0];
             if (!file) return;
+
+            // Check if it's a JSON workflow file first
+            if (file.name.endsWith('.json') || file.type === 'application/json') {
+                try {
+                    const text = await file.text();
+                    const workflow = JSON.parse(text);
+
+                    // Load the workflow using ComfyUI's built-in function
+                    if (app.loadGraphData) {
+                        app.loadGraphData(workflow);
+                    } else {
+                        console.error('[PowerLoadVideo] app.loadGraphData not available!');
+                    }
+                } catch (err) {
+                    console.error('[PowerLoadVideo] Failed to load JSON workflow:', err);
+                }
+                return;
+            }
+
+            // Check if it's a PNG image with embedded workflow
+            if (file.type === 'image/png') {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const workflow = extractWorkflowFromPng(arrayBuffer);
+
+                    if (workflow && app.loadGraphData) {
+                        app.loadGraphData(workflow);
+                        return;
+                    }
+                } catch (err) {
+                    // Silently fail - not a PNG with embedded workflow
+                }
+            }
 
             // Check if it's a video file
             if (!file.type.startsWith('video/')) {

@@ -28,21 +28,51 @@ export async function uploadVideoFile(file) {
  * Create a Power Load Video node at the given position with the uploaded video
  */
 export async function createPowerLoadVideoNodeAt(pos, filename) {
-    // Get the LiteGraph constructor for PowerLoadVideo node
-    const nodeClass = app.graphConstructor.nodeTypes.PowerLoadVideo;
-    if (!nodeClass) {
-        console.error('[PowerLoadVideo] Node type not registered yet!');
+    // Use LiteGraph.createNode - the standard way to create nodes in ComfyUI
+    const node = LiteGraph.createNode('PowerLoadVideo');
+
+    if (!node) {
+        console.error('[PowerLoadVideo] Failed to create node!');
         return null;
     }
 
-    const node = new nodeClass();
+    // Set position
     node.pos = [pos[0], pos[1]];
 
-    // Set the video filename as the first widget value
-    node.widgets_values = [filename];
+    // Add node to graph (this auto-assigns ID and creates widgets)
+    app.canvas.graph.add(node);
 
-    app.graph.add(node);
-    node.configure({ id: app.graph.getNodeId(), widgets_values: [filename] });
+    // Wait for widgets and custom methods to be created
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Store the video filename on the node for execution (same as drag-to-node does)
+    node.videoFilename = filename;
+
+    // Update the hidden combo widget value so ComfyUI serializes it to the backend
+    const comboWidget = node.widgets.find(w => w.type === 'combo');
+    if (comboWidget) {
+        comboWidget.value = filename;
+    }
+
+    // Also update widgets_values so serialization picks it up
+    if (!node.widgets_values || node.widgets_values.length === 0) {
+        node.widgets_values = [filename];
+    } else {
+        node.widgets_values[0] = filename;
+    }
+
+    // Directly load the video into our custom display using node method (same as drag-to-node)
+    if (typeof node.loadVideoIntoDisplay === 'function') {
+        node.loadVideoIntoDisplay(filename);
+    } else {
+        console.error('[PowerLoadVideo] loadVideoIntoDisplay not available yet, will retry');
+        // Retry after a short delay
+        setTimeout(() => {
+            if (typeof node.loadVideoIntoDisplay === 'function') {
+                node.loadVideoIntoDisplay(filename);
+            }
+        }, 50);
+    }
 
     return node;
 }
