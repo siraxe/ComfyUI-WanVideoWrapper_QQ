@@ -176,7 +176,22 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
     }
 
     /**
-     * Create/show the HTML dropdown overlay
+     * Filter files by search query (supports multiple keywords, partial matching)
+     */
+    filterFiles(files, query) {
+        if (!query || query.trim() === '') return files;
+
+        const keywords = query.toLowerCase().split(/\s+/).filter(k => k.length > 0);
+
+        return files.filter(filename => {
+            const lowerFilename = filename.toLowerCase();
+            // All keywords must be present (AND logic)
+            return keywords.every(keyword => lowerFilename.includes(keyword));
+        });
+    }
+
+    /**
+     * Create/show the HTML dropdown overlay with searchable filter
      */
     openDropdown() {
         if (this.dropdownOpen) {
@@ -194,38 +209,124 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
             background-color: #1a1a1a;
             border: 1px solid #555;
             border-radius: 4px;
-            max-height: 200px;
-            overflow-y: auto;
+            max-height: 280px;
             z-index: 10000;
             min-width: 200px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.5);
         `;
 
-        files.forEach(filename => {
-            const item = document.createElement('div');
-            item.textContent = filename;
-            const isCurrent = filename === this.currentFilename;
-            item.style.cssText = `
-                padding: 6px 12px;
-                cursor: pointer;
-                color: ${isCurrent ? '#2cc6ff' : '#ccc'};
-                font-size: 13px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                ${isCurrent ? 'background-color: #0d3b4a;' : ''}
-            `;
-            item.onmouseenter = () => {
-                item.style.backgroundColor = '#333';
-            };
-            item.onmouseleave = () => {
-                item.style.backgroundColor = isCurrent ? '#0d3b4a' : 'transparent';
-            };
-            item.onclick = (e) => {
-                e.stopPropagation();
-                this.selectFile(filename);
-            };
-            dropdown.appendChild(item);
+        // === SEARCH INPUT BAR (top row) ===
+        const searchContainer = document.createElement('div');
+        searchContainer.style.cssText = `
+            padding: 6px 8px;
+            border-bottom: 1px solid #333;
+            background-color: #0f0f0f;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        `;
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.placeholder = this.currentFilename || 'Search videos...';
+        searchInput.value = '';
+        searchInput.style.cssText = `
+            width: 100%;
+            padding: 6px 8px;
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #eee;
+            font-size: 13px;
+            outline: none;
+            box-sizing: border-box;
+        `;
+
+        // Focus the input immediately when dropdown opens
+        searchInput.addEventListener('focus', () => {
+            searchInput.select();
+        });
+
+        searchContainer.appendChild(searchInput);
+        dropdown.appendChild(searchContainer);
+
+        // === FILE LIST CONTAINER ===
+        const fileList = document.createElement('div');
+        fileList.style.cssText = `
+            max-height: 240px;
+            overflow-y: auto;
+        `;
+
+        let filteredFiles = [...files];
+
+        /**
+         * Render file list items (called on init and after filter changes)
+         */
+        const renderFileList = () => {
+            fileList.innerHTML = '';
+
+            if (filteredFiles.length === 0) {
+                const noResults = document.createElement('div');
+                noResults.textContent = 'No matching videos';
+                noResults.style.cssText = `
+                    padding: 12px;
+                    color: #666;
+                    font-size: 13px;
+                    text-align: center;
+                `;
+                fileList.appendChild(noResults);
+                return;
+            }
+
+            filteredFiles.forEach(filename => {
+                const item = document.createElement('div');
+                item.textContent = filename;
+                const isCurrent = filename === this.currentFilename;
+                item.style.cssText = `
+                    padding: 6px 12px;
+                    cursor: pointer;
+                    color: ${isCurrent ? '#2cc6ff' : '#ccc'};
+                    font-size: 13px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    ${isCurrent ? 'background-color: #0d3b4a;' : ''}
+                `;
+                item.onmouseenter = () => {
+                    item.style.backgroundColor = '#333';
+                };
+                item.onmouseleave = () => {
+                    item.style.backgroundColor = isCurrent ? '#0d3b4a' : 'transparent';
+                };
+                item.onclick = (e) => {
+                    e.stopPropagation();
+                    this.selectFile(filename);
+                };
+                fileList.appendChild(item);
+            });
+        };
+
+        // Initial render
+        renderFileList();
+        dropdown.appendChild(fileList);
+
+        // === SEARCH FILTER LOGIC ===
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value;
+            filteredFiles = this.filterFiles(files, query);
+            renderFileList();
+        });
+
+        // Allow Enter key to select first result
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (filteredFiles.length > 0) {
+                    this.selectFile(filteredFiles[0]);
+                }
+            } else if (e.key === 'Escape') {
+                this.closeDropdown();
+            }
         });
 
         // Position the dropdown below the file selector area on screen
@@ -238,15 +339,21 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         this.dropdownElement = dropdown;
         this.dropdownOpen = true;
 
-        // Close on outside click (delayed to prevent immediate close from the same click)
+        // Focus search input after a short delay to ensure DOM is ready
+        setTimeout(() => {
+            searchInput.focus();
+            searchInput.select();
+        }, 10);
+
+        // Close on outside click (delay registration to let opening click complete)
         setTimeout(() => {
             this._closeDropdownHandler = (e) => {
-                if (!this.dropdownElement || !this.dropdownElement.contains(e.target)) {
-                    this.closeDropdown();
-                }
+                if (!this.dropdownElement || !this.dropdownOpen) return;
+                if (this.dropdownElement.contains(e.target)) return;
+                this.closeDropdown();
             };
-            document.addEventListener('mousedown', this._closeDropdownHandler);
-        }, 10);
+            document.addEventListener('click', this._closeDropdownHandler);
+        }, 0);
     }
 
     /**
@@ -291,7 +398,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         this.dropdownOpen = false;
         // Always remove the close handler when closing
         if (this._closeDropdownHandler) {
-            document.removeEventListener('mousedown', this._closeDropdownHandler);
+            document.removeEventListener('click', this._closeDropdownHandler);
             this._closeDropdownHandler = null;
         }
     }
