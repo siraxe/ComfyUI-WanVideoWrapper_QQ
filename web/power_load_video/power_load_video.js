@@ -166,11 +166,6 @@ app.registerExtension({
             isHandlingDrop = true;
             droppedFile = file;
 
-            // Convert client coordinates to canvas coordinates
-            const rect = canvas.getBoundingClientRect();
-            const canvasX = e.clientX - rect.left;
-            const canvasY = e.clientY - rect.top;
-
             try {
                 // Upload the video file
                 const filename = await uploadVideoFile(file);
@@ -196,8 +191,17 @@ app.registerExtension({
                     // Wait a moment for node types to be registered
                     await new Promise(resolve => setTimeout(resolve, 100));
 
-                    // Create Power Load Video node at drop position
-                    const node = await createPowerLoadVideoNodeAt([canvasX, canvasY], filename);
+                    // Calculate mouse position in graph coordinates (accounts for pan/zoom)
+                    const ds = app.canvas.ds || { scale: 1, offset: [0, 0] };
+                    const rect = canvas.getBoundingClientRect();
+                    const mouseX = e.clientX - rect.left;
+                    const mouseY = e.clientY - rect.top;
+                    // Convert to graph coordinates by accounting for zoom and pan
+                    const graphX = mouseX / ds.scale - ds.offset[0];
+                    const graphY = mouseY / ds.scale - ds.offset[1];
+
+                    // Create Power Load Video node at drop position under mouse
+                    const node = await createPowerLoadVideoNodeAt(filename, [graphX, graphY]);
 
                     if (node) {
                         // Focus/select the new node

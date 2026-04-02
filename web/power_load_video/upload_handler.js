@@ -27,7 +27,7 @@ export async function uploadVideoFile(file) {
 /**
  * Create a Power Load Video node at the given position with the uploaded video
  */
-export async function createPowerLoadVideoNodeAt(pos, filename) {
+export async function createPowerLoadVideoNodeAt(filename, pos = null) {
     // Use LiteGraph.createNode - the standard way to create nodes in ComfyUI
     const node = LiteGraph.createNode('PowerLoadVideo');
 
@@ -36,8 +36,13 @@ export async function createPowerLoadVideoNodeAt(pos, filename) {
         return null;
     }
 
-    // Set position
-    node.pos = [pos[0], pos[1]];
+    // Set position if provided, otherwise let LiteGraph place it automatically
+    if (pos) {
+        // Offset by half node width/height so mouse is at center of new node
+        const nodeWidth = 300;  // Approximate default width for Power Load Video
+        const nodeHeight = 200; // Approximate height including video display + timeline
+        node.pos = [pos[0] - nodeWidth / 2, pos[1] - nodeHeight / 2];
+    }
 
     // Add node to graph (this auto-assigns ID and creates widgets)
     app.canvas.graph.add(node);
