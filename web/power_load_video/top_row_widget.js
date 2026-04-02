@@ -18,6 +18,7 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         this.fpsValue = 24;
         this.sizeValue = "?x?";
         this.frameCountValue = "?f";
+        this.forceFpsValue = "0";
 
         this.hitAreas = {
             refreshButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
@@ -26,6 +27,7 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
             fpsInc: { bounds: [0, 0], onClick: null },
             fpsAny: { bounds: [0, 0], onMove: null },
             sizeInput: { bounds: [0, 0], onClick: null },
+            forceFpsInput: { bounds: [0, 0], onClick: null },
         };
     }
 
@@ -87,10 +89,10 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         assignBounds("fpsVal", fpsText);
         assignBounds("fpsInc", fpsRightArrow);
         assignBounds("fpsAny", [fpsLeftArrow[0], fpsRightArrow[0] + fpsRightArrow[1] - fpsLeftArrow[0]]);
-        posX += fpsLabelWidth + drawNumberWidgetPart.WIDTH_TOTAL + spacing;
+        posX += fpsLabelWidth + drawNumberWidgetPart.WIDTH_TOTAL + 20;
 
         // Draw size input (text field style with content-sized background)
-        const sizeLabelWidth = 35;
+        const sizeLabelWidth = 20;
         ctx.fillText("size:", posX, midY);
 
         const sizeInputX = posX + sizeLabelWidth;
@@ -123,6 +125,39 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
         posX = sizeInputX + bgWidth + spacing;
         ctx.fillText(this.frameCountValue, posX, midY);
+
+        // Draw force fps label and input
+        const forceLabelWidth = 40;
+        posX += ctx.measureText(this.frameCountValue).width + 15;
+        ctx.fillText("force:", posX, midY);
+
+        const forceInputX = posX + forceLabelWidth;
+
+        // Measure the actual text width and add padding
+        ctx.font = `${Math.max(14, height * 0.7)}px Sans-Serif`;
+        const forceTextSize = ctx.measureText(this.forceFpsValue);
+        const forceTextWidthActual = Math.ceil(forceTextSize.width);
+        const forceBgPadding = 12; // Padding on each side
+        const forceBgWidth = forceTextWidthActual + forceBgPadding * 2;
+        const forceBgRadius = height * 0.5;
+
+        // Draw rounded background only around the text content
+        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.beginPath();
+        ctx.roundRect(forceInputX, posY, forceBgWidth, height, [forceBgRadius]);
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw force fps text
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.fillText(this.forceFpsValue, forceInputX + forceBgPadding, midY);
+
+        assignBounds("forceFpsInput", [forceInputX, forceBgWidth]);
+
+        // Draw "fps" label after the input
+        const fpsLabelX = forceInputX + forceBgWidth + 8;
+        ctx.fillText("fps", fpsLabelX, midY);
 
         // Setup event handlers
         this.hitAreas.refreshButton.onClick = async () => {
@@ -165,6 +200,9 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
 
         // Size input handler
         this.hitAreas.sizeInput.onClick = () => this.promptSize(node);
+
+        // Force fps input handler
+        this.hitAreas.forceFpsInput.onClick = () => this.promptForceFps(node);
 
         ctx.restore();
     }
@@ -210,6 +248,33 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         });
     }
 
+    promptForceFps(node) {
+        if (this.haveMouseMovedValue) return;
+        const canvas = app.canvas;
+        canvas.prompt("Force FPS", this.forceFpsValue, (v) => {
+            this.forceFpsValue = String(v).trim() || "0";
+            // Update the hidden backend widget value so it gets serialized to Python
+            const forceFpsWidget = node.widgets.find(w => w.name === 'force_fps');
+            if (forceFpsWidget) {
+                forceFpsWidget.value = this.forceFpsValue === "0" ? 0 : parseFloat(this.forceFpsValue);
+            }
+            node.setDirtyCanvas(true, true);
+        });
+    }
+
+    // Restore from saved workflow JSON
+    fromJSON(data, _widgetInfo, node) {
+        if (data?.force_fps !== undefined && data.force_fps !== null) {
+            this.forceFpsValue = String(data.force_fps);
+        }
+        return this;
+    }
+
+    // Serialize to workflow JSON
+    toJSON(_node, widgetInfo) {
+        return { force_fps: this.forceFpsValue === "0" ? 0 : parseFloat(this.forceFpsValue) };
+    }
+
     onMouseUp(event, pos, node) {
         super.onMouseUp(event, pos, node);
         this.haveMouseMovedValue = false;
@@ -249,9 +314,9 @@ function drawWidgetButton(ctx, rect, label, pressed = false) {
 }
 
 function drawNumberWidgetPart(ctx, { posX, posY, height, value, direction = 1 }) {
-    const spacing = 3;  // Reduced from 6 to bring arrows closer
-    const arrowWidth = 24;
-    const textWidth = 50;
+    const spacing = 0;  // No gap between elements
+    const arrowWidth = 16;
+    const textWidth = 32;
     const midY = posY + height * 0.5;
 
     // Left arrow (no background)
@@ -287,4 +352,4 @@ function drawNumberWidgetPart(ctx, { posX, posY, height, value, direction = 1 })
     ];
 }
 
-drawNumberWidgetPart.WIDTH_TOTAL = 24 + 3 + 50 + 3 + 24; // arrow + spacing + text + spacing + arrow
+drawNumberWidgetPart.WIDTH_TOTAL = 16 + 0 + 32 + 0 + 16; // arrow + spacing + text + spacing + arrow

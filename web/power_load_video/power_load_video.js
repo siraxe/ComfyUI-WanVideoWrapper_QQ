@@ -310,6 +310,11 @@ app.registerExtension({
                         this.timelineWidget.endFrameMarker = endFrameWidget.value;
                     }
                 }
+                // Restore force_fps from hidden widget to custom UI
+                const forceFpsWidget = this.widgets.find(w => w.name === 'force_fps');
+                if (forceFpsWidget && typeof forceFpsWidget.value === 'number' && this.topRowWidget) {
+                    this.topRowWidget.forceFpsValue = String(forceFpsWidget.value);
+                }
             };
 
             // Store original onRemoved and wrap it

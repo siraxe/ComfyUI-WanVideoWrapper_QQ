@@ -417,8 +417,8 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 comboWidget.computeSize = () => [0, 0]; // Make it zero height
                 comboWidget.hidden = true; // Mark as hidden
             }
-            // Hide start_frame and end_frame number widgets (created from Python INPUT_TYPES)
-            for (const name of ['start_frame', 'end_frame']) {
+            // Hide start_frame, end_frame, and force_fps number widgets (created from Python INPUT_TYPES)
+            for (const name of ['start_frame', 'end_frame', 'force_fps']) {
                 const w = this.widgets.find(w => w.name === name);
                 if (w) {
                     w.computeSize = () => [0, 0];
