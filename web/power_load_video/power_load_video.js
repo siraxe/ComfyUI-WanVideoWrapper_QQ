@@ -115,6 +115,140 @@ app.registerExtension({
             return null;
         };
 
+        /**
+         * Upload an image file to ComfyUI's input directory
+         */
+        const uploadImageFile = async (file) => {
+            const formData = new FormData();
+            formData.append('image', file);
+            formData.append('type', 'input');
+
+            try {
+                const resp = await api.fetchApi('/upload/image', { method: 'POST', body: formData });
+                if (resp.ok || resp.status === 200) {
+                    const data = await resp.json();
+                    return data.name || data.filename || file.name;
+                }
+            } catch (err) {
+                console.error('[PowerLoadVideo] Image upload error:', err);
+            }
+            return null;
+        };
+
+        /**
+         * Create a LoadImage node at the given position and load an image into it
+         */
+        const createLoadImageNodeWithImage = async (filename, pos) => {
+            // Check if LoadImage node type exists
+            if (!LiteGraph.registered_node_types['LoadImage']) {
+                console.error('[PowerLoadVideo] LoadImage node type not found!');
+                return null;
+            }
+
+            const node = LiteGraph.createNode('LoadImage');
+            if (!node) {
+                console.error('[PowerLoadVideo] Failed to create LoadImage node!');
+                return null;
+            }
+
+            // Set position centered at mouse
+            node.pos = [pos[0] - 150, pos[1] - 100];
+
+            // Add node to graph
+            app.canvas.graph.add(node);
+
+            // Wait for widgets to be created
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            // Find the image combo widget and set it to our uploaded filename
+            const imageWidget = node.widgets.find(w => w.name === 'image');
+            if (imageWidget) {
+                imageWidget.value = filename;
+                // Trigger value change to update the node display
+                if (imageWidget.callback) {
+                    imageWidget.callback(filename);
+                }
+            }
+
+            // Select the new node
+            app.canvas.selectNodes([node]);
+
+            return node;
+        };
+
+        /**
+         * Load an image file into a LoadImage node by updating its widget
+         */
+        const loadImageIntoNode = async (node, file) => {
+            // Upload the image first
+            const filename = await uploadImageFile(file);
+            if (!filename) {
+                console.error('[PowerLoadVideo] Failed to upload image!');
+                return false;
+            }
+
+            // Find the image combo widget and set it to our uploaded filename
+            const imageWidget = node.widgets.find(w => w.name === 'image');
+            if (imageWidget) {
+                imageWidget.value = filename;
+                // Trigger value change to update the node display
+                if (imageWidget.callback) {
+                    imageWidget.callback(filename);
+                }
+                return true;
+            }
+            return false;
+        };
+
+        /**
+         * Check if a file is an image type
+         */
+        const isImageFile = (file) => {
+            return file.type.startsWith('image/') ||
+                   file.name.toLowerCase().match(/\.(png|jpg|jpeg|gif|webp|bmp)$/i);
+        };
+
+        /**
+         * Check if a point is inside a node's bounding box
+         */
+        const isPointInNode = (pointX, pointY, node) => {
+            // Node position and size in graph coordinates
+            const nodeLeft = node.pos[0];
+            const nodeTop = node.pos[1];
+            const nodeRight = nodeLeft + node.size[0];
+            const nodeBottom = nodeTop + node.size[1];
+
+            return pointX >= nodeLeft && pointX <= nodeRight &&
+                   pointY >= nodeTop && pointY <= nodeBottom;
+        };
+
+        /**
+         * Check if the drop target is over a LoadImage node
+         */
+        const getLoadImageNodeAtPosition = (clientX, clientY) => {
+            // Get canvas rect for coordinate conversion
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = clientX - rect.left;
+            const mouseY = clientY - rect.top;
+
+            // Convert to graph coordinates
+            const ds = app.canvas.ds || { scale: 1, offset: [0, 0] };
+            const graphX = mouseX / ds.scale - ds.offset[0];
+            const graphY = mouseY / ds.scale - ds.offset[1];
+
+            // Find all LoadImage nodes and check if mouse is over any of them
+            const loadImageNodes = app.canvas.graph.nodes.filter(
+                node => node.type === 'LoadImage'
+            );
+
+            for (const node of loadImageNodes) {
+                if (isPointInNode(graphX, graphY, node)) {
+                    return node;
+                }
+            }
+            return null;
+        };
+
         const handleDrop = async (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -143,6 +277,16 @@ app.registerExtension({
                 return;
             }
 
+            // Check if dropping over a LoadImage node (for any image type)
+            if (isImageFile(file)) {
+                const loadImageNode = getLoadImageNodeAtPosition(e.clientX, e.clientY);
+                if (loadImageNode) {
+                    // Drop onto existing LoadImage node - load image into it
+                    await loadImageIntoNode(loadImageNode, file);
+                    return;
+                }
+            }
+
             // Check if it's a PNG image with embedded workflow
             if (file.type === 'image/png') {
                 try {
@@ -156,6 +300,39 @@ app.registerExtension({
                 } catch (err) {
                     // Silently fail - not a PNG with embedded workflow
                 }
+            }
+
+            // If it's an image file without embedded workflow, create LoadImage node
+            if (isImageFile(file)) {
+                isHandlingDrop = true;
+                droppedFile = file;
+
+                try {
+                    // Upload the image file
+                    const filename = await uploadImageFile(file);
+
+                    if (filename) {
+                        // Wait a moment for node types to be registered
+                        await new Promise(resolve => setTimeout(resolve, 100));
+
+                        // Calculate mouse position in graph coordinates
+                        const ds = app.canvas.ds || { scale: 1, offset: [0, 0] };
+                        const rect = canvas.getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const mouseY = e.clientY - rect.top;
+                        const graphX = mouseX / ds.scale - ds.offset[0];
+                        const graphY = mouseY / ds.scale - ds.offset[1];
+
+                        // Create LoadImage node at drop position
+                        await createLoadImageNodeWithImage(filename, [graphX, graphY]);
+                    } else {
+                        console.error('[PowerLoadVideo] Image upload failed!');
+                    }
+                } finally {
+                    isHandlingDrop = false;
+                    droppedFile = null;
+                }
+                return;
             }
 
             // Check if it's a video file
