@@ -60,6 +60,23 @@ app.registerExtension({
         };
 
         /**
+         * Decode UTF-8 bytes to string properly handling multi-byte characters
+         */
+        const decodeUtf8 = (bytes) => {
+            // Use TextDecoder for proper UTF-8 decoding
+            try {
+                return new TextDecoder('utf-8').decode(bytes);
+            } catch (e) {
+                // Fallback to latin1 if text decoder fails
+                let result = '';
+                for (let i = 0; i < bytes.length; i++) {
+                    result += String.fromCharCode(bytes[i]);
+                }
+                return result;
+            }
+        };
+
+        /**
          * Extract embedded ComfyUI workflow from PNG metadata
          */
         const extractWorkflowFromPng = (arrayBuffer) => {
@@ -83,21 +100,27 @@ app.registerExtension({
                     // Check for tEXt chunks (text metadata)
                     if (chunkType === 'tEXt' && chunkLength > 0) {
                         let keywordStart = offset + 8;
-                        let keyword = '';
+                        const keywordBytes = [];
                         while (keywordStart < offset + 8 + chunkLength && dataView.getUint8(keywordStart) !== 0) {
-                            keyword += String.fromCharCode(dataView.getUint8(keywordStart));
+                            keywordBytes.push(dataView.getUint8(keywordStart));
                             keywordStart++;
                         }
+
+                        // Decode keyword with proper UTF-8 handling
+                        const keyword = decodeUtf8(new Uint8Array(keywordBytes));
 
                         // Check for workflow-related keywords (ComfyUI uses 'workflow')
                         if (keyword === 'workflow' || keyword === 'ExtraForUi') {
                             let textStart = keywordStart + 1; // skip null terminator
                             const textEnd = offset + 8 + chunkLength;
-                            let text = '';
+                            const textBytes = [];
                             while (textStart < textEnd) {
-                                text += String.fromCharCode(dataView.getUint8(textStart));
+                                textBytes.push(dataView.getUint8(textStart));
                                 textStart++;
                             }
+
+                            // Decode text with proper UTF-8 handling
+                            const text = decodeUtf8(new Uint8Array(textBytes));
 
                             try {
                                 return JSON.parse(text);
