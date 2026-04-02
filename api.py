@@ -251,6 +251,69 @@ async def open_explorer(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
+@PromptServer.instance.routes.post("/power_load_video/open_input_dir")
+async def open_input_dir(request):
+    """API endpoint to open Windows Explorer at the input directory"""
+    try:
+        input_dir = folder_paths.get_input_directory()
+        if not os.path.isdir(input_dir):
+            return web.json_response({"error": f"Input directory not found: {input_dir}"}, status=404)
+        subprocess.run(['explorer', input_dir], check=True, shell=False)
+        return web.json_response({"success": True, "path": input_dir})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+@PromptServer.instance.routes.post("/power_load_video/check_workflow")
+async def check_video_workflow(request):
+    """Check if a video file has embedded workflow metadata (VHS or ComfyUI SaveVideo/SaveWEBM)."""
+    try:
+        data = await request.json()
+        filename = data.get("filename", "")
+        subfolder = data.get("subfolder", "")
+
+        # Build path manually - uploaded files go to the input directory
+        input_dir = folder_paths.get_input_directory()
+        if subfolder:
+            file_path = os.path.join(input_dir, subfolder, filename)
+        else:
+            file_path = os.path.join(input_dir, filename)
+
+        if not os.path.isfile(file_path):
+            return web.json_response({"has_workflow": False})
+
+        # Try extracting metadata via ffprobe/ffmpeg
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-show_format", "-print_format", "json", file_path],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                probe = json.loads(result.stdout)
+                tags = probe.get("format", {}).get("tags", {})
+                if tags:
+                    workflow = None
+                    # Check for 'workflow' tag (VHS VideoCombine)
+                    if "workflow" in tags:
+                        try:
+                            workflow = json.loads(tags["workflow"])
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    # Check for 'prompt' tag and reconstruct workflow
+                    if workflow is None and "prompt" in tags:
+                        try:
+                            prompt = json.loads(tags["prompt"])
+                            workflow = {"prompt": prompt}
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    if workflow is not None:
+                        return web.json_response({"has_workflow": True, "workflow": workflow})
+        except Exception as e:
+            pass
+
+        return web.json_response({"has_workflow": False})
+    except Exception as e:
+        return web.json_response({"has_workflow": False, "error": str(e)})
+
 @PromptServer.instance.routes.post("/wanvideo_wrapper/get_lora_path")
 async def get_lora_path(request):
     """API endpoint to get the full path of a LoRA file"""

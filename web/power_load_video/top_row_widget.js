@@ -3,7 +3,6 @@
  * Similar to Power Spline Editor's top row with Refresh button and text inputs
  */
 import { app } from '../../../scripts/app.js';
-import { api } from '../../../scripts/api.js';
 import { RgthreeBaseWidget } from '../power_spline_editor/drawing_utils.js';
 
 export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
@@ -27,9 +26,7 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
             fpsInc: { bounds: [0, 0], onClick: null },
             fpsAny: { bounds: [0, 0], onMove: null },
             sizeInput: { bounds: [0, 0], onClick: null },
-            uploadButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
         };
-        this.uploadButtonMouseDown = false;
     }
 
     draw(ctx, node, w, posY, height) {
@@ -49,9 +46,8 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
             area.onMove = null;
         };
 
-        // Calculate available width (leaving room for upload button on the right)
-        const uploadButtonWidth = 100;
-        const availableWidth = node.size[0] - margin * 2 - spacing * 3 - uploadButtonWidth;
+        // Calculate available width (no upload button - moved to file selector row)
+        const availableWidth = node.size[0] - margin * 2 - spacing * 2;
 
         // Calculate component widths
         const refreshButtonWidth = availableWidth * 0.24;  // Narrower refresh button
@@ -122,21 +118,11 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
 
         assignBounds("sizeInput", [sizeInputX, bgWidth]);
 
-        // Draw frame count text (read-only, between size and Upload button)
+        // Draw frame count text (read-only)
         ctx.textAlign = "left";
         ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
         posX = sizeInputX + bgWidth + spacing;
         ctx.fillText(this.frameCountValue, posX, midY);
-
-        // Draw Upload button on the right side
-        const uploadButtonX = node.size[0] - margin - uploadButtonWidth;
-        drawWidgetButton(
-            ctx,
-            { size: [uploadButtonWidth, height], pos: [uploadButtonX, posY] },
-            "📤 Upload",
-            this.uploadButtonMouseDown
-        );
-        assignBounds("uploadButton", [uploadButtonX, uploadButtonWidth]);
 
         // Setup event handlers
         this.hitAreas.refreshButton.onClick = async () => {
@@ -168,19 +154,6 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         };
         this.hitAreas.refreshButton.onUp = () => {
             this.refreshButtonMouseDown = false;
-            node.setDirtyCanvas(true, false);
-        };
-
-        // Upload button handlers
-        this.hitAreas.uploadButton.onClick = async () => {
-            await this.handleUploadClick(node);
-        };
-        this.hitAreas.uploadButton.onDown = () => {
-            this.uploadButtonMouseDown = true;
-            node.setDirtyCanvas(true, false);
-        };
-        this.hitAreas.uploadButton.onUp = () => {
-            this.uploadButtonMouseDown = false;
             node.setDirtyCanvas(true, false);
         };
 
@@ -241,70 +214,6 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         super.onMouseUp(event, pos, node);
         this.haveMouseMovedValue = false;
         this.refreshButtonMouseDown = false;
-        this.uploadButtonMouseDown = false;
-    }
-
-    /**
-     * Handle upload button click - opens file picker and uploads video
-     */
-    async handleUploadClick(node) {
-        // Create a hidden file input element
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.accept = 'video/*';
-        fileInput.style.display = 'none';
-
-        fileInput.onchange = async (e) => {
-            const file = e.target.files[0];
-            if (!file || !file.type.startsWith('video/')) {
-                return;
-            }
-
-            // Upload the file via ComfyUI's API
-            try {
-                const formData = new FormData();
-                formData.append('image', file);
-                formData.append('type', 'input');
-
-                const resp = await api.fetchApi('/upload/image', { method: 'POST', body: formData });
-
-                if (resp.ok || resp.status === 200) {
-                    const data = await resp.json();
-                    const uploadedName = data.name || data.filename || file.name;
-
-                    // Store the video filename on the node for execution
-                    node.videoFilename = uploadedName;
-
-                    // Update the hidden combo widget value so ComfyUI serializes it to the backend
-                    const comboWidget = node.widgets.find(w => w.type === 'combo');
-                    if (comboWidget) {
-                        comboWidget.value = uploadedName;
-                    }
-                    // Also update widgets_values so serialization picks it up
-                    if (!node.widgets_values || node.widgets_values.length === 0) {
-                        node.widgets_values = [uploadedName];
-                    } else {
-                        node.widgets_values[0] = uploadedName;
-                    }
-
-                    // Load the video into the display directly (bypassing execute)
-                    if (node.loadVideoIntoDisplay && typeof node.loadVideoIntoDisplay === 'function') {
-                        node.loadVideoIntoDisplay(uploadedName);
-                    }
-
-                    // Force canvas redraw to show the video
-                    app.graph.setDirtyCanvas(true, true);
-                } else {
-                    console.error('[PowerLoadVideo] Upload failed:', resp.status, resp.statusText);
-                }
-            } catch (err) {
-                console.error('[PowerLoadVideo] Upload error:', err);
-            }
-        };
-
-        document.body.appendChild(fileInput);
-        fileInput.click();
-        document.body.removeChild(fileInput);
     }
 
     computeSize(width) {

@@ -176,6 +176,22 @@ app.registerExtension({
                 const filename = await uploadVideoFile(file);
 
                 if (filename) {
+                    // Check if the video has embedded workflow metadata (VHS/ComfyUI SaveVideo)
+                    try {
+                        const checkResp = await api.fetchApi('/power_load_video/check_workflow', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ filename: filename, subfolder: '' })
+                        });
+                        if (checkResp.ok) {
+                            const checkData = await checkResp.json();
+                            if (checkData.has_workflow && checkData.workflow && app.loadGraphData) {
+                                app.loadGraphData(checkData.workflow);
+                                return;
+                            }
+                        }
+                    } catch (err) {
+                    }
 
                     // Wait a moment for node types to be registered
                     await new Promise(resolve => setTimeout(resolve, 100));
@@ -204,20 +220,8 @@ app.registerExtension({
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData?.name === 'PowerLoadVideo') {
-            if (nodeData.input) {
-                // Check both 'required' and 'optional' sections in input
-                const allInputs = {...nodeData.input.required, ...nodeData.input.optional};
-                for (const [key, value] of Object.entries(allInputs)) {
-                if (value && typeof value === 'object' && value.video_upload === true) {
-                        delete value.video_upload;
-                    } else if (value && Array.isArray(value) && value.length > 1 && typeof value[1] === 'object') {
-                        // Handle array format [type, options]
-                        if (value[1].video_upload === true) {
-                                delete value[1].video_upload;
-                        }
-                    }
-                }
-            }
+            // Note: We intentionally keep video_upload flag so ComfyUI serializes
+            // the combo widget value for persistence across tab switches and workflow reloads.
 
             // Store original onNodeCreated FIRST before wrapping
             const originalOnNodeCreated = nodeType.prototype.onNodeCreated;
@@ -264,11 +268,22 @@ app.registerExtension({
                     originalOnConfigure.apply(this, arguments);
                 }
 
-                // Try to get frame count from saved widget values if available
+                // Restore frame count from saved widget values
                 if (info?.widgets_values && info.widgets_values.length > 1) {
                     const frameCount = info.widgets_values[1];
                     if (frameCount && frameCount > 0) {
                         this.timelineWidget?.setTotalFrames(this, frameCount);
+                    }
+                }
+                // Restore video display from saved combo value (widgets_values[0])
+                if (info?.widgets_values && info.widgets_values.length > 0) {
+                    const videoFilename = info.widgets_values[0];
+                    if (videoFilename && typeof this.loadVideoIntoDisplay === 'function') {
+                        this.loadVideoIntoDisplay(videoFilename);
+                    }
+                    // Update the file selector widget display if it exists
+                    if (this.fileSelectorWidget) {
+                        this.fileSelectorWidget.setCurrentFilename(videoFilename);
                     }
                 }
             };

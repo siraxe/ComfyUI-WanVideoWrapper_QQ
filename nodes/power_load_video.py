@@ -81,21 +81,28 @@ class PowerLoadVideo:
     Outputs:
         - IMAGE: Tensor of shape [frame_count, height, width, 3]
         - AUDIO: Audio waveform dict {"waveform", "sample_rate"}
-        - FLOAT: FPS value
+        - FPS: Vide real FPS
     """
 
     @classmethod
     def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        try:
+            files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+            files = folder_paths.filter_files_content_types(files, ["video"])
+            files = sorted(files)
+        except Exception:
+            files = []
         return {
             "required": {},
             "optional": {
-                "video": ([], {}),
+                "video": (files, {"video_upload": True}),
                 "start_frame": ("INT", {"default": 1, "min": 1}),
                 "end_frame": ("INT", {"default": -1, "min": -1}),
             },
         }
 
-    RETURN_TYPES = ("IMAGE", "AUDIO", "FLOAT")
+    RETURN_TYPES = ("IMAGE", "AUDIO", "FPS")
     FUNCTION = "load_video"
     OUTPUT_NODE = True
     CATEGORY = "Power/Video"

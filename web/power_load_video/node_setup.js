@@ -5,6 +5,7 @@ import { api } from '../../../scripts/api.js';
 import { app } from '../../../scripts/app.js';
 import { PowerLoadVideoTopRowWidget } from './top_row_widget.js';
 import { PowerLoadVideoTimelineWidget } from './timeline_widget.js';
+import { PowerLoadVideoFileSelectorWidget } from './file_selector_widget.js';
 
 /**
  * Create the onNodeCreated wrapper function for PowerLoadVideo nodes
@@ -20,8 +21,8 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         if (this.size[0] < 570) {
             this.size[0] = 570;
         }
-        if (this.size[1] > 520) {
-            this.size[1] = 520;
+        if (this.size[1] > 550) {
+            this.size[1] = 550;
         }
 
         // Enforce min width and max height on resize
@@ -29,8 +30,8 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             if (size[0] < 570) {
                 size[0] = 570;
             }
-            if (size[1] > 520) {
-                size[1] = 520;
+            if (size[1] > 550) {
+                size[1] = 550;
             }
         };
 
@@ -340,9 +341,12 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         this.handlePlayPauseShortcut = (e) => {
             if ((e.key === ' ' || e.code === 'Space') && e.shiftKey) {
                 if (!e.target.matches('input, textarea')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.timelineWidget?.togglePlay(this);
+                    // Only toggle playback for the currently selected node
+                    if (this.selected) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.timelineWidget?.togglePlay(this);
+                    }
                 }
             }
         };
@@ -372,7 +376,7 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         // Store handlers for cleanup on node removal
         this.dragHandlers = { handleDragOver, handleDragLeave, handleDrop };
 
-        // === CREATE WIDGETS IN ORDER: Top Row -> Video Display -> Timeline ===
+        // === CREATE WIDGETS IN ORDER: Top Row -> File Selector -> Video Display -> Timeline ===
 
         // 1. Create and add the top row widget FIRST (appears above video)
         if (!this.topRowWidget) {
@@ -380,7 +384,13 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             this.addCustomWidget(this.topRowWidget);
         }
 
-        // 2. Add video display as DOM widget
+        // 2. Create and add the file selector widget (upload + dropdown, replaces old upload button)
+        if (!this.fileSelectorWidget) {
+            this.fileSelectorWidget = new PowerLoadVideoFileSelectorWidget(this);
+            this.addCustomWidget(this.fileSelectorWidget);
+        }
+
+        // 3. Add video display as DOM widget
         this.videoDisplayWidget = this.addDOMWidget(nodeData.name, 'VideoDisplay', videoContainer, {
             serialize: false,
             hideOnZoom: false
@@ -391,7 +401,7 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             return [width, 380];
         };
 
-        // 3. Create and add the timeline widget LAST (appears below video)
+        // 4. Create and add the timeline widget LAST (appears below video)
         if (!this.timelineWidget) {
             this.timelineWidget = new PowerLoadVideoTimelineWidget();
             this.addCustomWidget(this.timelineWidget);
@@ -423,6 +433,9 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
          * since seek-based capture fails for VFR videos (browser stays on first frame).
          */
         this.decodeVFRFrames = async (videoEl, frameCount, fps) => {
+            // Clear abort flag from any previous decode
+            this._vfrDecodeAborted = false;
+
             // Array to hold decoded frame canvases
             this.vfrFrames = [];
             this.isVFRVideo = true;
@@ -455,6 +468,14 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                     }, { once: true });
 
                     const captureFrame = (now, metadata) => {
+                        // Abort if a new video was loaded while decoding
+                        if (this._vfrDecodeAborted) {
+                            clearTimeout(safetyTimer);
+                            videoEl.pause();
+                            resolve();
+                            return;
+                        }
+
                         const frameCanvas = document.createElement('canvas');
                         frameCanvas.setAttribute('willReadFrequently', 'true');  // Optimize for getImageData readbacks
                         frameCanvas.width = videoEl.videoWidth;
@@ -484,6 +505,11 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                         reject(err);
                     });
                 });
+
+                // If decode was aborted while awaiting, skip all post-decode setup
+                if (this._vfrDecodeAborted) {
+                    return;
+                }
 
                 // Reset video state
                 videoEl.currentTime = 0;
@@ -574,11 +600,30 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             }
         };
 
+        // Abort any in-progress VFR decode (used when switching videos mid-decode)
+        this._abortVFRDecode = () => {
+            if (this.isVFRDecoding) {
+                this._vfrDecodeAborted = true;
+                if (videoElement && !videoElement.paused) {
+                    videoElement.pause();
+                }
+                this.isVFRDecoding = false;
+                this.isVFRVideo = false;
+                this.vfrFrames = null;
+                if (placeholderText) {
+                    placeholderText.style.display = 'none';
+                }
+            }
+        };
+
         // Function to load video into custom display - attach to node for external access
         this.loadVideoIntoDisplay = (videoFilename) => {
             if (!videoFilename || String(videoElement.src).includes(videoFilename)) {
                 return;
             }
+
+            // Abort any in-progress VFR decode before switching video
+            this._abortVFRDecode();
 
             // Clear VFR frames from previous video before loading new one
             this.clearVFRFrames();
