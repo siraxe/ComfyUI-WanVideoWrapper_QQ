@@ -251,12 +251,17 @@ app.registerExtension({
 
                 // Recalculate total frames with accurate native FPS + duration
                 if (this.timelineWidget && this.videoElement && this.videoElement.duration && isFinite(this.videoElement.duration)) {
-                    // Use ceiling to ensure full video playback without truncation at the end
                     const accurateFrames = Math.ceil(this.videoElement.duration * this.timelineWidget.nativeFPS);
                     if (accurateFrames > 0) {
                         this.timelineWidget.setTotalFrames(this, accurateFrames);
-                        this.timelineWidget.setStartFrame(1, this);
-                        this.timelineWidget.setEndFrame(accurateFrames, this);
+                        // Only set default markers if not already restored by onConfigure
+                        if (this.timelineWidget.startFrameMarker === 1 && this.timelineWidget.endFrameMarker === 1) {
+                            this.timelineWidget.setStartFrame(1, this);
+                            this.timelineWidget.setEndFrame(accurateFrames, this);
+                        } else if (this.timelineWidget.endFrameMarker > accurateFrames || this.timelineWidget.endFrameMarker === 1) {
+                            // End marker exceeds new video length or wasn't set - clamp/update it
+                            this.timelineWidget.setEndFrame(Math.min(this.timelineWidget.endFrameMarker || accurateFrames, accurateFrames), this);
+                        }
                     }
                 }
             };
@@ -284,6 +289,21 @@ app.registerExtension({
                     // Update the file selector widget display if it exists
                     if (this.fileSelectorWidget) {
                         this.fileSelectorWidget.setCurrentFilename(videoFilename);
+                    }
+                }
+                // Restore timeline bracket markers [ and ] from hidden widgets
+                // Only restore if widgets exist AND have valid values (not null/undefined/0)
+                if (this.timelineWidget && this.widgets) {
+                    const startFrameWidget = this.widgets.find(w => w.name === 'start_frame');
+                    const endFrameWidget = this.widgets.find(w => w.name === 'end_frame');
+
+                    // Restore start marker only if widget has a valid value
+                    if (startFrameWidget && typeof startFrameWidget.value === 'number' && startFrameWidget.value > 0) {
+                        this.timelineWidget.startFrameMarker = startFrameWidget.value;
+                    }
+                    // Restore end marker only if widget has a valid value
+                    if (endFrameWidget && typeof endFrameWidget.value === 'number' && endFrameWidget.value > 0) {
+                        this.timelineWidget.endFrameMarker = endFrameWidget.value;
                     }
                 }
             };

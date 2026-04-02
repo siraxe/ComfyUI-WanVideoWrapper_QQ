@@ -519,8 +519,14 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 const actualFrames = this.vfrFrames.length;
                 if (this.timelineWidget && actualFrames > 0) {
                     this.timelineWidget.setTotalFrames(this, actualFrames);
-                    this.timelineWidget.setStartFrame(1, this);
-                    this.timelineWidget.setEndFrame(actualFrames, this);
+                    // Only set default markers if not already restored by onConfigure
+                    if (this.timelineWidget.startFrameMarker === 1 && this.timelineWidget.endFrameMarker === 1) {
+                        this.timelineWidget.setStartFrame(1, this);
+                        this.timelineWidget.setEndFrame(actualFrames, this);
+                    } else if (this.timelineWidget.endFrameMarker > actualFrames || this.timelineWidget.endFrameMarker === 1) {
+                        // End marker exceeds new video length or wasn't set - clamp/update it
+                        this.timelineWidget.setEndFrame(Math.min(this.timelineWidget.endFrameMarker || actualFrames, actualFrames), this);
+                    }
                 }
 
                 // Hide overlay and show first frame
@@ -684,8 +690,15 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                                 totalFrames = Math.ceil(videoElement.duration * meta.fps);
                             }
                             this.timelineWidget.setTotalFrames(this, totalFrames);
-                            this.timelineWidget.setStartFrame(1, this);
-                            this.timelineWidget.setEndFrame(totalFrames, this);
+                            // Only set default markers if not already restored by onConfigure
+                            // Check: start marker still at constructor default (1) AND end marker still at constructor default (1)
+                            if (this.timelineWidget.startFrameMarker === 1 && this.timelineWidget.endFrameMarker === 1) {
+                                this.timelineWidget.setStartFrame(1, this);
+                                this.timelineWidget.setEndFrame(totalFrames, this);
+                            } else if (this.timelineWidget.endFrameMarker > totalFrames || this.timelineWidget.endFrameMarker === 1) {
+                                // End marker exceeds new video length or wasn't set - clamp/update it
+                                this.timelineWidget.setEndFrame(Math.min(this.timelineWidget.endFrameMarker || totalFrames, totalFrames), this);
+                            }
                             this.timelineWidget.applyPlaybackRate();
 
                             // === VFR DETECTION ===
@@ -711,8 +724,14 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 // Add small buffer (1 frame) to account for any edge case timing issues
                 const totalFrames = Math.ceil(videoElement.duration * nativeFPS) + 1;
                 this.timelineWidget.setTotalFrames(this, totalFrames);
-                this.timelineWidget.setStartFrame(1, this);
-                this.timelineWidget.setEndFrame(totalFrames, this);
+                // Only set default markers if not already restored by onConfigure
+                if (this.timelineWidget.startFrameMarker === 1 && this.timelineWidget.endFrameMarker === 1) {
+                    this.timelineWidget.setStartFrame(1, this);
+                    this.timelineWidget.setEndFrame(totalFrames, this);
+                } else if (this.timelineWidget.endFrameMarker > totalFrames || this.timelineWidget.endFrameMarker === 1) {
+                    // End marker exceeds new video length or wasn't set - clamp/update it
+                    this.timelineWidget.setEndFrame(Math.min(this.timelineWidget.endFrameMarker || totalFrames, totalFrames), this);
+                }
                 this.timelineWidget.applyPlaybackRate();
 
                 // Force redraw

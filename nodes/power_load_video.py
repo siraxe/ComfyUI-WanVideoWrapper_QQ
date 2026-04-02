@@ -150,17 +150,30 @@ class PowerLoadVideo:
         first_idx = max(0, (start_frame or 1) - 1)
         last_idx = (total_frames - 1) if (end_frame is None or end_frame <= 0) else min(end_frame - 1, total_frames - 1)
 
-        frames_to_load = list(range(first_idx, last_idx + 1))
+        # Check if we're using the full video (no trimming needed)
+        full_video = (first_idx == 0) and (last_idx == total_frames - 1)
 
         # Read frames
         images = []
-        for frame_idx in frames_to_load:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, frame = cap.read()
-            if ret:
+        if full_video:
+            # Optimized path: read all frames sequentially without seeking
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(frame)
                 images.append(pil_image)
+        else:
+            # Trimmed path: seek to each frame (slower but necessary for trimming)
+            frames_to_load = list(range(first_idx, last_idx + 1))
+            for frame_idx in frames_to_load:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(frame)
+                    images.append(pil_image)
 
         cap.release()
 
@@ -170,11 +183,14 @@ class PowerLoadVideo:
         # Convert to tensor
         image_tensor = self.pil_totensor(images)
 
-        # Extract audio (trimmed to match frame range)
+        # Extract audio (skip trimming if full video)
         audio = None
-        audio_start_time = first_idx / native_fps
-        audio_duration = (last_idx - first_idx + 1) / native_fps
-        audio = extract_audio(filename, audio_start_time, audio_duration)
+        if full_video:
+            audio = extract_audio(filename, start_time=0, duration=0)
+        else:
+            audio_start_time = first_idx / native_fps
+            audio_duration = (last_idx - first_idx + 1) / native_fps
+            audio = extract_audio(filename, audio_start_time, audio_duration)
 
         return (image_tensor, audio, native_fps)
 
@@ -188,7 +204,7 @@ class PowerLoadVideo:
         return torch.from_numpy(stacked)
 
     @classmethod
-    def IS_CHANGED(s, video=None):
+    def IS_CHANGED(s, video=None, start_frame=1, end_frame=-1):
         if not video:
             return 0
         try:
