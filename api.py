@@ -1,51 +1,180 @@
-import json
 import base64
-from aiohttp import web
-from server import PromptServer
+import json
 import os
-from PIL import Image
+import sys
+from datetime import datetime
 from io import BytesIO
+from pathlib import Path
+from typing import Optional, Tuple, List, Dict, Any
+
+import cv2
 import folder_paths
 import subprocess
-import sys
-import cv2
-import numpy as np
-
-
-import os
-import folder_paths
-from datetime import datetime
+from aiohttp import web
+from PIL import Image
+from server import PromptServer
 
 # Import SAM2 masker for point-click masking
 from .nodes.sam2_masker import sam2_masker
 from .nodes.prepare_refs import convert_mask_to_contour
 
-def get_bg_folder_path():
-    """Get the path to the bg folder where A.jpg and bg_image.png are stored"""
-    # Look for the bg folder relative to this file
-    import pathlib
-    current_dir = pathlib.Path(__file__).parent
+# Constants
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
+LORA_EXTENSIONS = {'.safetensors', '.ckpt', '.pt'}
+PREVIEW_SUFFIXES = ["_01", "_02", "_03", "_thumb"]
+
+# Endpoint prefix constant for consistency
+API_PREFIX = "/wanvideowrapper_qq"
+
+
+def _get_bg_folder_path() -> str:
+    """Get the path to the bg folder where A.jpg and bg_image.png are stored."""
+    current_dir = Path(__file__).parent
     bg_path = current_dir / "web" / "power_spline_editor" / "bg"
-    
-    # Create the directory if it doesn't exist
     bg_path.mkdir(parents=True, exist_ok=True)
-    
     return str(bg_path)
 
-def get_ref_folder_path():
-    """Get the path to the ref folder where reference images are stored"""
-    import pathlib
-    current_dir = pathlib.Path(__file__).parent
+
+def _get_ref_folder_path() -> str:
+    """Get the path to the ref folder where reference images are stored."""
+    current_dir = Path(__file__).parent
     ref_path = current_dir / "web" / "power_spline_editor" / "ref"
-
-    # Create the directory if it doesn't exist
     ref_path.mkdir(parents=True, exist_ok=True)
-
     return str(ref_path)
 
-@PromptServer.instance.routes.post("/wanvideowrapper_qq/save_ref_image")
-async def save_ref_image(request):
-    """API endpoint to save ref_image to the bg folder"""
+
+def _decode_base64_image(image_data: str) -> Tuple[Image.Image, str]:
+    if image_data.startswith('data:image'):
+        header, encoded = image_data.split(',', 1)
+        image_format = header.split('/')[1].split(';')[0]
+    else:
+        encoded = image_data
+        # Try to infer format from data or default to png
+        image_format = 'png'
+
+    try:
+        image_bytes = base64.b64decode(encoded)
+        img = Image.open(BytesIO(image_bytes))
+        img.verify()
+        # Reopen after verification since verify() closes the file
+        img = Image.open(BytesIO(image_bytes))
+        return img, image_format
+    except Exception as e:
+        raise ValueError(f"Invalid image data: {e}")
+
+
+def _save_image_with_format(img: Image.Image, filepath: str, image_format: Optional[str] = None) -> None:
+    fmt = (image_format or "png").upper()
+    save_kwargs = {}
+
+    if fmt in ("JPG", "JPEG"):
+        img = img.convert('RGB')
+        fmt = "JPEG"
+        save_kwargs["quality"] = 95
+    else:
+        # Preserve alpha if present
+        if img.mode not in ("RGBA", "LA"):
+            img = img.convert("RGBA")
+        fmt = "PNG"
+
+    img.save(filepath, format=fmt, **save_kwargs)
+
+
+def _get_lora_full_path(lora_name: str) -> Optional[str]:
+    try:
+        lora_folders = folder_paths.get_folder_paths("loras")
+
+        for folder in lora_folders:
+            # Check exact name first
+            lora_path = os.path.join(folder, lora_name)
+            if os.path.exists(lora_path):
+                return os.path.abspath(lora_path)
+
+            # Check with common extensions if not provided
+            if not any(lora_name.lower().endswith(ext) for ext in LORA_EXTENSIONS):
+                for ext in LORA_EXTENSIONS:
+                    lora_path_with_ext = os.path.join(folder, lora_name + ext)
+                    if os.path.exists(lora_path_with_ext):
+                        return os.path.abspath(lora_path_with_ext)
+
+        return None
+    except Exception as e:
+        print(f"Error finding LoRA path: {e}")
+        return None
+
+
+def _rename_preview_files(old_base_name: str, new_name: str, preview_folder: str) -> List[str]:
+    renamed_files = []
+
+    try:
+        # Rename JSON file
+        old_json_path = os.path.join(preview_folder, f"{old_base_name}.json")
+        new_json_path = os.path.join(preview_folder, f"{new_name}.json")
+        if os.path.exists(old_json_path):
+            try:
+                os.rename(old_json_path, new_json_path)
+                renamed_files.append(new_json_path)
+                print(f"Renamed JSON: {old_json_path} -> {new_json_path}")
+            except Exception as e:
+                print(f"Warning: Failed to rename JSON file: {e}")
+
+        # Rename preview images with suffixes
+        for suffix in PREVIEW_SUFFIXES:
+            for ext in IMAGE_EXTENSIONS:
+                old_img_path = os.path.join(preview_folder, f"{old_base_name}{suffix}{ext}")
+                new_img_path = os.path.join(preview_folder, f"{new_name}{suffix}{ext}")
+                if os.path.exists(old_img_path):
+                    try:
+                        os.rename(old_img_path, new_img_path)
+                        renamed_files.append(new_img_path)
+                        print(f"Renamed image: {old_img_path} -> {new_img_path}")
+                    except Exception as e:
+                        print(f"Warning: Failed to rename image file: {e}")
+
+        # Check for images without suffix (backward compatibility)
+        for ext in IMAGE_EXTENSIONS:
+            old_img_path = os.path.join(preview_folder, f"{old_base_name}{ext}")
+            new_img_path = os.path.join(preview_folder, f"{new_name}{ext}")
+            if os.path.exists(old_img_path):
+                try:
+                    os.rename(old_img_path, new_img_path)
+                    renamed_files.append(new_img_path)
+                    print(f"Renamed image: {old_img_path} -> {new_img_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to rename image file: {e}")
+
+    except Exception as e:
+        print(f"Error in _rename_preview_files: {e}")
+
+    return renamed_files
+
+
+def _open_explorer(path: str, select_file: bool = True) -> Dict[str, Any]:
+    if not sys.platform.startswith('win'):
+        return {"error": "This feature is only available on Windows", "status": 400}
+
+    try:
+        if select_file and os.path.isfile(path):
+            subprocess.run(['explorer', '/select,', path], check=True, shell=False)
+            return {"success": True, "path": path}
+        else:
+            folder_path = path if os.path.isdir(path) else os.path.dirname(path)
+            subprocess.run(['explorer', folder_path], check=True, shell=False)
+            return {"success": True, "path": folder_path,
+                   "message": "Opened folder instead of selecting file"}
+    except subprocess.CalledProcessError as e:
+        # Fallback: try opening just the directory
+        try:
+            if os.path.isfile(path):
+                path = os.path.dirname(path)
+            subprocess.run(['explorer', path], check=True, shell=False)
+            return {"success": True, "path": path}
+        except subprocess.CalledProcessError as e2:
+            return {"error": f"Failed to open Explorer: {str(e2)}", "status": 500}
+
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/save_ref_image")
+async def save_ref_image(request) -> web.Response:
     try:
         post = await request.post()
         image_data = post.get("image")
@@ -59,46 +188,20 @@ async def save_ref_image(request):
         if "." not in safe_name:
             safe_name += ".png"
 
-        # Decode base64 image data
-        if image_data.startswith('data:image'):
-            # Remove data URL prefix (e.g., "data:image/png;base64,")
-            header, encoded = image_data.split(',', 1)
-            image_format = header.split('/')[1].split(';')[0]  # Extract format like 'png' or 'jpeg'
-        else:
-            encoded = image_data
-            image_format = safe_name.split(".")[-1]
-
-        # Decode the base64 string
-        image_bytes = base64.b64decode(encoded)
-
-        # Verify it's a valid image
+        # Decode and validate image
         try:
-            img = Image.open(BytesIO(image_bytes))
-            img.verify()  # Verify it's a valid image
-            img = Image.open(BytesIO(image_bytes))  # Reopen after verify
-        except Exception as e:
-            return web.json_response({"error": f"Invalid image data: {str(e)}"}, status=400)
+            img, image_format = _decode_base64_image(image_data)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
 
-        # Get the bg folder path
-        bg_folder = get_bg_folder_path()
+        bg_folder = _get_bg_folder_path()
         ref_image_path = os.path.join(bg_folder, safe_name)
 
-        # Decide format (prefer PNG to preserve alpha)
-        fmt = (image_format or "png").upper()
-        save_kwargs = {}
-        if fmt in ("JPG", "JPEG"):
-            img = img.convert('RGB')
-            fmt = "JPEG"
-            save_kwargs["quality"] = 95
-        else:
-            # Preserve alpha if present
-            if img.mode not in ("RGBA", "LA"):
-                img = img.convert("RGBA")
-            fmt = "PNG"
+        # Save with appropriate format handling
+        _save_image_with_format(img, ref_image_path, image_format)
 
-        img.save(ref_image_path, format=fmt, **save_kwargs)
-
-        return web.json_response({"success": True, "path": ref_image_path, "message": "Reference image saved successfully"})
+        return web.json_response({"success": True, "path": ref_image_path,
+                                  "message": "Reference image saved successfully"})
 
     except Exception as e:
         print(f"Error saving ref image: {e}")
@@ -106,9 +209,9 @@ async def save_ref_image(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
-@PromptServer.instance.routes.post("/wanvideowrapper_qq/save_prepare_refs_images")
-async def save_prepare_refs_images(request):
-    """API endpoint to save ALL images from PrepareRefs node to the REF folder"""
+
+@PromptServer.instance.routes.post(f"{API_PREFIX}/save_prepare_refs_images")
+async def save_prepare_refs_images(request) -> web.Response:
     try:
         data = await request.json()
         bg_image_data = data.get("bg_image")
@@ -116,31 +219,23 @@ async def save_prepare_refs_images(request):
 
         print(f"[API save_prepare_refs_images] === Received request ===")
         print(f"[API save_prepare_refs_images] bg_image present: {bg_image_data is not None}")
-        print(f"[API save_prepare_refs_images] ref_images count: {len(ref_images_data) if isinstance(ref_images_data, list) else 0}")
+        print(f"[API save_prepare_refs_images] ref_images count: "
+              f"{len(ref_images_data) if isinstance(ref_images_data, list) else 0}")
 
         saved_paths = {
             "bg_image_path": None,
             "ref_images_paths": []
         }
 
-        # Get ref folder (ALL images go to ref folder for PrepareRefs!)
-        ref_folder = get_ref_folder_path()
+        ref_folder = _get_ref_folder_path()
         print(f"[API save_prepare_refs_images] Using ref folder: {ref_folder}")
 
-        # Save background image to REF folder (not bg folder!)
+        # Save background image to REF folder
         if bg_image_data:
             try:
                 print(f"[API save_prepare_refs_images] Saving bg_image to REF folder...")
-                # Decode base64 image data
-                if bg_image_data.startswith('data:image'):
-                    header, encoded = bg_image_data.split(',', 1)
-                else:
-                    encoded = bg_image_data
+                img, _ = _decode_base64_image(bg_image_data)
 
-                image_bytes = base64.b64decode(encoded)
-                img = Image.open(BytesIO(image_bytes))
-
-                # Save to REF folder as bg_image.png
                 bg_image_path = os.path.join(ref_folder, "bg_image.png")
                 img.save(bg_image_path, format="PNG")
                 saved_paths["bg_image_path"] = "ref/bg_image.png"
@@ -155,16 +250,8 @@ async def save_prepare_refs_images(request):
             for idx, ref_image_data in enumerate(ref_images_data):
                 try:
                     print(f"[API save_prepare_refs_images] Saving ref_image {idx} to REF folder...")
-                    # Decode base64 image data
-                    if ref_image_data.startswith('data:image'):
-                        header, encoded = ref_image_data.split(',', 1)
-                    else:
-                        encoded = ref_image_data
+                    img, _ = _decode_base64_image(ref_image_data)
 
-                    image_bytes = base64.b64decode(encoded)
-                    img = Image.open(BytesIO(image_bytes))
-
-                    # Save to ref folder
                     ref_image_path = os.path.join(ref_folder, f"ref_image_{idx}.png")
                     img.save(ref_image_path, format="PNG")
                     saved_paths["ref_images_paths"].append(f"ref/ref_image_{idx}.png")
@@ -186,37 +273,10 @@ async def save_prepare_refs_images(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
-def get_lora_full_path(lora_name):
-    """Get the full path to a LoRA file"""
-    try:
-        # Get the LoRA folder paths from ComfyUI
-        lora_folders = folder_paths.get_folder_paths("loras")
-
-        # Search for the LoRA file in all LoRA folders
-        for folder in lora_folders:
-            lora_path = os.path.join(folder, lora_name)
-            if os.path.exists(lora_path):
-                return os.path.abspath(lora_path)
-
-            # Also check for common extensions if not provided
-            if not lora_name.lower().endswith(('.safetensors', '.ckpt', '.pt')):
-                for ext in ['.safetensors', '.ckpt', '.pt']:
-                    lora_path_with_ext = os.path.join(folder, lora_name + ext)
-                    if os.path.exists(lora_path_with_ext):
-                        return os.path.abspath(lora_path_with_ext)
-
-        return None
-    except Exception as e:
-        print(f"Error finding LoRA path: {e}")
-        return None
 
 @PromptServer.instance.routes.post("/wanvideo_wrapper/open_explorer")
-async def open_explorer(request):
-    """API endpoint to open Windows Explorer at the LoRA file location"""
+async def open_explorer_handler(request) -> web.Response:
     try:
-        if not sys.platform.startswith('win'):
-            return web.json_response({"error": "This feature is only available on Windows"}, status=400)
-
         post = await request.post()
         data = await request.json() if request.content_type == 'application/json' else {}
 
@@ -225,25 +285,17 @@ async def open_explorer(request):
         if not lora_name:
             return web.json_response({"error": "No LoRA name provided"}, status=400)
 
-        # Get the full path to the LoRA file
-        lora_path = get_lora_full_path(lora_name)
+        lora_path = _get_lora_full_path(lora_name)
 
         if not lora_path:
             return web.json_response({"error": f"LoRA file not found: {lora_name}"}, status=404)
 
-        # Open Windows Explorer and select the file
-        try:
-            # Use start command to open Explorer with the file selected
-            subprocess.run(['explorer', '/select,', lora_path], check=True, shell=False)
-            return web.json_response({"success": True, "path": lora_path})
-        except subprocess.CalledProcessError as e:
-            # Fallback: open the folder if selecting the file fails
-            try:
-                folder_path = os.path.dirname(lora_path)
-                subprocess.run(['explorer', folder_path], check=True, shell=False)
-                return web.json_response({"success": True, "path": folder_path, "message": "Opened folder instead of selecting file"})
-            except subprocess.CalledProcessError as e2:
-                return web.json_response({"error": f"Failed to open Explorer: {str(e2)}"}, status=500)
+        result = _open_explorer(lora_path, select_file=True)
+
+        if "error" in result:
+            return web.json_response(result, status=result.get("status", 500))
+
+        return web.json_response({"success": True, **result})
 
     except Exception as e:
         print(f"Error opening Explorer: {e}")
@@ -251,37 +303,40 @@ async def open_explorer(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
+
 @PromptServer.instance.routes.post("/power_load_video/open_input_dir")
-async def open_input_dir(request):
-    """API endpoint to open Windows Explorer at the input directory"""
+async def open_input_dir(request) -> web.Response:
     try:
+        if not sys.platform.startswith('win'):
+            return web.json_response({"error": "This feature is only available on Windows"}, status=400)
+
         input_dir = folder_paths.get_input_directory()
         if not os.path.isdir(input_dir):
             return web.json_response({"error": f"Input directory not found: {input_dir}"}, status=404)
+
         subprocess.run(['explorer', input_dir], check=True, shell=False)
         return web.json_response({"success": True, "path": input_dir})
+    except subprocess.CalledProcessError as e:
+        return web.json_response({"error": f"Failed to open Explorer: {str(e)}"}, status=500)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+
 @PromptServer.instance.routes.post("/power_load_video/check_workflow")
-async def check_video_workflow(request):
-    """Check if a video file has embedded workflow metadata (VHS or ComfyUI SaveVideo/SaveWEBM)."""
+async def check_video_workflow(request) -> web.Response:
     try:
         data = await request.json()
         filename = data.get("filename", "")
         subfolder = data.get("subfolder", "")
 
-        # Build path manually - uploaded files go to the input directory
         input_dir = folder_paths.get_input_directory()
-        if subfolder:
-            file_path = os.path.join(input_dir, subfolder, filename)
-        else:
-            file_path = os.path.join(input_dir, filename)
+        file_path = os.path.join(input_dir, subfolder, filename) if subfolder else \
+                    os.path.join(input_dir, filename)
 
         if not os.path.isfile(file_path):
             return web.json_response({"has_workflow": False})
 
-        # Try extracting metadata via ffprobe/ffmpeg
+        # Extract metadata via ffprobe/ffmpeg
         try:
             result = subprocess.run(
                 ["ffprobe", "-show_format", "-print_format", "json", file_path],
@@ -290,33 +345,35 @@ async def check_video_workflow(request):
             if result.returncode == 0:
                 probe = json.loads(result.stdout)
                 tags = probe.get("format", {}).get("tags", {})
-                if tags:
-                    workflow = None
-                    # Check for 'workflow' tag (VHS VideoCombine)
-                    if "workflow" in tags:
-                        try:
-                            workflow = json.loads(tags["workflow"])
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                    # Check for 'prompt' tag and reconstruct workflow
-                    if workflow is None and "prompt" in tags:
-                        try:
-                            prompt = json.loads(tags["prompt"])
-                            workflow = {"prompt": prompt}
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                    if workflow is not None:
-                        return web.json_response({"has_workflow": True, "workflow": workflow})
-        except Exception as e:
+
+                workflow = None
+                # Check for 'workflow' tag (VHS VideoCombine)
+                if "workflow" in tags:
+                    try:
+                        workflow = json.loads(tags["workflow"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                # Check for 'prompt' tag and reconstruct workflow
+                if workflow is None and "prompt" in tags:
+                    try:
+                        prompt = json.loads(tags["prompt"])
+                        workflow = {"prompt": prompt}
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                if workflow is not None:
+                    return web.json_response({"has_workflow": True, "workflow": workflow})
+        except Exception:
             pass
 
         return web.json_response({"has_workflow": False})
     except Exception as e:
         return web.json_response({"has_workflow": False, "error": str(e)})
 
+
 @PromptServer.instance.routes.post("/wanvideo_wrapper/get_lora_path")
-async def get_lora_path(request):
-    """API endpoint to get the full path of a LoRA file"""
+async def get_lora_path(request) -> web.Response:
     try:
         post = await request.post()
         data = await request.json() if request.content_type == 'application/json' else {}
@@ -326,8 +383,7 @@ async def get_lora_path(request):
         if not lora_name:
             return web.json_response({"error": "No LoRA name provided"}, status=400)
 
-        # Get the full path to the LoRA file
-        lora_path = get_lora_full_path(lora_name)
+        lora_path = _get_lora_full_path(lora_name)
 
         if not lora_path:
             return web.json_response({"error": f"LoRA file not found: {lora_name}"}, status=404)
@@ -340,9 +396,9 @@ async def get_lora_path(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
+
 @PromptServer.instance.routes.post("/wanvideo_wrapper/rename_lora")
-async def rename_lora(request):
-    """API endpoint to rename a LoRA file and its associated files"""
+async def rename_lora(request) -> web.Response:
     try:
         post = await request.post()
         data = await request.json() if request.content_type == 'application/json' else {}
@@ -357,53 +413,39 @@ async def rename_lora(request):
         if not new_name:
             return web.json_response({"error": "No new LoRA name provided"}, status=400)
 
-        # Get the full path to the LoRA file
-        old_lora_path = get_lora_full_path(old_name)
+        old_lora_path = _get_lora_full_path(old_name)
 
         if not old_lora_path:
             return web.json_response({"error": f"LoRA file not found: {old_name}"}, status=404)
 
-        # Get the directory and file extension
         lora_dir = os.path.dirname(old_lora_path)
         old_base_name = os.path.splitext(os.path.basename(old_lora_path))[0]
         lora_ext = os.path.splitext(old_lora_path)[1]
 
-        # Create the new file paths
         new_lora_path = os.path.join(lora_dir, f"{new_name}{lora_ext}")
 
-        # Check if new file already exists
         if os.path.exists(new_lora_path):
             return web.json_response({"error": f"A file with the name '{new_name}{lora_ext}' already exists"}, status=409)
 
-        # Rename the main LoRA file
         try:
             os.rename(old_lora_path, new_lora_path)
             print(f"Renamed LoRA: {old_lora_path} -> {new_lora_path}")
         except Exception as e:
             return web.json_response({"error": f"Failed to rename LoRA file: {str(e)}"}, status=500)
 
-        # Rename associated files (JSON and preview images)
         renamed_files = [new_lora_path]
 
         # Determine if this is a model or LoRA based on file path
-        is_model = any(old_lora_path.startswith(folder) for folder in folder_paths.get_folder_paths("checkpoints"))
+        is_model = any(old_lora_path.startswith(folder)
+                      for folder in folder_paths.get_folder_paths("checkpoints"))
 
-        if is_model:
-            # Handle model files - check checkpoints directory
-            model_folders = folder_paths.get_folder_paths("checkpoints")
-            for folder in model_folders:
-                # Look for _power_preview subfolder
-                preview_folder = os.path.join(folder, "_power_preview")
-                if os.path.exists(preview_folder):
-                    renamed_files.extend(_rename_preview_files(old_base_name, new_name, preview_folder))
-        else:
-            # Handle LoRA files - check loras directory
-            lora_folders = folder_paths.get_folder_paths("loras")
-            for folder in lora_folders:
-                # Look for _power_preview subfolder
-                preview_folder = os.path.join(folder, "_power_preview")
-                if os.path.exists(preview_folder):
-                    renamed_files.extend(_rename_preview_files(old_base_name, new_name, preview_folder))
+        folder_type = "checkpoints" if is_model else "loras"
+        folders_to_check = folder_paths.get_folder_paths(folder_type)
+
+        for folder in folders_to_check:
+            preview_folder = os.path.join(folder, "_power_preview")
+            if os.path.exists(preview_folder):
+                renamed_files.extend(_rename_preview_files(old_base_name, new_name, preview_folder))
 
         return web.json_response({
             "success": True,
@@ -419,55 +461,9 @@ async def rename_lora(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
-def _rename_preview_files(old_base_name, new_name, preview_folder):
-    """Helper function to rename preview files (JSON and images) in a preview folder."""
-    renamed_files = []
 
-    try:
-        # Rename JSON file
-        old_json_path = os.path.join(preview_folder, f"{old_base_name}.json")
-        new_json_path = os.path.join(preview_folder, f"{new_name}.json")
-        if os.path.exists(old_json_path):
-            try:
-                os.rename(old_json_path, new_json_path)
-                renamed_files.append(new_json_path)
-                print(f"Renamed JSON: {old_json_path} -> {new_json_path}")
-            except Exception as e:
-                print(f"Warning: Failed to rename JSON file: {e}")
-
-        # Rename preview images (with various suffixes)
-        for suffix in ["_01", "_02", "_03", "_thumb"]:
-            for ext in [".jpg", ".jpeg", ".png", ".webp"]:
-                old_img_path = os.path.join(preview_folder, f"{old_base_name}{suffix}{ext}")
-                new_img_path = os.path.join(preview_folder, f"{new_name}{suffix}{ext}")
-                if os.path.exists(old_img_path):
-                    try:
-                        os.rename(old_img_path, new_img_path)
-                        renamed_files.append(new_img_path)
-                        print(f"Renamed image: {old_img_path} -> {new_img_path}")
-                    except Exception as e:
-                        print(f"Warning: Failed to rename image file: {e}")
-
-        # Also check for image without suffix (backward compatibility)
-        for ext in [".jpg", ".jpeg", ".png", ".webp"]:
-            old_img_path = os.path.join(preview_folder, f"{old_base_name}{ext}")
-            new_img_path = os.path.join(preview_folder, f"{new_name}{ext}")
-            if os.path.exists(old_img_path):
-                try:
-                    os.rename(old_img_path, new_img_path)
-                    renamed_files.append(new_img_path)
-                    print(f"Renamed image: {old_img_path} -> {new_img_path}")
-                except Exception as e:
-                    print(f"Warning: Failed to rename image file: {e}")
-
-    except Exception as e:
-        print(f"Error in _rename_preview_files: {e}")
-
-    return renamed_files
-
-@PromptServer.instance.routes.post("/wanvideowrapper_qq/extract_first_frame")
-async def extract_first_frame(request):
-    """API endpoint to extract the first frame from a video file"""
+@PromptServer.instance.routes.post(f"{API_PREFIX}/extract_first_frame")
+async def extract_first_frame(request) -> web.Response:
     try:
         data = await request.json()
         video_path = data.get("video_path")
@@ -477,15 +473,12 @@ async def extract_first_frame(request):
 
         print(f"[API extract_first_frame] Extracting first frame from: {video_path}")
 
-        # Try to find the video file
-        video_file_path = None
-
-        # Check if it's already an absolute path
+        # Find the video file
         if os.path.exists(video_path):
             video_file_path = video_path
         else:
-            # Search in input directories
             input_folders = folder_paths.get_folder_paths("input")
+            video_file_path = None
             for folder in input_folders:
                 potential_path = os.path.join(folder, video_path)
                 if os.path.exists(potential_path):
@@ -497,37 +490,40 @@ async def extract_first_frame(request):
 
         print(f"[API extract_first_frame] Found video at: {video_file_path}")
 
-        # Extract first frame using OpenCV
-        cap = cv2.VideoCapture(video_file_path)
+        # Extract first frame using OpenCV with proper resource management
+        cap = None
+        try:
+            cap = cv2.VideoCapture(video_file_path)
 
-        if not cap.isOpened():
-            return web.json_response({"success": False, "error": "Failed to open video file"}, status=500)
+            if not cap.isOpened():
+                return web.json_response({"success": False, "error": "Failed to open video file"}, status=500)
 
-        # Read first frame
-        ret, frame = cap.read()
-        cap.release()
+            ret, frame = cap.read()
 
-        if not ret:
-            return web.json_response({"success": False, "error": "Failed to read first frame from video"}, status=500)
+            if not ret:
+                return web.json_response({"success": False, "error": "Failed to read first frame from video"}, status=500)
 
-        # Convert BGR to RGB
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Convert BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Convert to PIL Image
-        img = Image.fromarray(frame_rgb)
+            # Convert to PIL Image
+            img = Image.fromarray(frame_rgb)
 
-        # Convert to base64
-        buffered = BytesIO()
-        img.save(buffered, format="PNG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        img_data_url = f"data:image/png;base64,{img_base64}"
+            # Convert to base64
+            buffered = BytesIO()
+            img.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            img_data_url = f"data:image/png;base64,{img_base64}"
 
-        print(f"[API extract_first_frame] Successfully extracted first frame")
+            print(f"[API extract_first_frame] Successfully extracted first frame")
 
-        return web.json_response({
-            "success": True,
-            "image": img_data_url
-        })
+            return web.json_response({
+                "success": True,
+                "image": img_data_url
+            })
+        finally:
+            if cap is not None and cap.isOpened():
+                cap.release()
 
     except Exception as e:
         print(f"[API extract_first_frame] ERROR: {e}")
@@ -536,26 +532,11 @@ async def extract_first_frame(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-@PromptServer.instance.routes.post("/wanvideowrapper_qq/sam2_predict")
-async def sam2_predict(request):
-    """
-    API endpoint for SAM2 point-click prediction.
-
-    Expects JSON with:
-        image: base64 encoded image (data URL format)
-        points: list of {'x': float, 'y': float, 'label': int} points
-                x, y are in pixel coordinates, label is 1 (foreground) or 0 (background)
-
-    Returns JSON with:
-        success: bool
-        path: list of {'x': float, 'y': float} normalized coordinates (0-1)
-        score: float (confidence score)
-        mask_shape: [height, width] of the predicted mask
-    """
+@PromptServer.instance.routes.post(f"{API_PREFIX}/sam2_predict")
+async def sam2_predict(request) -> web.Response:
     try:
         data = await request.json()
 
-        # Validate required parameters
         if not data.get("image"):
             return web.json_response({"success": False, "error": "Missing image parameter"}, status=400)
 
@@ -563,14 +544,7 @@ async def sam2_predict(request):
             return web.json_response({"success": False, "error": "Missing points parameter"}, status=400)
 
         # Decode base64 image
-        image_data = data["image"]
-        if image_data.startswith('data:image'):
-            header, encoded = image_data.split(',', 1)
-        else:
-            encoded = image_data
-
-        image_bytes = base64.b64decode(encoded)
-        img = Image.open(BytesIO(image_bytes))
+        img, _ = _decode_base64_image(data["image"])
 
         # Extract points
         points = data["points"]
@@ -587,7 +561,7 @@ async def sam2_predict(request):
             "success": True,
             "path": path,
             "score": score,
-            "mask_shape": mask.shape
+            "mask_shape": list(mask.shape) if hasattr(mask, 'shape') else None
         })
 
     except Exception as e:
@@ -596,9 +570,8 @@ async def sam2_predict(request):
         return web.json_response({"success": False, "error": str(e)}, status=500)
 
 
-@PromptServer.instance.routes.get("/wanvideowrapper_qq/video_metadata")
-async def get_video_metadata(request):
-    """Return FPS and frame count for a video file in the input directory."""
+@PromptServer.instance.routes.get(f"{API_PREFIX}/video_metadata")
+async def get_video_metadata(request) -> web.Response:
     filename = request.query.get("filename")
     if not filename:
         return web.json_response({"success": False, "error": "Missing filename"}, status=400)
@@ -612,24 +585,30 @@ async def get_video_metadata(request):
     if not os.path.exists(filepath):
         return web.json_response({"success": False, "error": "File not found"}, status=404)
 
+    cap = None
     try:
         cap = cv2.VideoCapture(filepath)
+
+        if not cap.isOpened():
+            return web.json_response({"success": False, "error": "Failed to open video file"}, status=500)
+
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
 
         if fps <= 0:
             fps = 24.0
 
         return web.json_response({
             "success": True,
-            "fps": fps,
+            "fps": float(fps),
             "frame_count": frame_count,
             "width": width,
             "height": height,
         })
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)}, status=500)
-
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
