@@ -917,7 +917,7 @@ class VideoPrepAB:
             "required": {
                 "image_A": ("IMAGE",),
                 "image_B": ("IMAGE",),
-                "mid_frames_color": ("FLOAT", {"default": 50, "min": 0, "max": 100, "step": 1}),
+                "mid_frames_RGB": ("STRING", {"default": "0,191,0"}),
                 "end_A_frames": ("INT", {"default": 24, "min": 0, "max": 10000, "step": 1}),
                 "start_B_frames": ("INT", {"default": 24, "min": 0, "max": 10000, "step": 1}),
                 "total_frames": ("INT", {"default": 121, "min": 1, "max": 993, "step": 8}),
@@ -935,7 +935,7 @@ class VideoPrepAB:
     FUNCTION = "video_prep_ab"
     CATEGORY = "WanVideoWrapper_QQ/video"
 
-    def video_prep_ab(self, image_A, image_B, mid_frames_color, end_A_frames, start_B_frames, total_frames, video_fps, audio_blend_frames, audio_A=None, audio_B=None):
+    def video_prep_ab(self, image_A, image_B, mid_frames_RGB, end_A_frames, start_B_frames, total_frames, video_fps, audio_blend_frames, audio_A=None, audio_B=None):
         device = image_A.device
 
         # Get dimensions
@@ -982,14 +982,41 @@ class VideoPrepAB:
         else:
             frames_b = torch.zeros((0, target_h, target_w, target_c), device=device)
 
-        # Create mid frames with color based on mid_frames_color (0-100 -> 0.0-1.0)
-        color_value = mid_frames_color / 100.0
+        # Parse RGB color string (e.g., "0,191,0") and convert to 0.0-1.0 range
+        try:
+            r_str, g_str, b_str = mid_frames_RGB.split(",")
+            r_val = float(r_str.strip()) / 255.0
+            g_val = float(g_str.strip()) / 255.0
+            b_val = float(b_str.strip()) / 255.0
+        except (ValueError, AttributeError):
+            # Fallback to grayscale if parsing fails
+            try:
+                val = float(mid_frames_RGB) / 100.0
+                r_val = g_val = b_val = val
+            except:
+                r_val = g_val = b_val = 0.5
+
         if mid_frames_count > 0:
-            mid_frames = torch.full(
-                (mid_frames_count, target_h, target_w, target_c),
-                color_value,
-                device=device
-            )
+            # Create colored fill for each channel
+            if target_c == 1:
+                # Grayscale: use average of RGB
+                color_value = (r_val + g_val + b_val) / 3.0
+                mid_frames = torch.full(
+                    (mid_frames_count, target_h, target_w, target_c),
+                    color_value,
+                    device=device
+                )
+            elif target_c == 3:
+                # RGB: create separate channel values
+                mid_frames = torch.zeros((mid_frames_count, target_h, target_w, target_c), device=device)
+                mid_frames[..., 0] = r_val
+                mid_frames[..., 1] = g_val
+                mid_frames[..., 2] = b_val
+            else:  # RGBA or more channels
+                mid_frames = torch.zeros((mid_frames_count, target_h, target_w, target_c), device=device)
+                mid_frames[..., 0] = r_val
+                mid_frames[..., 1] = g_val
+                mid_frames[..., 2] = b_val
         else:
             mid_frames = torch.zeros((0, target_h, target_w, target_c), device=device)
 
