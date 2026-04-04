@@ -331,7 +331,8 @@ class VideoAudioMergeAB:
             "required": {
                 "image_A": ("IMAGE",),
                 "image_B": ("IMAGE",),
-                "FlamesOverlap": ("INT", {"default": 15, "min": 0, "max": 1000, "step": 1}),
+                "Overlap_A": ("INT", {"default": 24, "min": 0, "max": 1000, "step": 1}),
+                "Overlap_B": ("INT", {"default": 24, "min": 0, "max": 1000, "step": 1}),
                 "video_fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 0.5}),
                 "easing_clamp": ("FLOAT", {"default": 0.5, "min": -1.0, "max": 2.0, "step": 0.01}),
                 "easing_type": (["linear", "ease_in", "ease_out", "ease_in_out"],),
@@ -350,7 +351,7 @@ class VideoAudioMergeAB:
     FUNCTION = "merge_ab"
     CATEGORY = "WanVideoWrapper_QQ/video"
 
-    def merge_ab(self, image_A, image_B, FlamesOverlap, video_fps, easing_clamp, easing_type, normalize_volume, b_volume_gain, cut_mode, audio_A=None, audio_B=None):
+    def merge_ab(self, image_A, image_B, Overlap_A, Overlap_B, video_fps, easing_clamp, easing_type, normalize_volume, b_volume_gain, cut_mode, audio_A=None, audio_B=None):
         device = image_A.device
         num_a = image_A.shape[0]
         num_b = image_B.shape[0]
@@ -363,7 +364,8 @@ class VideoAudioMergeAB:
         image_A = self._resize_to_target(image_A, num_a, target_h, target_w, target_c)
         image_B = self._resize_to_target(image_B, num_b, target_h, target_w, target_c)
 
-        safe_overlap = min(FlamesOverlap, num_a // 2, num_b // 2)
+        # Calculate safe overlap: use min of both overlaps, clamped to available frames
+        safe_overlap = min(Overlap_A, Overlap_B, num_a // 2, num_b // 2)
 
         # 2. Video Merge Logic
         if cut_mode:
@@ -1349,31 +1351,54 @@ class VideoLoopMove:
                 "image": ("IMAGE",),
                 "num_frames": ("INT", {"default": 16, "min": 0, "max": 10000, "step": 1}),
             },
+            "optional": {
+                "audio": ("AUDIO",),
+            },
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("image",)
+    RETURN_TYPES = ("IMAGE", "AUDIO")
+    RETURN_NAMES = ("image", "audio")
     FUNCTION = "loop_move"
     CATEGORY = "WanVideoWrapper_QQ/video"
 
-    def loop_move(self, image, num_frames):
+    def loop_move(self, image, num_frames, audio=None):
         total_frames = image.shape[0]
 
         # Handle edge cases
         if num_frames <= 0:
-            return (image,)
-        if num_frames >= total_frames:
-            # If num_frames >= total, just reverse or return as-is
-            # Let's wrap it: effectively no change needed
-            return (image,)
+            result_image = image
+        elif num_frames >= total_frames:
+            # If num_frames >= total, just return as-is
+            result_image = image
+        else:
+            # Split: last num_frames go to front, rest follow
+            moved_part = image[-num_frames:]  # Last N frames
+            remaining_part = image[:-num_frames]  # First (total - N) frames
+            result_image = torch.cat([moved_part, remaining_part], dim=0)
 
-        # Split: last num_frames go to front, rest follow
-        moved_part = image[-num_frames:]  # Last N frames
-        remaining_part = image[:-num_frames]  # First (total - N) frames
+        # Apply same loop move to audio if provided
+        if audio is not None:
+            waveform = audio["waveform"]
+            sample_rate = audio["sample_rate"]
+            total_samples = waveform.shape[-1]
 
-        result = torch.cat([moved_part, remaining_part], dim=0)
+            # Calculate samples per frame ratio
+            samples_per_frame = total_samples / total_frames
+            num_samples_to_move = int(num_frames * samples_per_frame)
 
-        return (result,)
+            if num_samples_to_move > 0 and num_samples_to_move < total_samples:
+                # Apply same loop move to audio
+                moved_audio = waveform[..., -num_samples_to_move:]
+                remaining_audio = waveform[..., :-num_samples_to_move]
+                result_audio_waveform = torch.cat([moved_audio, remaining_audio], dim=-1)
+            else:
+                result_audio_waveform = waveform
+
+            result_audio = {"waveform": result_audio_waveform, "sample_rate": sample_rate}
+        else:
+            result_audio = audio
+
+        return (result_image, result_audio)
 
 
 NODE_CLASS_MAPPINGS = {

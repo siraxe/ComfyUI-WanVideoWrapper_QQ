@@ -15,11 +15,39 @@ import { createOnNodeCreatedWrapper } from './node_setup.js';
 app.registerExtension({
     name: 'PowerLoadVideo',
 
+    settings: [
+        {
+            id: 'SA-Nodes.overwriteDragAndDrop',
+            name: 'Overwrite drag and drop',
+            category: ['SA-Nodes', 'Power Load Video', 'Overwrite drag and drop'],
+            tooltip: 'When enabled, dragging video files onto the canvas creates Power Load Video nodes instead of default Load Video nodes. Also enables image drag-and-drop to create LoadImage nodes.',
+            type: 'boolean',
+            defaultValue: false,
+        },
+    ],
+
+    commands: [
+        {
+            id: 'SA-Nodes.ToggleOverwriteDragAndDrop',
+            label: 'Toggle overwrite drag and drop',
+            active: () => app.ui.settings.getSettingValue('SA-Nodes.overwriteDragAndDrop'),
+            function: () => {
+                const cur = app.ui.settings.getSettingValue('SA-Nodes.overwriteDragAndDrop');
+                app.ui.settings.setSettingValue('SA-Nodes.overwriteDragAndDrop', !cur);
+            },
+        },
+    ],
+
     /**
      * Intercept canvas-level drag-and-drop to create Power Load Video nodes
      * instead of default Load Video nodes
      */
     async setup() {
+        // Check if overwrite drag and drop is enabled
+        const overwriteDragAndDrop = app.ui.settings.getSettingValue('SA-Nodes.overwriteDragAndDrop');
+        if (!overwriteDragAndDrop) {
+            return;
+        }
         // Get the canvas element - try multiple approaches
         let canvas = null;
 
@@ -423,6 +451,20 @@ app.registerExtension({
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
+        // Add SA-Nodes category to the node list for easy discovery
+        if (nodeData?.category && nodeData.category.startsWith('Power/')) {
+            // Extract the subcategory (e.g., 'Video' from 'Power/Video')
+            const subcategory = nodeData.category.split('/')[1];
+            if (subcategory) {
+                // Add to SA-Nodes category as well for easy discovery
+                if (!nodeType.category) {
+                    nodeType.category = 'SA-Nodes/' + subcategory;
+                } else {
+                    nodeType.categories = ['SA-Nodes/' + subcategory, nodeData.category];
+                }
+            }
+        }
+
         if (nodeData?.name === 'PowerLoadVideo') {
             // Note: We intentionally keep video_upload flag so ComfyUI serializes
             // the combo widget value for persistence across tab switches and workflow reloads.
