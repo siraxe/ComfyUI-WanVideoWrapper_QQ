@@ -1,5 +1,5 @@
 # ComfyUI-SA-Nodes-QQ
-**Version 1.3.7** - 2026-04-04
+**Version 1.3.8** - 2026-04-04
 - **Video Prep AB**: mid_frame_RGB changed to color and use of RGB value
 <blockquote style="border-left: 4px solid orange; padding-left: 10px; color: #e67e22;">
 ⚠️ <strong>Warning:</strong> This repository was renamed in version 1.3.4.
@@ -11,6 +11,23 @@ Older workflow `.json` files may still reference the previous `wanwrapper_qq` no
 </blockquote>
 
 <strong>Note:</strong> The recent addition of `Power Load Video` overwrites ComfyUI's default drag-and-drop behavior to enable the node creation on drag and drop. Otherwise, it should act normally with other drag-and-drop functionality. If you notice anything not working, please create an issue.
+<table>
+<tr>
+<td width="50%">
+
+Drag and drop override to create Load video node is optional now. False by default
+
+</td>
+<td width="50%">
+  
+<img width="561" height="208" alt="image" src="https://github.com/user-attachments/assets/578a15e7-52f4-4f2d-a62c-4cbc6539edea" />
+
+</td>
+</tr>
+</table>
+
+
+
 
 **Version 1.3.4** - 2026-04-01
 - **ComfyUI-SA-Nodes-QQ**: Name change of node/repo to ComfyUI-SA-Nodes-QQ as Comfyui had warning print on import with kj wanwraper node pack. (Originally this was an addition node pack to build on top but now there's more nodes so it doesn't make sence as well)
