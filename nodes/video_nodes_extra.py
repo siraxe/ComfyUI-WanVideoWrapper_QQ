@@ -364,15 +364,23 @@ class VideoAudioMergeAB:
         image_A = self._resize_to_target(image_A, num_a, target_h, target_w, target_c)
         image_B = self._resize_to_target(image_B, num_b, target_h, target_w, target_c)
 
-        # Calculate safe overlap: use min of both overlaps, clamped to available frames
-        safe_overlap = min(Overlap_A, Overlap_B, num_a // 2, num_b // 2)
-
-        # 2. Video Merge Logic
-        if cut_mode:
-            # CUT MODE: image_A as background (full length), image_B overlaid at the end
-            # Discard first (num_b - safe_overlap) frames of B, blend remaining onto A's end
-            result_image = self._cut_mode_merge(image_A, image_B, safe_overlap, easing_clamp, easing_type, device)
+        # Handle single-frame A: overlay it on top of B's beginning with fade-out
+        if num_a == 1:
+            safe_overlap = min(Overlap_A, num_b)
+            if safe_overlap > 0:
+                # Duplicate A to match overlap length for fading
+                image_A_extended = torch.cat([image_A] * safe_overlap, dim=0)
+                y_list = self._generate_y_values_ab(safe_overlap, easing_clamp, easing_type)
+                opacity_y = torch.tensor(y_list, dtype=torch.float32, device=device)
+                # Fade A OUT over B's first frames (reverse opacity: start opaque, end transparent)
+                blended_start = self._blend_images(image_A_extended, image_B[:safe_overlap], 1.0 - opacity_y)
+                result_image = torch.cat([blended_start, image_B[safe_overlap:]], dim=0)
+            else:
+                result_image = image_B
         else:
+            # Calculate safe overlap: use min of both overlaps, clamped to available frames
+            safe_overlap = min(Overlap_A, Overlap_B, num_a // 2, num_b // 2)
+
             # NORMAL MODE: crossfade merge A -> B
             if safe_overlap > 0:
                 A1 = image_A[:-safe_overlap]

@@ -19,6 +19,7 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         this.sizeValue = "?x?";
         this.frameCountValue = "?f";
         this.forceFpsValue = "0";
+        this.maxFpsValue = "0";
 
         this.hitAreas = {
             refreshButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
@@ -28,6 +29,7 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
             fpsAny: { bounds: [0, 0], onMove: null },
             sizeInput: { bounds: [0, 0], onClick: null },
             forceFpsInput: { bounds: [0, 0], onClick: null },
+            maxFpsInput: { bounds: [0, 0], onClick: null },
         };
     }
 
@@ -127,9 +129,9 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         ctx.fillText(this.frameCountValue, posX, midY);
 
         // Draw force fps label and input
-        const forceLabelWidth = 40;
+        const forceLabelWidth = 45;
         posX += ctx.measureText(this.frameCountValue).width + 15;
-        ctx.fillText("force:", posX, midY);
+        ctx.fillText("forcef:", posX, midY);
 
         const forceInputX = posX + forceLabelWidth;
 
@@ -155,9 +157,34 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
 
         assignBounds("forceFpsInput", [forceInputX, forceBgWidth]);
 
-        // Draw "fps" label after the input
-        const fpsLabelX = forceInputX + forceBgWidth + 8;
-        ctx.fillText("fps", fpsLabelX, midY);
+        // Draw max fps label and input (after force fps)
+        const maxLabelWidth = 35;
+        posX = forceInputX + forceBgWidth + 15;
+        ctx.fillText("maxf:", posX, midY);
+
+        const maxInputX = posX + maxLabelWidth;
+
+        // Measure the actual text width and add padding
+        ctx.font = `${Math.max(14, height * 0.7)}px Sans-Serif`;
+        const maxTextSize = ctx.measureText(this.maxFpsValue);
+        const maxTextWidthActual = Math.ceil(maxTextSize.width);
+        const maxBgPadding = 12; // Padding on each side
+        const maxBgWidth = maxTextWidthActual + maxBgPadding * 2;
+        const maxBgRadius = height * 0.5;
+
+        // Draw rounded background only around the text content
+        ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+        ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.beginPath();
+        ctx.roundRect(maxInputX, posY, maxBgWidth, height, [maxBgRadius]);
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw max fps text
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.fillText(this.maxFpsValue, maxInputX + maxBgPadding, midY);
+
+        assignBounds("maxFpsInput", [maxInputX, maxBgWidth]);
 
         // Setup event handlers
         this.hitAreas.refreshButton.onClick = async () => {
@@ -203,6 +230,9 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
 
         // Force fps input handler
         this.hitAreas.forceFpsInput.onClick = () => this.promptForceFps(node);
+
+        // Max fps input handler
+        this.hitAreas.maxFpsInput.onClick = () => this.promptMaxFps(node);
 
         ctx.restore();
     }
@@ -262,17 +292,37 @@ export class PowerLoadVideoTopRowWidget extends RgthreeBaseWidget {
         });
     }
 
+    promptMaxFps(node) {
+        if (this.haveMouseMovedValue) return;
+        const canvas = app.canvas;
+        canvas.prompt("Max Frames", this.maxFpsValue, (v) => {
+            this.maxFpsValue = String(v).trim() || "0";
+            // Update the hidden backend widget value so it gets serialized to Python
+            const maxFpsWidget = node.widgets.find(w => w.name === 'max_fps');
+            if (maxFpsWidget) {
+                maxFpsWidget.value = this.maxFpsValue === "0" ? 0 : parseFloat(this.maxFpsValue);
+            }
+            node.setDirtyCanvas(true, true);
+        });
+    }
+
     // Restore from saved workflow JSON
     fromJSON(data, _widgetInfo, node) {
         if (data?.force_fps !== undefined && data.force_fps !== null) {
             this.forceFpsValue = String(data.force_fps);
+        }
+        if (data?.max_fps !== undefined && data.max_fps !== null) {
+            this.maxFpsValue = String(data.max_fps);
         }
         return this;
     }
 
     // Serialize to workflow JSON
     toJSON(_node, widgetInfo) {
-        return { force_fps: this.forceFpsValue === "0" ? 0 : parseFloat(this.forceFpsValue) };
+        return {
+            force_fps: this.forceFpsValue === "0" ? 0 : parseFloat(this.forceFpsValue),
+            max_fps: this.maxFpsValue === "0" ? 0 : parseFloat(this.maxFpsValue)
+        };
     }
 
     onMouseUp(event, pos, node) {

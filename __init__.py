@@ -88,15 +88,46 @@ __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
 
 WEB_DIRECTORY = "./web"
 
-# Add static path for kjweb_async
+# Add static path for web_async - define BEFORE using
 from aiohttp import web
-from server import PromptServer
 from pathlib import Path
 
-if hasattr(PromptServer, "instance"):
+# Store the directory path for later use
+_WEB_ASYNC_DIR = str((Path(__file__).parent.absolute() / "web_async").as_posix())
+
+def register_web_async_routes(server):
+    """Register static routes for web_async - called by ComfyUI's extension system."""
     try:
-        PromptServer.instance.app.add_routes(
-            [web.static("/kjweb_async", (Path(__file__).parent.absolute() / "kjweb_async").as_posix())]
+        server.app.add_routes(
+            [web.static("/web_async", _WEB_ASYNC_DIR, append_version=True)]
         )
+        print(f"[SA-Nodes-QQ] Registered /web_async route pointing to: {_WEB_ASYNC_DIR}")
     except Exception as e:
-        print(f"Error adding static route for kjweb_async: {e}")
+        print(f"[SA-Nodes-QQ] Error adding static route for web_async: {e}")
+
+# Register the route registration function with ComfyUI's extension system
+from server import PromptServer
+
+# Use the proper ComfyUI extension point - this runs when server starts
+if hasattr(PromptServer, 'instance') and PromptServer.instance is not None:
+    # Server already running (dev mode), register immediately
+    register_web_async_routes(PromptServer.instance)
+else:
+    # Store for later registration - ComfyUI will call our function via the extension system
+    # We need to monkey-patch or use a different approach
+    import threading
+
+    def wait_for_server_and_register():
+        """Wait for PromptServer.instance to be available, then register routes."""
+        import time
+        for _ in range(30):  # Wait up to 30 seconds
+            time.sleep(0.5)
+            if hasattr(PromptServer, 'instance') and PromptServer.instance is not None:
+                try:
+                    register_web_async_routes(PromptServer.instance)
+                    return
+                except Exception as e:
+                    print(f"[SA-Nodes-QQ] Waiting for server... error: {e}")
+        print("[SA-Nodes-QQ] Failed to register web_async routes - server not ready")
+
+    threading.Thread(target=wait_for_server_and_register, daemon=True).start()

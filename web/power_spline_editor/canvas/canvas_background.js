@@ -55,10 +55,8 @@ export function attachBackgroundHandlers(editor) {
         if (!arePointsDenormalized) {
           // Points are normalized [0,1], safe to denormalize
           editor.points = editor.denormalizePoints(storedPoints);
-          console.log('[handleImageLoad] Points were normalized, denormalized with editor.scale:', editor.scale);
         } else {
           // Points are already in canvas space, use as-is
-          console.log('[handleImageLoad] Points already denormalized, using as-is');
           editor.points = storedPoints;
         }
       } catch (e) {
@@ -158,19 +156,13 @@ export function attachBackgroundHandlers(editor) {
    * Called when Python backend sends bg_video metadata
    */
   editor.handlePythonUpdate = (uiData) => {
-    console.log('[handlePythonUpdate] Called with uiData:', uiData);
-
     // Check for video data in UI updates
     if (uiData.bg_video && uiData.bg_video.length > 0) {
       const videoInfo = uiData.bg_video[0];
-      console.log('[handlePythonUpdate] Found video info:', videoInfo);
       editor.node.videoData = videoInfo;
-      console.log('[handlePythonUpdate] Calling loadBackgroundVideo...');
       loadBackgroundVideo(editor, videoInfo);
-      console.log('[handlePythonUpdate] Video loading initiated');
       return true;  // Video loaded
     }
-    console.log('[handlePythonUpdate] No bg_video found in uiData');
     return false;  // No video
   };
 
@@ -192,10 +184,8 @@ export function attachBackgroundHandlers(editor) {
             // Points are normalized [0,1], safe to denormalize with new scale
             const denormalizedPoints = editor.denormalizePoints(storedPoints);
             editor.points = denormalizedPoints;
-            console.log('[updateLayerCoordinatesAfterScaleChange] Points were normalized, re-denormalized with new editor.scale:', editor.scale);
           } else {
             // Points are already in canvas space, no need to re-denormalize
-            console.log('[updateLayerCoordinatesAfterScaleChange] Points already denormalized, using as-is');
             editor.points = storedPoints;
           }
 
@@ -223,10 +213,8 @@ export function attachBackgroundHandlers(editor) {
         if (!arePointsDenormalized) {
           // Points are normalized [0,1], safe to denormalize
           editor.points = editor.denormalizePoints(storedPoints);
-          console.log('[refreshActiveLayerCoordinates] Points were normalized, denormalized with editor.scale:', editor.scale);
         } else {
           // Points are already in canvas space, use as-is
-          console.log('[refreshActiveLayerCoordinates] Points already denormalized, using as-is');
           editor.points = storedPoints;
         }
 

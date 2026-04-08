@@ -31,6 +31,18 @@ def _find_ffmpeg():
     return candidates[0] if candidates else "ffmpeg"
 
 
+def _to_float(val, default):
+    """Coerce a value to float, handling dict and invalid types."""
+    if isinstance(val, dict):
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(val) if val else default
+    except (ValueError, TypeError):
+        return default
+
+
 def extract_audio(file_path, start_time=0, duration=0):
     """Extract audio from a video file using ffmpeg.
 
@@ -100,6 +112,12 @@ class PowerLoadVideo:
                 "start_frame": ("INT", {"default": 1, "min": 1}),
                 "end_frame": ("INT", {"default": -1, "min": -1}),
                 "force_fps": ("FLOAT", {"default": 0, "min": 0, "max": 60, "step": 1, "disable": 0}),
+                "max_fps": ("FLOAT", {"default": 0, "min": 0, "step": 1}),
+                "crop_enabled": ("BOOLEAN", {"default": False}),
+                "crop_x": ("FLOAT", {"default": 0.5, "min": 0, "max": 1, "step": 0.01}),
+                "crop_y": ("FLOAT", {"default": 0.5, "min": 0, "max": 1, "step": 0.01}),
+                "crop_w": ("FLOAT", {"default": 1.0, "min": 0.05, "max": 1, "step": 0.01}),
+                "crop_h": ("FLOAT", {"default": 1.0, "min": 0.05, "max": 1, "step": 0.01}),
             },
         }
 
@@ -109,7 +127,7 @@ class PowerLoadVideo:
     CATEGORY = "Power/Video"
     DESCRIPTION = "Load a video file via drag-and-drop. Outputs frames as IMAGE tensor, audio, and FPS."
 
-    def load_video(self, video=None, start_frame=1, end_frame=-1, force_fps=0):
+    def load_video(self, video=None, start_frame=1, end_frame=-1, force_fps=0, max_fps=0, crop_enabled=False, crop_x=0.5, crop_y=0.5, crop_w=1.0, crop_h=1.0):
         """
         Load video frames and audio from uploaded video file.
 
@@ -118,6 +136,8 @@ class PowerLoadVideo:
             start_frame: First frame to load (1-based). Default 1 = first frame.
             end_frame: Last frame to load (1-based). Default -1 = last frame.
             force_fps: Force output FPS (0 = native). Same logic as VHS force_rate.
+            max_fps: Maximum output frames (0 = disabled). Calculates required source frames
+                    based on FPS conversion ratio. Ignores end_frame trim when set.
 
         Returns:
             tuple: (IMAGE tensor, AUDIO dict, fps)
@@ -132,6 +152,25 @@ class PowerLoadVideo:
                 force_fps = float(force_fps) if force_fps else 0.0
             except (ValueError, TypeError):
                 force_fps = 0.0
+
+        # Handle max_fps type coercion
+        if isinstance(max_fps, dict):
+            max_fps = 0.0
+        elif not isinstance(max_fps, (int, float)):
+            try:
+                max_fps = float(max_fps) if max_fps else 0.0
+            except (ValueError, TypeError):
+                max_fps = 0.0
+
+        # Handle crop parameter type coercion
+        if isinstance(crop_enabled, dict):
+            crop_enabled = False
+        else:
+            crop_enabled = bool(crop_enabled)
+        crop_x = _to_float(crop_x, 0.5)
+        crop_y = _to_float(crop_y, 0.5)
+        crop_w = _to_float(crop_w, 1.0)
+        crop_h = _to_float(crop_h, 1.0)
 
         if not video_filename:
             raise ValueError("No video file provided. Please use the Upload button or drag and drop a video onto this node.")
@@ -165,7 +204,17 @@ class PowerLoadVideo:
 
         # Convert 1-based frame numbers to 0-based index range
         first_idx = max(0, (start_frame or 1) - 1)
-        last_idx = (total_frames - 1) if (end_frame is None or end_frame <= 0) else min(end_frame - 1, total_frames - 1)
+
+        # Calculate last_idx based on max_fps if set, otherwise use end_frame
+        if max_fps > 0:
+            # max_fps is the desired OUTPUT frame count after FPS conversion
+            # Calculate required SOURCE frames: source_frames = ceil(max_fps * native_fps / target_fps)
+            fps_ratio = native_fps / target_fps  # e.g., 30/25 = 1.2 means we need 1.2x more source frames
+            required_source_frames = int(np.ceil(max_fps * fps_ratio))
+            last_idx = min(first_idx + required_source_frames - 1, total_frames - 1)
+        else:
+            # Use end_frame trim as normal
+            last_idx = (total_frames - 1) if (end_frame is None or end_frame <= 0) else min(end_frame - 1, total_frames - 1)
 
         # Check if we're using the full video (no trimming needed)
         full_video = (first_idx == 0) and (last_idx == total_frames - 1)
@@ -231,6 +280,27 @@ class PowerLoadVideo:
         # Convert to tensor
         image_tensor = self.pil_totensor(images)
 
+        # Apply crop if enabled
+        if crop_enabled:
+            h, w = image_tensor.shape[1], image_tensor.shape[2]
+            left = max(0, int(round((crop_x - crop_w / 2) * w)))
+            top = max(0, int(round((crop_y - crop_h / 2) * h)))
+            right = min(w, int(round((crop_x + crop_w / 2) * w)))
+            bottom = min(h, int(round((crop_y + crop_h / 2) * h)))
+            if right > left and bottom > top:
+                # Snap crop dimensions to multiples of 8 to avoid VHS padding warnings
+                raw_w = right - left
+                raw_h = bottom - top
+                snapped_w = raw_w - (raw_w % 8)
+                snapped_h = raw_h - (raw_h % 8)
+                if snapped_w >= 8 and snapped_h >= 8:
+                    # Re-center the adjusted crop within the original region
+                    left = left + (raw_w - snapped_w) // 2
+                    top = top + (raw_h - snapped_h) // 2
+                    right = left + snapped_w
+                    bottom = top + snapped_h
+                image_tensor = image_tensor[:, top:bottom, left:right, :]
+
         # Extract audio (skip trimming if full video)
         audio = None
         if full_video:
@@ -252,7 +322,7 @@ class PowerLoadVideo:
         return torch.from_numpy(stacked)
 
     @classmethod
-    def IS_CHANGED(s, video=None, start_frame=1, end_frame=-1, force_fps=0):
+    def IS_CHANGED(s, video=None, start_frame=1, end_frame=-1, force_fps=0, max_fps=0, crop_enabled=False, crop_x=0.5, crop_y=0.5, crop_w=1.0, crop_h=1.0):
         if not video:
             return 0
         try:
@@ -269,8 +339,27 @@ class PowerLoadVideo:
                     force_fps = float(force_fps) if force_fps else 0.0
                 except (ValueError, TypeError):
                     force_fps = 0.0
-            # Include force_fps in hash so changing it triggers re-execution
+            # Handle max_fps type coercion
+            if isinstance(max_fps, dict):
+                max_fps = 0.0
+            elif not isinstance(max_fps, (int, float)):
+                try:
+                    max_fps = float(max_fps) if max_fps else 0.0
+                except (ValueError, TypeError):
+                    max_fps = 0.0
+            # Include force_fps and max_fps in hash so changing them triggers re-execution
             m.update(str(force_fps).encode())
+            m.update(str(max_fps).encode())
+            # Include crop params in hash so changing them triggers re-execution
+            crop_x = _to_float(crop_x, 0.5)
+            crop_y = _to_float(crop_y, 0.5)
+            crop_w = _to_float(crop_w, 1.0)
+            crop_h = _to_float(crop_h, 1.0)
+            m.update(str(bool(crop_enabled)).encode())
+            m.update(f"{crop_x:.4f}".encode())
+            m.update(f"{crop_y:.4f}".encode())
+            m.update(f"{crop_w:.4f}".encode())
+            m.update(f"{crop_h:.4f}".encode())
             return m.digest().hex()
         except:
             return 0

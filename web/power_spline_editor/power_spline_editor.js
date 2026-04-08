@@ -40,10 +40,48 @@ import { createDimensionManager } from './modules/dimension-manager.js';
 import { saveRefImageToCache, safeSetSessionItem } from './modules/image-cache.js';
 
 // Load external scripts
-loadScript('/kjweb_async/svg-path-properties.min.js').catch(e =>
+loadScript('/web_async/svg-path-properties.min.js').catch(e =>
   console.log(e)
 );
-loadScript('/kjweb_async/protovis.min.js').catch(e => console.log(e));
+
+// Initialize Protovis loading with proper tracking
+if (typeof window.pv === 'undefined') {
+    window.protovisLoaded = false;
+}
+const loadProtovis = async () => {
+    // Check if protovis is already loaded to prevent multiple loads
+    if (typeof window.pv !== 'undefined') {
+        console.log('[PowerSplineEditor] Protovis already loaded');
+        window.protovisLoaded = true;
+        return;
+    }
+
+    try {
+        console.log('[PowerSplineEditor] Loading Protovis from /web_async/protovis.min.js...');
+        await loadScript('/web_async/protovis.min.js');
+        console.log('[PowerSplineEditor] Script loaded, waiting for pv to be available...');
+        // Wait a bit to ensure protovis is fully loaded
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Verify protovis is now available
+        if (typeof window.pv !== 'undefined') {
+            window.protovisLoaded = true;
+            console.log('[PowerSplineEditor] Protovis loaded successfully');
+        } else {
+            console.warn("[PowerSplineEditor] Protovis library did not load properly, checking typeof pv:", typeof pv);
+            // Try accessing pv directly (it might be global but not on window)
+            if (typeof pv !== 'undefined') {
+                console.log('[PowerSplineEditor] Found pv as global variable');
+                window.protovisLoaded = true;
+            }
+        }
+    } catch (e) {
+        console.error("[PowerSplineEditor] Failed to load protovis.min.js", e);
+    }
+};
+
+// Start loading Protovis immediately
+loadProtovis().catch(e => console.log(e));
 create_documentation_stylesheet();
 
 app.registerExtension({

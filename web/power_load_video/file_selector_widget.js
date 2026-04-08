@@ -20,6 +20,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         this.dropdownElement = null;
         this.uploadButtonMouseDown = false;
         this.showButtonMouseDown = false;
+        this.cropButtonMouseDown = false;
         this._closeDropdownHandler = null;
 
         this.hitAreas = {
@@ -28,6 +29,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
             nextButton: { bounds: [0, 0], onClick: null },
             showButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
             uploadButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
+            cropButton: { bounds: [0, 0], onClick: null, onDown: null, onUp: null },
         };
     }
 
@@ -366,7 +368,8 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         const arrowWidth = 26;
         const spacing = 4;
         const showButtonWidth = 80;
-        const uploadButtonWidth = 100;
+        const uploadButtonWidth = 90;
+        const cropButtonWidth = 70;
 
         // Selector starts after left arrow
         const selectorX = margin + arrowWidth + spacing;
@@ -381,7 +384,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         const offsetX = ds?.offset?.[0] || 0;
         const offsetY = ds?.offset?.[1] || 0;
 
-        const selectorWidth = node.size[0] - margin * 2 - arrowWidth * 2 - spacing * 4 - showButtonWidth - uploadButtonWidth;
+        const selectorWidth = node.size[0] - margin * 2 - arrowWidth * 2 - spacing * 5 - showButtonWidth - uploadButtonWidth - cropButtonWidth;
 
         const screenX = rect.left + (node.pos[0] + selectorX + offsetX) * scale;
         const screenY = rect.top + (node.pos[1] + (this.last_y || 0) + offsetY) * scale + scale;
@@ -409,7 +412,8 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         const midY = posY + height * 0.5;
         const arrowWidth = 26;
         const showButtonWidth = 80;
-        const uploadButtonWidth = 100;
+        const uploadButtonWidth = 90;
+        const cropButtonWidth = 70;
 
         ctx.save();
 
@@ -433,7 +437,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
 
         // === FILE SELECTOR AREA (combo-style box with dropdown) ===
         const selectorX = leftArrowX + arrowWidth + spacing;
-        const selectorWidth = node.size[0] - margin * 2 - arrowWidth * 2 - spacing * 4 - showButtonWidth - uploadButtonWidth;
+        const selectorWidth = node.size[0] - margin * 2 - arrowWidth * 2 - spacing * 5 - showButtonWidth - uploadButtonWidth - cropButtonWidth;
 
         // Draw rounded background
         ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
@@ -506,6 +510,26 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         ctx.fillText("\u{1F4E4} Upload", uploadButtonX + uploadButtonWidth * 0.5, midY + (this.uploadButtonMouseDown ? 1 : 0));
         assignBounds("uploadButton", [uploadButtonX, posY, uploadButtonWidth, height]);
 
+        // === CROP BUTTON (right side, after Upload) ===
+        const cropButtonX = uploadButtonX + uploadButtonWidth + spacing;
+        const cropActive = node.boxCropWidget?.value?.visible;
+        ctx.fillStyle = cropActive
+            ? (this.cropButtonMouseDown ? '#0a3a1a' : 'rgba(0, 255, 100, 0.15)')
+            : (this.cropButtonMouseDown ? '#1a4a6a' : LiteGraph.WIDGET_BGCOLOR);
+        ctx.strokeStyle = cropActive ? '#00ff64' : LiteGraph.WIDGET_OUTLINE_COLOR;
+        ctx.lineWidth = cropActive ? 2 : 1;
+        ctx.beginPath();
+        ctx.rect(cropButtonX, posY, cropButtonWidth, height);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+        ctx.font = `${Math.max(12, height * 0.6)}px Sans-Serif`;
+        ctx.fillText("\u{1F4CF} Crop", cropButtonX + cropButtonWidth * 0.5, midY + (this.cropButtonMouseDown ? 1 : 0));
+        assignBounds("cropButton", [cropButtonX, posY, cropButtonWidth, height]);
+
         // === EVENT HANDLERS ===
         this.hitAreas.prevButton.onClick = () => this.selectPrevFile();
         this.hitAreas.nextButton.onClick = () => this.selectNextFile();
@@ -532,6 +556,31 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
             node.setDirtyCanvas(true, false);
         };
 
+        // Crop button handlers - toggle box crop widget visibility
+        this.hitAreas.cropButton.onClick = () => {
+            if (node.boxCropWidget) {
+                node.boxCropWidget.value.visible = !node.boxCropWidget.value.visible;
+                // Redraw current frame with/without overlay
+                const currentFrame = node.timelineWidget?.value?.currentFrame || 1;
+                if (typeof node.updateDisplayCanvas === 'function') {
+                    node.updateDisplayCanvas(currentFrame);
+                }
+                // Sync crop values to hidden widgets for backend serialization
+                if (typeof node.syncCropToWidgets === 'function') {
+                    node.syncCropToWidgets();
+                }
+                node.setDirtyCanvas(true, true);
+            }
+        };
+        this.hitAreas.cropButton.onDown = () => {
+            this.cropButtonMouseDown = true;
+            node.setDirtyCanvas(true, false);
+        };
+        this.hitAreas.cropButton.onUp = () => {
+            this.cropButtonMouseDown = false;
+            node.setDirtyCanvas(true, false);
+        };
+
         ctx.restore();
     }
 
@@ -539,6 +588,7 @@ export class PowerLoadVideoFileSelectorWidget extends RgthreeBaseWidget {
         super.onMouseUp(event, pos, node);
         this.uploadButtonMouseDown = false;
         this.showButtonMouseDown = false;
+        this.cropButtonMouseDown = false;
     }
 
     computeSize(width) {

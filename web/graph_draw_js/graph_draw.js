@@ -11,7 +11,7 @@ const loadProtovis = async () => {
     }
     
     try {
-        await loadScript('/kjweb_async/protovis.min.js');
+        await loadScript('/web_async/protovis.min.js');
         // Wait a bit to ensure protovis is fully loaded
         await new Promise(resolve => setTimeout(resolve, 100));
         

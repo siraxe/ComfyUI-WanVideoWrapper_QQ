@@ -557,6 +557,11 @@ app.registerExtension({
                 if (forceFpsWidget && typeof forceFpsWidget.value === 'number' && this.topRowWidget) {
                     this.topRowWidget.forceFpsValue = String(forceFpsWidget.value);
                 }
+                // Restore max_fps from hidden widget to custom UI
+                const maxFpsWidget = this.widgets.find(w => w.name === 'max_fps');
+                if (maxFpsWidget && typeof maxFpsWidget.value === 'number' && this.topRowWidget) {
+                    this.topRowWidget.maxFpsValue = String(maxFpsWidget.value);
+                }
             };
 
             // Store original onRemoved and wrap it

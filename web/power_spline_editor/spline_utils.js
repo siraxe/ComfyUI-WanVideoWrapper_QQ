@@ -140,28 +140,33 @@ export const loadScript = (
         // Check if the script already exists
         const existingScript = document.querySelector(`script[src="${FILE_URL}"]`)
         if (existingScript) {
+          console.log(`[loadScript] Script already loaded: ${FILE_URL}`);
           resolve({ status: true, message: 'Script already loaded' })
           return
         }
-  
+
+        console.log(`[loadScript] Loading script: ${FILE_URL}`);
         const scriptEle = document.createElement('script')
         scriptEle.type = type
         scriptEle.async = async
         scriptEle.src = FILE_URL
-  
+
         scriptEle.addEventListener('load', (ev) => {
+          console.log(`[loadScript] Script loaded successfully: ${FILE_URL}`);
           resolve({ status: true })
         })
-  
+
         scriptEle.addEventListener('error', (ev) => {
+          console.error(`[loadScript] Failed to load script: ${FILE_URL}`, ev);
           reject({
             status: false,
             message: `Failed to load the script ${FILE_URL}`,
           })
         })
-  
+
         document.body.appendChild(scriptEle)
       } catch (error) {
+        console.error(`[loadScript] Exception while loading ${FILE_URL}:`, error);
         reject(error)
       }
     })

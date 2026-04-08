@@ -6,6 +6,7 @@ import { app } from '../../../scripts/app.js';
 import { PowerLoadVideoTopRowWidget } from './top_row_widget.js';
 import { PowerLoadVideoTimelineWidget } from './timeline_widget.js';
 import { PowerLoadVideoFileSelectorWidget } from './file_selector_widget.js';
+import { BoxCropWidget } from './box_crop_widget.js';
 
 /**
  * Create the onNodeCreated wrapper function for PowerLoadVideo nodes
@@ -18,8 +19,8 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         }
 
         // Enforce minimum width and max height
-        if (this.size[0] < 570) {
-            this.size[0] = 570;
+        if (this.size[0] < 620) {
+            this.size[0] = 620;
         }
         if (this.size[1] > 550) {
             this.size[1] = 550;
@@ -27,8 +28,8 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
 
         // Enforce min width and max height on resize
         this.onResize = function(size) {
-            if (size[0] < 570) {
-                size[0] = 570;
+            if (size[0] < 620) {
+                size[0] = 620;
             }
             if (size[1] > 550) {
                 size[1] = 550;
@@ -164,6 +165,7 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         // Store references on node for later access
         this.videoElement = videoElement;
         this.displayCanvas = displayCanvas;  // Canvas for displaying frames
+        this._frameBuffer = document.createElement('canvas');  // Offscreen buffer for last clean frame (used during seeking)
 
         // Redraw display canvas whenever video seek completes (handles scrubbing for CFR videos)
         videoElement.addEventListener('seeked', () => {
@@ -376,7 +378,7 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         // Store handlers for cleanup on node removal
         this.dragHandlers = { handleDragOver, handleDragLeave, handleDrop };
 
-        // === CREATE WIDGETS IN ORDER: Top Row -> File Selector -> Video Display -> Timeline ===
+        // === CREATE WIDGETS IN ORDER: Top Row -> Box Crop (hidden) -> File Selector -> Video Display -> Timeline ===
 
         // 1. Create and add the top row widget FIRST (appears above video)
         if (!this.topRowWidget) {
@@ -384,13 +386,19 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             this.addCustomWidget(this.topRowWidget);
         }
 
-        // 2. Create and add the file selector widget (upload + dropdown, replaces old upload button)
+        // 2. Create box crop widget BEFORE file selector (file selector's Crop button needs it to exist)
+        if (!this.boxCropWidget) {
+            this.boxCropWidget = new BoxCropWidget();
+            this.addCustomWidget(this.boxCropWidget);
+        }
+
+        // 3. Create and add the file selector widget (upload + dropdown, replaces old upload button)
         if (!this.fileSelectorWidget) {
             this.fileSelectorWidget = new PowerLoadVideoFileSelectorWidget(this);
             this.addCustomWidget(this.fileSelectorWidget);
         }
 
-        // 3. Add video display as DOM widget
+        // 4. Add video display as DOM widget
         this.videoDisplayWidget = this.addDOMWidget(nodeData.name, 'VideoDisplay', videoContainer, {
             serialize: false,
             hideOnZoom: false
@@ -401,7 +409,7 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             return [width, 380];
         };
 
-        // 4. Create and add the timeline widget LAST (appears below video)
+        // 5. Create and add the timeline widget LAST (appears below video)
         if (!this.timelineWidget) {
             this.timelineWidget = new PowerLoadVideoTimelineWidget();
             this.addCustomWidget(this.timelineWidget);
@@ -410,6 +418,25 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
         // Set the video element reference on the timeline widget
         this.timelineWidget.setVideoElement(videoElement);
 
+        // Box crop overlay is now drawn directly on displayCanvas in updateDisplayCanvas
+
+        // Helper to sync crop values to hidden widgets for backend serialization
+        this.syncCropToWidgets = () => {
+            if (!this.boxCropWidget) return;
+            const bv = this.boxCropWidget.value;
+            const mapping = [
+                ['crop_enabled', bv.visible],
+                ['crop_x', bv.x],
+                ['crop_y', bv.y],
+                ['crop_w', bv.width],
+                ['crop_h', bv.height],
+            ];
+            for (const [name, val] of mapping) {
+                const w = this.widgets.find(w => w.name === name);
+                if (w) w.value = val;
+            }
+        };
+
         // === HIDE THE COMBO WIDGET ("choose file to upload") AND frame range widgets ===
         setTimeout(() => {
             const comboWidget = this.widgets.find(w => w.type === 'combo');
@@ -417,14 +444,16 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 comboWidget.computeSize = () => [0, 0]; // Make it zero height
                 comboWidget.hidden = true; // Mark as hidden
             }
-            // Hide start_frame, end_frame, and force_fps number widgets (created from Python INPUT_TYPES)
-            for (const name of ['start_frame', 'end_frame', 'force_fps']) {
+            // Hide start_frame, end_frame, force_fps, max_fps, and crop parameter widgets
+            for (const name of ['start_frame', 'end_frame', 'force_fps', 'max_fps', 'crop_enabled', 'crop_x', 'crop_y', 'crop_w', 'crop_h']) {
                 const w = this.widgets.find(w => w.name === name);
                 if (w) {
                     w.computeSize = () => [0, 0];
                     w.hidden = true;
                 }
             }
+            // Sync initial crop values to hidden widgets
+            this.syncCropToWidgets();
         }, 0);
 
         /**
@@ -574,6 +603,11 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 }
             }
 
+            // Draw frame (clear + draw) only when a new frame is available.
+            // When video is mid-seek, restore the last good frame from the buffer
+            // to avoid both black frames and overlay accumulation.
+            let drewFrame = false;
+
             // For VFR videos, use pre-decoded frame
             if (this.isVFRVideo && this.vfrFrames && frameIndex > 0) {
                 const idx = frameIndex - 1;  // 1-based to 0-based
@@ -581,18 +615,96 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
                 if (frameCanvas) {
                     ctx.clearRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
                     ctx.drawImage(frameCanvas, 0, 0);
-                    return;
+                    drewFrame = true;
                 } else {
                     console.warn(`[PowerLoadVideo] updateDisplayCanvas: VFR frame ${frameIndex} (idx ${idx}) not found, total=${this.vfrFrames.length}`);
                 }
-            }
-
-            // For CFR videos: draw from video element if ready
-            if (videoEl && videoEl.readyState >= 2) {  // HAVE_CURRENT_DATA
+            } else if (videoEl && videoEl.readyState >= 2) {  // HAVE_CURRENT_DATA (CFR path)
                 ctx.clearRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
                 ctx.drawImage(videoEl, 0, 0);
+                drewFrame = true;
+            }
+
+            if (drewFrame) {
+                // Save clean frame (without overlay) to buffer for reuse during seeking
+                const buf = this._frameBuffer;
+                if (buf.width !== this.displayCanvas.width || buf.height !== this.displayCanvas.height) {
+                    buf.width = this.displayCanvas.width;
+                    buf.height = this.displayCanvas.height;
+                }
+                buf.getContext('2d').clearRect(0, 0, buf.width, buf.height);
+                buf.getContext('2d').drawImage(this.displayCanvas, 0, 0);
+            } else if (this._frameBuffer.width > 0) {
+                // Video not ready (seeking) - restore last good clean frame
+                ctx.clearRect(0, 0, this.displayCanvas.width, this.displayCanvas.height);
+                ctx.drawImage(this._frameBuffer, 0, 0);
+            }
+
+            // Draw box crop overlay on top of the video frame
+            if (this.boxCropWidget?.value?.visible) {
+                this.boxCropWidget.drawBoxOverlay(ctx, this, this.displayCanvas.width, this.displayCanvas.height);
             }
         };
+
+        // Wire up box crop mouse interaction on the display canvas
+        displayCanvas.addEventListener('mousedown', (e) => {
+            if (!this.boxCropWidget?.value?.visible) return;
+            if (this.boxCropWidget.handleCanvasMouse(e, null, this)) {
+                e.stopPropagation();
+                e.preventDefault();
+                const onWinMouseMove = (e) => {
+                    this.boxCropWidget.handleCanvasMouse(e, null, this);
+                };
+                const onWinMouseUp = (e) => {
+                    this.boxCropWidget.handleCanvasMouse(e, null, this);
+                    window.removeEventListener('mousemove', onWinMouseMove);
+                    window.removeEventListener('mouseup', onWinMouseUp);
+                };
+                window.addEventListener('mousemove', onWinMouseMove);
+                window.addEventListener('mouseup', onWinMouseUp);
+            }
+        });
+
+        // Change cursor when hovering over crop handles/box
+        displayCanvas.addEventListener('mousemove', (e) => {
+            if (!this.boxCropWidget?.value?.visible || this.boxCropWidget.isDragging) return;
+            const videoEl = this.videoElement;
+            if (!videoEl || videoEl.videoWidth === 0) return;
+
+            const canvasRect = displayCanvas.getBoundingClientRect();
+            const relX = (e.clientX - canvasRect.left) / canvasRect.width * videoEl.videoWidth;
+            const relY = (e.clientY - canvasRect.top) / canvasRect.height * videoEl.videoHeight;
+            const videoW = videoEl.videoWidth;
+            const videoH = videoEl.videoHeight;
+            const bv = this.boxCropWidget.value;
+            const cx = bv.x * videoW;
+            const cy = bv.y * videoH;
+            const hw = (bv.width * videoW) / 2;
+            const hh = (bv.height * videoH) / 2;
+
+            const corners = [
+                { x: cx - hw, y: cy - hh, cursor: 'nw-resize' },
+                { x: cx + hw, y: cy - hh, cursor: 'ne-resize' },
+                { x: cx + hw, y: cy + hh, cursor: 'se-resize' },
+                { x: cx - hw, y: cy + hh, cursor: 'sw-resize' },
+            ];
+
+            let cursor = 'default';
+            for (const corner of corners) {
+                if (Math.sqrt((relX - corner.x) ** 2 + (relY - corner.y) ** 2) < 15) {
+                    cursor = corner.cursor;
+                    break;
+                }
+            }
+            if (cursor === 'default') {
+                const isInside = relX >= cx - hw && relX <= cx + hw && relY >= cy - hh && relY <= cy + hh;
+                if (isInside) cursor = 'move';
+            }
+            displayCanvas.style.cursor = cursor;
+        });
+        displayCanvas.addEventListener('mouseleave', () => {
+            displayCanvas.style.cursor = 'default';
+        });
 
         /**
          * Clear VFR frame cache to free memory.

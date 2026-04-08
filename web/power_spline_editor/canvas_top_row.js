@@ -367,32 +367,89 @@ export async function handlePrepareRefsRefresh(node) {
 }
 
 /**
+ * Load a script dynamically by fetching and evaluating
+ */
+async function loadScript(url, forceReload = false) {
+    const existing = document.querySelector(`script[src="${url}"]`);
+    if (existing && !forceReload) {
+        console.log('[loadScript] Script tag already exists:', url);
+        return true;
+    }
+
+    try {
+        // Don't add query params - static route may not handle them
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        const code = await response.text();
+
+        // Evaluate in global scope using window.eval
+        window.eval(code);
+        return true;
+    } catch (e) {
+        console.error('Failed to load script:', url, e);
+        return false;
+    }
+}
+
+/**
+ * Wait for Protovis library to be loaded, loading it if necessary
+ */
+async function waitForProtovis() {
+    // Check if already available
+    if (typeof pv !== 'undefined') {
+        return true;
+    }
+
+    // Force reload Protovis using fetch+eval (bypass cached script tag)
+    const loaded = await loadScript('/web_async/protovis.min.js', true);
+    if (!loaded) {
+        console.error('[waitForProtovis] Failed to load Protovis');
+        return false;
+    }
+
+    // Check immediately after eval
+    if (typeof pv !== 'undefined') {
+        return true;
+    }
+
+    // Wait a bit more just in case
+    const maxWait = 2000;
+    const interval = 50;
+    let waited = 0;
+
+    while (waited < maxWait) {
+        if (typeof pv !== 'undefined') {
+            return true;
+        }
+        await new Promise(r => setTimeout(r, interval));
+        waited += interval;
+    }
+    return false;
+}
+
+/**
  * Handler for PowerSplineEditor "Canvas" button
  */
 export async function handleCanvasRefresh(node) {
-  console.log("[handleCanvasRefresh] Canvas button clicked");
-
   try {
     // Check if connected to PrepareRefs
     const prepareRefsNode = await checkIfConnectedToPrepareRefs(node, 'ref_images');
 
     if (prepareRefsNode) {
-      console.log("[handleCanvasRefresh] PrepareRefs connection detected");
       
       try {
         const { triggerPrepareRefsBackend } = await import('./trigger_ref_refresh.js');
         const result = await triggerPrepareRefsBackend(prepareRefsNode);
-        console.log("[handleCanvasRefresh] triggerPrepareRefsBackend result:", result);
 
         if (result.success) {
-          console.log("[handleCanvasRefresh] Backend processing successful");
 
           // Load newly generated images using backend paths
           await loadImagesFromRefFolder(node, result.paths);
 
           // Check if video was generated
           if (result.paths?.bg_video) {
-            console.log('[handleCanvasRefresh] Video generated, loading:', result.paths.bg_video);
             const { loadBackgroundVideo } = await import('./canvas/canvas_video_background.js');
             if (node.editor && loadBackgroundVideo) {
               loadBackgroundVideo(node.editor, result.paths.bg_video);
@@ -405,7 +462,6 @@ export async function handleCanvasRefresh(node) {
         console.error('[handleCanvasRefresh] Backend trigger error:', e);
       }
     } else {
-      console.log("[handleCanvasRefresh] PrepareRefs NOT connected, using original behavior");
       
       // Original behavior: update from connected nodes
       if (node.refImageManager?.updateAllBoxLayerRefs) {
@@ -419,6 +475,13 @@ export async function handleCanvasRefresh(node) {
       if (node.refImageManager?.updateReferenceImageFromConnectedNode) {
         try {
           await node.refImageManager.updateReferenceImageFromConnectedNode(true);
+
+          // Wait for Protovis to be loaded before creating editor
+          const protovisReady = await waitForProtovis();
+          if (!protovisReady) {
+            console.error('[handleCanvasRefresh] Protovis failed to load, cannot create canvas');
+            return;
+          }
 
           // Create the editor if it doesn't exist
           if (!node.editor) {
@@ -465,7 +528,6 @@ export async function handleCanvasRefresh(node) {
  * Handler for "Frames" button (refresh keyframes)
  */
 export async function handleFramesRefresh(node) {
-  console.log("[handleFramesRefresh] Frames button clicked");
   
   if (node.handleFramesRefresh) {
     try {

@@ -30,8 +30,6 @@ export function createBackgroundImageManager(node) {
      * Update background image with current opacity
      */
     async updateBackgroundImage() {
-      console.log('[updateBackgroundImage] Called');
-
       // Get opacity value
       const bgOpacityWidget = node.widgets?.find(w => w.name === "bg_opacity");
       const opacity = bgOpacityWidget ? bgOpacityWidget.value : 1.0;
