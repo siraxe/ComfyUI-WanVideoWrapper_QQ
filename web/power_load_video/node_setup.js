@@ -746,6 +746,22 @@ export function createOnNodeCreatedWrapper(originalOnNodeCreated, nodeData) {
             // Clear VFR frames from previous video before loading new one
             this.clearVFRFrames();
 
+            // Reset frame buffer so stale frames from previous video aren't shown
+            this._frameBuffer.width = 0;
+            this._frameBuffer.height = 0;
+
+            // Re-clamp crop values to fit within video bounds
+            if (this.boxCropWidget) {
+                const bv = this.boxCropWidget.value;
+                bv.width = Math.min(1.0, bv.width);
+                bv.height = Math.min(1.0, bv.height);
+                bv.x = Math.max(bv.width / 2, Math.min(1 - bv.width / 2, bv.x));
+                bv.y = Math.max(bv.height / 2, Math.min(1 - bv.height / 2, bv.y));
+                if (typeof this.syncCropToWidgets === 'function') {
+                    this.syncCropToWidgets();
+                }
+            }
+
             // Stop playback and reset timeline when loading new video
             if (this.timelineWidget?.value?.isPlaying) {
                 this.timelineWidget.stopPlayback();
