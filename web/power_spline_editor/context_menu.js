@@ -632,7 +632,9 @@ export function showRefSelectionMenu(event, widget, position, onSelect) {
                         try {
                             const img = new Image();
                             const cacheBust = Date.now() + Math.random().toString(36).substring(2, 9);
-                            img.src = `${attachment.path}?v=${cacheBust}`;
+                            const _extMatch = import.meta.url.match(/\/extensions\/([^/]+)\//);
+                            const _extName = _extMatch ? _extMatch[1] : 'ComfyUI-SA-Nodes-QQ';
+                            img.src = `/extensions/${_extName}/${attachment.path}?v=${cacheBust}`;
                             await new Promise((resolve, reject) => {
                                 img.onload = () => {
                                     // Update attachment with fresh dimensions

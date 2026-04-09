@@ -227,6 +227,10 @@ export function getSelectedRefAttachment(widget) {
  * @param {number} cacheBustCounter - Cache busting counter
  * @returns {string|null} The image URL or null
  */
+// Derive extension name from this module's URL to avoid hardcoding
+const _extensionMatch = import.meta.url.match(/\/extensions\/([^/]+)\//);
+const EXTENSION_NAME = _extensionMatch ? _extensionMatch[1] : 'ComfyUI-SA-Nodes-QQ';
+
 export function getRefImageUrl(widget, attachment, refImageCache, cacheBustCounter) {
     if (!attachment) {
         return null;
@@ -259,25 +263,9 @@ export function getRefImageUrl(widget, attachment, refImageCache, cacheBustCount
 
         // Check if we have a cached URL for this widget+selection+attachment
         if (!refImageCache.has(cacheKey)) {
-            let url;
-            if (attachment.path.startsWith('ref/')) {
-                // This is an output file from PrepareRefs, use /view endpoint
-                const pathParts = attachment.path.split('/');
-                const filename = pathParts.pop();
-                const subfolder = pathParts.join('/');
-
-                const urlObj = new URL('/view', window.location.origin);
-                urlObj.searchParams.set('filename', filename);
-                if (subfolder) {
-                    urlObj.searchParams.set('subfolder', subfolder);
-                }
-                urlObj.searchParams.set('type', 'output');
-                urlObj.searchParams.set('t', cacheBustCounter);
-                url = urlObj.href;
-            } else {
-                // This is a file inside the extension's web folder (e.g., bg/....)
-                url = new URL(`/extensions/ComfyUI-WanVideoWrapper_QQ/${attachment.path}?v=${cacheBustCounter}`, window.location.origin).href;
-            }
+            // All path-based files (ref/, bg/, etc.) are inside the extension's web folder,
+            // served via ComfyUI's /extensions/ static route
+            const url = new URL(`/extensions/${EXTENSION_NAME}/${attachment.path}?v=${cacheBustCounter}`, window.location.origin).href;
             refImageCache.set(cacheKey, url);
         }
 
